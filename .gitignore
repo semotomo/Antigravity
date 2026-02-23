@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Streamlit
+.streamlit/secrets.toml
+
+# 環境
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# プロジェクト固有
+shift_settings.json
+app_backup_*.py
+*.bak
+
+# セッション・キャッシュ
+.claude/
+.serena/sessions/
+*.log
