@@ -554,8 +554,20 @@ with st.expander("🎭 **役割設定** — 追加・削除・優先順位", exp
         ("#e0f7fa", "#006064"), ("#f3e5f5", "#4a148c")
     ]
     
-    # 役割テーブルの表示・編集
-    st.markdown("##### 現在の役割一覧")
+    # ヘッダーラベル
+    label_cols = st.columns([2, 1, 1, 0.5])
+    with label_cols[0]:
+        st.caption("名前")
+    with label_cols[1]:
+        st.caption("必要人数/日")
+    with label_cols[2]:
+        st.caption("優先順位（小=高）")
+    with label_cols[3]:
+        st.caption("削除")
+    
+    # 削除対象を記録（ループ中に削除しない）
+    delete_idx = None
+    
     for idx, role in enumerate(roles_cfg):
         r_cols = st.columns([2, 1, 1, 0.5])
         with r_cols[0]:
@@ -563,13 +575,8 @@ with st.expander("🎭 **役割設定** — 追加・削除・優先順位", exp
                 "役割名", value=role["name"],
                 key=f"role_name_{idx}", label_visibility="collapsed"
             )
+            # 名前変更はセッション上のみ（カラム名は保存時に同期）
             if new_name != role["name"]:
-                # スタッフDFのカラム名も更新
-                old_name = role["name"]
-                if old_name in st.session_state.staff_df.columns:
-                    st.session_state.staff_df = st.session_state.staff_df.rename(
-                        columns={old_name: new_name}
-                    )
                 role["name"] = new_name
         with r_cols[1]:
             role["min_per_day"] = st.number_input(
@@ -583,50 +590,45 @@ with st.expander("🎭 **役割設定** — 追加・削除・優先順位", exp
             )
         with r_cols[3]:
             if st.button("🗑️", key=f"del_role_{idx}"):
-                # 役割を削除（スタッフDFからもカラム削除）
-                rname = role["name"]
-                if rname in st.session_state.staff_df.columns:
-                    st.session_state.staff_df = st.session_state.staff_df.drop(columns=[rname])
-                roles_cfg.pop(idx)
-                st.session_state.roles_config = roles_cfg
-                save_roles_config(roles_cfg)
-                st.rerun()
+                delete_idx = idx
     
-    # ヘッダーラベル
-    label_cols = st.columns([2, 1, 1, 0.5])
-    with label_cols[0]:
-        st.caption("↑ 名前")
-    with label_cols[1]:
-        st.caption("↑ 必要人数/日")
-    with label_cols[2]:
-        st.caption("↑ 優先順位（小=高）")
-    
-    # 役割追加ボタン
-    if st.button("➕ 新しい役割を追加", key="add_role"):
-        new_idx = len(roles_cfg)
-        ci = new_idx % len(color_palette)
-        new_role = {
-            "name": f"役割{new_idx + 1}",
-            "min_per_day": 1,
-            "priority": new_idx + 1,
-            "color": color_palette[ci][0],
-            "text_color": color_palette[ci][1]
-        }
-        roles_cfg.append(new_role)
-        # スタッフDFに新しい列を追加
-        st.session_state.staff_df[new_role["name"]] = False
+    # 削除処理（ループ外で安全に実行）
+    if delete_idx is not None:
+        rname = roles_cfg[delete_idx]["name"]
+        if rname in st.session_state.staff_df.columns:
+            st.session_state.staff_df = st.session_state.staff_df.drop(columns=[rname])
+        roles_cfg.pop(delete_idx)
         st.session_state.roles_config = roles_cfg
-        save_roles_config(roles_cfg)
         st.rerun()
     
-    # デフォルトに戻すボタン
-    if st.button("🔄 デフォルト役割に戻す", key="reset_roles"):
-        st.session_state.roles_config = [dict(r) for r in DEFAULT_ROLES_CONFIG]
-        save_roles_config(st.session_state.roles_config)
-        st.rerun()
+    # 役割追加・リセットボタン
+    add_col, reset_col = st.columns(2)
+    with add_col:
+        if st.button("➕ 新しい役割を追加", key="add_role", use_container_width=True):
+            new_idx = len(roles_cfg)
+            ci = new_idx % len(color_palette)
+            new_role = {
+                "name": f"役割{new_idx + 1}",
+                "min_per_day": 1,
+                "priority": new_idx + 1,
+                "color": color_palette[ci][0],
+                "text_color": color_palette[ci][1]
+            }
+            roles_cfg.append(new_role)
+            st.session_state.staff_df[new_role["name"]] = False
+            st.session_state.roles_config = roles_cfg
+            st.rerun()
     
-    # 変更を保存
+    with reset_col:
+        if st.button("🔄 デフォルトに戻す", key="reset_roles", use_container_width=True):
+            st.session_state.roles_config = [dict(r) for r in DEFAULT_ROLES_CONFIG]
+            st.rerun()
+    
+    # 変更をセッションに反映（ファイル保存はサイドバーの「📥 保存」で）
     st.session_state.roles_config = roles_cfg
+    st.caption("💡 設定変更はサイドバーの「📥 保存」で保存されます。")
+
+
 
 
 # =============================================
