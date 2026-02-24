@@ -5,6 +5,23 @@ import itertools
 import pandas as pd
 
 
+# --- デフォルト役割設定 ---
+DEFAULT_ROLES_CONFIG = [
+    {"name": "A",    "min_per_day": 1, "priority": 1, "color": "#b3e5fc", "text_color": "#1a5276"},
+    {"name": "B",    "min_per_day": 1, "priority": 2, "color": "#c8e6c9", "text_color": "#1b5e20"},
+    {"name": "C",    "min_per_day": 1, "priority": 3, "color": "#fff9c4", "text_color": "#5d4e00"},
+    {"name": "ネコ",  "min_per_day": 1, "priority": 4, "color": "#ffe0b2", "text_color": "#5d3a00"},
+]
+
+# 固定表示記号（役割ではなく状態を表す）
+FIXED_SYMBOLS = {
+    "〇": {"color": "#e8deef", "text_color": "#3a2d5e"},    # 通常勤務
+    "／": {"color": "#f5d0d0", "text_color": "#5a3e3e"},    # 公休
+    "×": {"color": "#e0dede", "text_color": "#777"},        # 希望休
+    "※": {"color": "#f48fb1", "text_color": "white"},       # 人員不足
+}
+
+
 # --- 祝日判定関数 ---
 def is_holiday(d):
     """日付が祝日かどうかを判定する"""
@@ -29,188 +46,221 @@ def is_holiday(d):
     return d in holidays_2026
 
 
-# --- 役割マップ生成 ---
-def get_role_map_from_df(staff_df):
-    """スタッフDataFrameから、各スタッフのインデックス→役割セットのマップを生成する"""
+# --- 役割名の内部キー変換 ---
+def _role_internal_key(role_name):
+    """役割名を内部キーに変換する（ネコ→Neko、その他はそのまま）"""
+    # 内部的には日本語名でもそのまま使う（Nekoの特殊扱いを維持）
+    return role_name
+
+
+# --- 役割マップ生成（動的対応） ---
+def get_role_map_from_df(staff_df, roles_config=None):
+    """スタッフDataFrameから、各スタッフのインデックス→役割セットのマップを生成する
+    
+    roles_config: 役割設定リスト。Noneの場合はDEFAULT_ROLES_CONFIGを使用。
+    """
+    if roles_config is None:
+        roles_config = DEFAULT_ROLES_CONFIG
+    
     role_map = {}
     df = staff_df.reset_index(drop=True)
+    
+    # 動的に設定された役割名のリストを取得
+    role_names = [r["name"] for r in roles_config]
+    
     for i, row in df.iterrows():
         roles = set()
-        if row["A"]:
-            roles.add("A")
-        if row["B"]:
-            roles.add("B")
-        if row["C"]:
-            roles.add("C")
-        if row["ネコ"]:
-            roles.add("Neko")
-        if row["夜可"]:
+        # 動的役割のチェック
+        for rname in role_names:
+            if rname in df.columns and row.get(rname, False):
+                roles.add(rname)
+        # 固定属性（朝可/夜可）は常にチェック
+        if "夜可" in df.columns and row.get("夜可", False):
             roles.add("Night")
-        if row["朝可"]:
+        if "朝可" in df.columns and row.get("朝可", False):
             roles.add("Morning")
         role_map[i] = roles
     return role_map
 
 
-# --- 役割カバー判定 ---
-def can_cover_required_roles(staff_list, role_map, constraints):
-    """指定されたスタッフリストで必要な役割（朝/夜/A/B/C/ネコ）をカバーできるかチェックする"""
-    # 朝/夜の最低人数チェック
+# --- 役割カバー判定（動的対応） ---
+def can_cover_required_roles(staff_list, role_map, constraints, roles_config=None):
+    """指定されたスタッフリストで必要な役割をカバーできるかチェックする
+    
+    roles_config: 役割設定リスト。各役割の min_per_day を参照。
+    """
+    if roles_config is None:
+        roles_config = DEFAULT_ROLES_CONFIG
+    
+    # 朝/夜の最低人数チェック（固定属性）
     if sum(1 for s in staff_list if "Night" in role_map[s]) < constraints.get('min_night', 3):
         return False
     if sum(1 for s in staff_list if "Morning" in role_map[s]) < constraints.get('min_morning', 3):
         return False
 
-    # ネコ/ABC の割り当てチェック
-    neko_cands = [s for s in staff_list if "Neko" in role_map[s]]
-    p_neko = [s for s in neko_cands if "A" not in role_map[s] and "B" not in role_map[s]]
-    neko_fixed = p_neko[0] if p_neko else (neko_cands[0] if neko_cands else None)
-
-    if neko_fixed is not None:
-        rem = [x for x in staff_list if x != neko_fixed]
-        if len(rem) < 3:
-            return False
-        if not all(any(r in role_map[x] for x in rem) for r in ["A", "B", "C"]):
-            return False
-        for p in itertools.permutations(rem, 3):
-            if 'A' in role_map[p[0]] and 'B' in role_map[p[1]] and 'C' in role_map[p[2]]:
-                return True
+    # 各役割の必要人数チェック（貪欲法で割り当て可能かを確認）
+    # 優先順位順にソートして、高優先の役割から割り当て
+    sorted_roles = sorted(roles_config, key=lambda r: r.get("priority", 999))
+    
+    # 各役割の必要人数を合計して、最低必要人数を計算
+    total_min = sum(r.get("min_per_day", 1) for r in sorted_roles)
+    if len(staff_list) < total_min:
         return False
-    else:
-        if len(staff_list) < 4:
+    
+    # 各役割に対して担当可能なスタッフがいるかチェック
+    assigned = set()
+    for role in sorted_roles:
+        rname = role["name"]
+        needed = role.get("min_per_day", 1)
+        candidates = [s for s in staff_list if s not in assigned and rname in role_map[s]]
+        if len(candidates) < needed:
             return False
-        for p in itertools.permutations(staff_list, 4):
-            if ('Neko' in role_map[p[0]] and 'A' in role_map[p[1]]
-                    and 'B' in role_map[p[2]] and 'C' in role_map[p[3]]):
-                return True
-        return False
+        # 貪欲に割り当て（他の役割との兼ね合いがあるので、ここでは可能性チェックのみ）
+        # より正確なチェックはpermutationsで行うが、パフォーマンスのため簡易判定
+        for c in candidates[:needed]:
+            assigned.add(c)
+    
+    return True
 
 
-# --- 出勤パターン生成 ---
-def get_possible_day_patterns(available_staff):
-    """出勤可能なスタッフから、4人〜最大9人の出勤組み合わせを生成する"""
+# --- 出勤パターン生成（動的対応） ---
+def get_possible_day_patterns(available_staff, roles_config=None):
+    """出勤可能なスタッフから、最低人数〜最大人数の出勤組み合わせを生成する"""
+    if roles_config is None:
+        roles_config = DEFAULT_ROLES_CONFIG
+    
+    # 最低人数 = 全役割の必要人数の合計
+    min_staff = sum(r.get("min_per_day", 1) for r in roles_config)
+    min_staff = max(min_staff, 2)  # 最低2人は必要
+    
     return [
         subset
-        for size in range(4, min(len(available_staff) + 1, 10))
+        for size in range(min_staff, min(len(available_staff) + 1, 10))
         for subset in itertools.combinations(available_staff, size)
     ]
 
 
-# --- 役割自動割り当て ---
-def assign_roles_smartly(working_indices, role_map):
-    """出勤メンバーに対してA/B/C/ネコ/〇の役割を最適に割り当てる"""
+# --- 役割自動割り当て（動的対応） ---
+def assign_roles_smartly(working_indices, role_map, roles_config=None, staff_df=None):
+    """出勤メンバーに対して役割を優先順位に基づいて最適に割り当てる
+    
+    roles_config: 役割設定リスト。priority順に割り当てる。
+    staff_df: スタッフDF（優先役割の参照用、Noneの場合は無視）
+    """
+    if roles_config is None:
+        roles_config = DEFAULT_ROLES_CONFIG
+    
     assignments = {}
     pool = list(working_indices)
-    neko_cands = [s for s in pool if "Neko" in role_map[s]]
-    p_neko = [s for s in neko_cands if "A" not in role_map[s] and "B" not in role_map[s]]
-    neko_fixed = p_neko[0] if p_neko else (neko_cands[0] if neko_cands else None)
-
-    found_strict = False
-    if neko_fixed is not None:
-        rem = [x for x in pool if x != neko_fixed]
-        for p in itertools.permutations(rem, 3):
-            if 'A' in role_map[p[0]] and 'B' in role_map[p[1]] and 'C' in role_map[p[2]]:
-                assignments[neko_fixed] = 'ネコ'
-                assignments[p[0]] = 'A'
-                assignments[p[1]] = 'B'
-                assignments[p[2]] = 'C'
-                found_strict = True
-                for ex in [x for x in rem if x not in p]:
-                    if (not any(r in role_map[ex] for r in ["A", "B", "C", "Neko"])
-                            and "Night" in role_map[ex]):
-                        assignments[ex] = '〇'
-                    else:
-                        caps = role_map[ex]
-                        if 'C' in caps:
-                            assignments[ex] = 'C'
-                        elif 'B' in caps:
-                            assignments[ex] = 'B'
-                        elif 'A' in caps:
-                            assignments[ex] = 'A'
-                        elif 'Neko' in caps:
-                            assignments[ex] = 'ネコ'
-                        elif "Night" in role_map[ex]:
-                            assignments[ex] = '〇'
+    
+    # 優先順位でソート
+    sorted_roles = sorted(roles_config, key=lambda r: r.get("priority", 999))
+    role_names = [r["name"] for r in sorted_roles]
+    
+    # --- フェーズ1: 優先役割が設定されているスタッフを先に割り当て ---
+    role_demand = {}  # 各役割であと何人必要か
+    for role in sorted_roles:
+        role_demand[role["name"]] = role.get("min_per_day", 1)
+    
+    assigned = set()
+    
+    # 優先役割が設定されているスタッフを優先割り当て
+    if staff_df is not None and "優先役割" in staff_df.columns:
+        df_reset = staff_df.reset_index(drop=True)
+        for s in pool:
+            if s < len(df_reset):
+                pref = df_reset.at[s, "優先役割"]
+                if pd.notna(pref) and pref != "" and pref != "なし":
+                    if pref in role_demand and role_demand[pref] > 0 and pref in role_map[s]:
+                        assignments[s] = pref
+                        assigned.add(s)
+                        role_demand[pref] -= 1
+    
+    # --- フェーズ2: 残りを優先順位順で割り当て ---
+    remaining = [s for s in pool if s not in assigned]
+    
+    # まず、各役割の最低人数を満たす割り当てを試みる
+    for role in sorted_roles:
+        rname = role["name"]
+        needed = role_demand.get(rname, 0)
+        if needed <= 0:
+            continue
+        
+        # この役割ができる未割り当てスタッフを見つける
+        candidates = [s for s in remaining if rname in role_map[s]]
+        
+        # 「この役割しかできない（or 選択肢が少ない）」スタッフを優先
+        # → 他の役割の候補数が少ない順にソート
+        def versatility_score(s):
+            return sum(1 for r in role_names if r in role_map[s])
+        candidates.sort(key=versatility_score)
+        
+        for c in candidates[:needed]:
+            assignments[c] = rname
+            assigned.add(c)
+            remaining.remove(c)
+            role_demand[rname] -= 1
+    
+    # --- フェーズ3: 余ったスタッフに追加役割 or 〇を割り当て ---
+    for s in remaining:
+        caps = role_map[s]
+        # 何か役割ができる場合は、優先順位が低い役割から追加割り当て
+        assigned_extra = False
+        for role in reversed(sorted_roles):
+            rname = role["name"]
+            if rname in caps:
+                assignments[s] = rname
+                assigned_extra = True
                 break
-    else:
-        for p in itertools.permutations(pool, 4):
-            if ('Neko' in role_map[p[0]] and 'A' in role_map[p[1]]
-                    and 'B' in role_map[p[2]] and 'C' in role_map[p[3]]):
-                assignments[p[0]] = 'ネコ'
-                assignments[p[1]] = 'A'
-                assignments[p[2]] = 'B'
-                assignments[p[3]] = 'C'
-                found_strict = True
-                for ex in [x for x in pool if x not in p]:
-                    if (not any(r in role_map[ex] for r in ["A", "B", "C", "Neko"])
-                            and "Night" in role_map[ex]):
-                        assignments[ex] = '〇'
-                    else:
-                        caps = role_map[ex]
-                        if 'C' in caps:
-                            assignments[ex] = 'C'
-                        elif 'B' in caps:
-                            assignments[ex] = 'B'
-                        elif 'A' in caps:
-                            assignments[ex] = 'A'
-                break
-
-    if not found_strict:
-        unassigned = set(pool)
-        for r in ['A', 'B', 'Neko', 'C']:
-            for s in list(unassigned):
-                if r == 'Neko' and neko_fixed and neko_fixed in unassigned:
-                    assignments[neko_fixed] = 'ネコ'
-                    unassigned.remove(neko_fixed)
-                    break
-                if r in role_map[s]:
-                    assignments[s] = r
-                    unassigned.remove(s)
-                    break
-        for s in list(unassigned):
-            if "Night" in role_map[s] and not any(r in role_map[s] for r in ["A", "B", "C", "Neko"]):
-                assignments[s] = '〇'
-            elif 'C' in role_map[s]:
-                assignments[s] = 'C'
+        if not assigned_extra:
+            # どの役割もできない場合は通常勤務
+            assignments[s] = '〇'
+    
     return assignments
 
 
-# --- カラーリングロジック ---
-def highlight_cells(data):
-    """シフト表のセルに役割・曜日に応じた背景色を適用する"""
+# --- カラーリングロジック（動的対応） ---
+def highlight_cells(data, roles_config=None):
+    """シフト表のセルに役割・曜日に応じた背景色を適用する（やわらかいパステル調）"""
+    if roles_config is None:
+        roles_config = DEFAULT_ROLES_CONFIG
+    
     styles = pd.DataFrame('', index=data.index, columns=data.columns)
+
+    # 動的に役割→色のマップを作成
+    role_color_map = {}
+    for role in roles_config:
+        role_color_map[role["name"]] = {
+            "bg": role.get("color", "#e8deef"),
+            "text": role.get("text_color", "#333")
+        }
 
     for col in data.columns:
         week_str = col[1]
         if week_str == '土':
-            styles[col] = 'background-color: #e6f7ff;'
+            styles[col] = 'background-color: #e8f4fd;'
         elif week_str in ['日', '祝']:
-            styles[col] = 'background-color: #ffe6e6;'
+            styles[col] = 'background-color: #fce8e8;'
 
     for r in data.index:
         for c in data.columns:
             val = data.at[r, c]
             # 勤休列のスタイル
             if c[0] == '勤(休)':
-                styles.at[r, c] += 'font-weight: bold; background-color: #f9f9f9;'
+                styles.at[r, c] += 'font-weight: bold; background-color: #faf8f6;'
                 continue
 
-            if val == '／':
-                styles.at[r, c] += 'background-color: #ffcccc; color: black;'
-            elif val == '×':
-                styles.at[r, c] += 'background-color: #d9d9d9; color: gray;'
-            elif val == '※':
-                styles.at[r, c] += 'background-color: #ff0000; color: white; font-weight: bold;'
-            elif val == 'A':
-                styles.at[r, c] += 'background-color: #ccffff; color: black;'
-            elif val == 'B':
-                styles.at[r, c] += 'background-color: #ccffcc; color: black;'
-            elif val == 'C':
-                styles.at[r, c] += 'background-color: #ffffcc; color: black;'
-            elif val == 'ネコ':
-                styles.at[r, c] += 'background-color: #ffe5cc; color: black;'
-            elif val == '〇':
-                styles.at[r, c] += 'background-color: #e6e6fa; color: black;'
+            # 固定記号のスタイル
+            if val in FIXED_SYMBOLS:
+                sym = FIXED_SYMBOLS[val]
+                style_str = f'background-color: {sym["color"]}; color: {sym["text_color"]};'
+                if val == '※':
+                    style_str += ' font-weight: bold;'
+                styles.at[r, c] += style_str
+            # 動的役割のスタイル
+            elif val in role_color_map:
+                rc = role_color_map[val]
+                styles.at[r, c] += f'background-color: {rc["bg"]}; color: {rc["text"]};'
 
     return styles
 

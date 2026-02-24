@@ -12,10 +12,11 @@ from utils import (
     can_cover_required_roles,
     get_possible_day_patterns,
     assign_roles_smartly,
+    DEFAULT_ROLES_CONFIG,
 )
 
 
-def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priority_days=None):
+def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priority_days=None, required_work_df=None, roles_config=None):
     """
     メインソルバー：ビームサーチアルゴリズムでシフトを自動生成する。
 
@@ -25,12 +26,16 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
         days_list: 日付リスト
         constraints: 制約条件辞書
         priority_days: 優先曜日リスト
+        required_work_df: 出勤指定DataFrame（Noneの場合は指定なし）
+        roles_config: 役割設定リスト（Noneの場合はデフォルト4役割）
 
     戻り値:
         pd.DataFrame: 完成シフト表（Noneの場合は生成失敗）
     """
     if priority_days is None:
         priority_days = []
+    if roles_config is None:
+        roles_config = [dict(r) for r in DEFAULT_ROLES_CONFIG]
 
     # --- データ前処理 ---
     staff_df = staff_df.dropna(subset=['名前'])
@@ -43,7 +48,7 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
 
     weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
 
-    role_map = get_role_map_from_df(staff_df)
+    role_map = get_role_map_from_df(staff_df, roles_config=roles_config)
 
     # --- 初期パラメータ設定 ---
     col_prev_cons = "前月末の連勤数" if "前月末の連勤数" in staff_df.columns else "先月からの連勤"
@@ -60,6 +65,20 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
             for s_idx in range(min(num_staff, len(holidays_df[col_name]))):
                 if holidays_df[col_name].values[s_idx] in [True, '×']:
                     fixed_shifts[s_idx, d_idx] = '×'
+
+    # --- 固定シフト（出勤指定）の設定 ---
+    # 出勤指定は希望休より優先される（被った場合は '×' を上書き）
+    required_work_flags = np.full((num_staff, num_days), False, dtype=bool)
+    if required_work_df is not None:
+        for d_idx in range(num_days):
+            col_name = f"Day_{d_idx+1}"
+            if col_name in required_work_df.columns:
+                for s_idx in range(min(num_staff, len(required_work_df[col_name]))):
+                    if required_work_df[col_name].values[s_idx] in [True, '★']:
+                        required_work_flags[s_idx, d_idx] = True
+                        # 出勤指定が優先：希望休を上書き
+                        if fixed_shifts[s_idx, d_idx] == '×':
+                            fixed_shifts[s_idx, d_idx] = ''
 
     # --- 制約パラメータ ---
     min_m = constraints.get('min_morning', 3)
@@ -81,7 +100,14 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
     day_patterns = []
     for d in range(num_days):
         avail = [s for s in range(num_staff) if fixed_shifts[s, d] != '×']
-        pats = get_possible_day_patterns(avail)
+        # 出勤指定スタッフを必ず含むパターンのみにフィルタリング
+        must_work = [s for s in range(num_staff) if required_work_flags[s, d]]
+        pats = get_possible_day_patterns(avail, roles_config=roles_config)
+        if must_work:
+            pats = [p for p in pats if all(s in p for s in must_work)]
+            # フィルタ後にパターンがない場合はフィルタなしにフォールバック
+            if not pats:
+                pats = get_possible_day_patterns(avail)
         random.shuffle(pats)
         day_patterns.append(pats)
 
@@ -110,8 +136,8 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
         patterns = day_patterns[d]
 
         # パターンフィルタリング：有効/無効に分類
-        valid_pats = [p for p in patterns if can_cover_required_roles(p, role_map, constraints)]
-        invalid_pats = [p for p in patterns if not can_cover_required_roles(p, role_map, constraints)]
+        valid_pats = [p for p in patterns if can_cover_required_roles(p, role_map, constraints, roles_config=roles_config)]
+        invalid_pats = [p for p in patterns if not can_cover_required_roles(p, role_map, constraints, roles_config=roles_config)]
         use_patterns = valid_pats[:150] + invalid_pats[:150]
         if len(use_patterns) < 50:
             use_patterns = (valid_pats + invalid_pats)[:300]
@@ -130,7 +156,7 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
                     penalty, violation = 0, False
 
                     # 役割カバーチェック
-                    if not can_cover_required_roles(pat, role_map, constraints):
+                    if not can_cover_required_roles(pat, role_map, constraints, roles_config=roles_config):
                         penalty += 50000
 
                     work_mask = np.zeros(num_staff, dtype=int)
@@ -296,8 +322,8 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
 
     for d in range(num_days):
         working = [s for s in range(num_staff) if final_sched[s, d] == 1]
-        roles = assign_roles_smartly(working, role_map)
-        is_insufficient = not can_cover_required_roles(working, role_map, constraints)
+        roles = assign_roles_smartly(working, role_map, roles_config=roles_config, staff_df=staff_df)
+        is_insufficient = not can_cover_required_roles(working, role_map, constraints, roles_config=roles_config)
 
         for s in range(num_staff):
             if s in working:
@@ -305,11 +331,14 @@ def solve_schedule_from_ui(staff_df, holidays_df, days_list, constraints, priori
                     output_data[s, d] = roles[s]
                 else:
                     caps = role_map[s]
-                    output_data[s, d] = (
-                        'C' if 'C' in caps else
-                        ('B' if 'B' in caps else
-                         ('A' if 'A' in caps else 'C'))
-                    )
+                    # 優先順位が低い役割から割り当て
+                    fallback_role = '〇'
+                    sorted_roles = sorted(roles_config, key=lambda r: r.get('priority', 999), reverse=True)
+                    for role in sorted_roles:
+                        if role['name'] in caps:
+                            fallback_role = role['name']
+                            break
+                    output_data[s, d] = fallback_role
             else:
                 output_data[s, d] = '×' if fixed_shifts[s, d] == '×' else '／'
         if is_insufficient:
