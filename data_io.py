@@ -11,6 +11,7 @@ from utils import is_holiday, DEFAULT_ROLES_CONFIG
 # --- 定数 ---
 SETTINGS_FILE = "shift_settings.json"
 HISTORY_DIR = "shift_history"
+STORES_DIR = "stores"
 
 
 # --- 役割設定の読み込み ---
@@ -42,14 +43,64 @@ def save_roles_config(roles_config):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+# --- 店舗管理 ---
+def list_stores():
+    """stores/フォルダ内の店舗一覧を返す。フォルダがなければ作成する。"""
+    if not os.path.exists(STORES_DIR):
+        os.makedirs(STORES_DIR, exist_ok=True)
+    stores = []
+    for f in sorted(os.listdir(STORES_DIR)):
+        if f.endswith('.json'):
+            stores.append(f.replace('.json', ''))
+    return stores
+
+
+def get_store_filepath(store_name):
+    """店舗名からファイルパスを生成する"""
+    return os.path.join(STORES_DIR, f"{store_name}.json")
+
+
+def create_store(store_name):
+    """新しい空の店舗を作成する"""
+    os.makedirs(STORES_DIR, exist_ok=True)
+    filepath = get_store_filepath(store_name)
+    if os.path.exists(filepath):
+        return False  # すでに存在
+    # 空のデフォルトデータで初期化
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump({}, f)
+    return True
+
+
+def delete_store(store_name):
+    """店舗を削除する"""
+    filepath = get_store_filepath(store_name)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return True
+    return False
+
+
+def rename_store(old_name, new_name):
+    """店舗名を変更する"""
+    old_path = get_store_filepath(old_name)
+    new_path = get_store_filepath(new_name)
+    if os.path.exists(old_path) and not os.path.exists(new_path):
+        os.rename(old_path, new_path)
+        return True
+    return False
+
+
 # --- 設定の読み込み ---
-def load_settings_from_file():
-    """shift_settings.json から設定データを読み込む
+def load_settings_from_file(filepath=None):
+    """JSONファイルから設定データを読み込む
+    filepath: 読み込むファイルパス（Noneの場合はデフォルトのshift_settings.json）
     戻り値: (staff_df, holidays_df, required_work_df, memos, start_d, end_d, roles_config)
     """
-    if os.path.exists(SETTINGS_FILE):
+    target = filepath if filepath else SETTINGS_FILE
+    if os.path.exists(target):
         try:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            with open(target, 'r', encoding='utf-8') as f:
                 loaded_data = json.load(f)
             
             # 役割設定の読込（後方互換：なければデフォルト）
@@ -153,8 +204,10 @@ def get_default_data(roles_config=None):
 
 # --- 設定の保存（動的対応） ---
 def save_settings_to_file(staff_df, holidays_df, required_work_df, memos, 
-                          start_date, end_date, roles_config=None):
-    """設定データをshift_settings.jsonに保存する（役割設定も含む）"""
+                          start_date, end_date, roles_config=None, filepath=None):
+    """設定データをJSONファイルに保存する（役割設定も含む）
+    filepath: 保存先ファイルパス（Noneの場合はデフォルトのshift_settings.json）
+    """
     if roles_config is None:
         roles_config = [dict(r) for r in DEFAULT_ROLES_CONFIG]
     
@@ -171,7 +224,12 @@ def save_settings_to_file(staff_df, holidays_df, required_work_df, memos,
             "end": end_date.strftime("%Y-%m-%d")
         }
     }
-    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+    target = filepath if filepath else SETTINGS_FILE
+    # ディレクトリが存在しない場合は作成
+    target_dir = os.path.dirname(target)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+    with open(target, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 

@@ -14,7 +14,8 @@ from data_io import (
     load_settings_from_file, get_default_data, save_settings_to_file,
     generate_custom_csv, SETTINGS_FILE,
     save_shift_history, load_shift_history_list, load_shift_history_detail,
-    delete_shift_history, load_roles_config, save_roles_config
+    delete_shift_history, load_roles_config, save_roles_config,
+    list_stores, get_store_filepath, create_store, delete_store, rename_store
 )
 from solver import solve_schedule_from_ui
 
@@ -338,10 +339,136 @@ with st.sidebar:
 
     # --- データ管理 ---
     st.markdown("#### 🗂️ データ管理")
+    
+    # === 店舗管理 ===
+    stores = list_stores()
+    
+    # 初期化: 店舗がなければ「店舗1」を自動作成
+    if not stores:
+        create_store("店舗1")
+        stores = list_stores()
+    
+    # 現在の店舗をセッションに保持
+    if 'current_store' not in st.session_state:
+        st.session_state.current_store = stores[0]
+    
+    # セレクトボックスで店舗選択
+    current_idx = stores.index(st.session_state.current_store) if st.session_state.current_store in stores else 0
+    selected_store = st.selectbox(
+        "🏪 店舗",
+        stores,
+        index=current_idx,
+        key="store_selector"
+    )
+    
+    # 店舗が切り替わったらデータを読込
+    if selected_store != st.session_state.current_store:
+        st.session_state.current_store = selected_store
+        filepath = get_store_filepath(selected_store)
+        result = load_settings_from_file(filepath)
+        if result[0] is not None:
+            loaded_staff, loaded_hol, loaded_req, loaded_memos, loaded_start, loaded_end, loaded_roles = result
+            st.session_state.staff_df = loaded_staff
+            st.session_state.holidays_df = loaded_hol
+            st.session_state.required_work_df = loaded_req
+            st.session_state.memos = loaded_memos if loaded_memos else {}
+            st.session_state.roles_config = loaded_roles if loaded_roles else [dict(r) for r in DEFAULT_ROLES_CONFIG]
+            if loaded_start and loaded_end:
+                st.session_state.start_date = loaded_start
+                st.session_state.end_date = loaded_end
+        else:
+            # 空の店舗はデフォルトデータをセット
+            roles_cfg = [dict(r) for r in DEFAULT_ROLES_CONFIG]
+            staff_df, holidays_df = get_default_data(roles_cfg)
+            st.session_state.staff_df = staff_df
+            st.session_state.holidays_df = holidays_df
+            st.session_state.required_work_df = holidays_df.copy().replace(True, False)
+            st.session_state.memos = {}
+            st.session_state.roles_config = roles_cfg
+        st.session_state.result_df = None  # シフト結果をリセット
+        st.rerun()
+    
+    # 店舗操作ボタン
+    store_col1, store_col2, store_col3 = st.columns(3)
+    with store_col1:
+        if st.button("➕", key="add_store", help="新しい店舗を追加", use_container_width=True):
+            st.session_state.show_add_store = True
+    with store_col2:
+        if st.button("✏️", key="rename_store_btn", help="店舗名を変更", use_container_width=True):
+            st.session_state.show_rename_store = True
+    with store_col3:
+        if st.button("🗑️", key="del_store", help="この店舗を削除", use_container_width=True):
+            if len(stores) <= 1:
+                st.warning("最低1つの店舗が必要です")
+            else:
+                st.session_state.show_delete_confirm = True
+    
+    # 店舗追加ダイアログ
+    if st.session_state.get('show_add_store', False):
+        new_store_name = st.text_input("新しい店舗名", key="new_store_name_input")
+        add_col1, add_col2 = st.columns(2)
+        with add_col1:
+            if st.button("作成", key="confirm_add_store", use_container_width=True):
+                if new_store_name and new_store_name.strip():
+                    if create_store(new_store_name.strip()):
+                        st.session_state.current_store = new_store_name.strip()
+                        st.session_state.show_add_store = False
+                        st.success(f"「{new_store_name.strip()}」を作成しました")
+                        st.rerun()
+                    else:
+                        st.error("同じ名前の店舗が既にあります")
+                else:
+                    st.warning("店舗名を入力してください")
+        with add_col2:
+            if st.button("キャンセル", key="cancel_add_store", use_container_width=True):
+                st.session_state.show_add_store = False
+                st.rerun()
+    
+    # 店舗名変更ダイアログ
+    if st.session_state.get('show_rename_store', False):
+        rename_input = st.text_input("新しい店舗名", value=selected_store, key="rename_store_input")
+        ren_col1, ren_col2 = st.columns(2)
+        with ren_col1:
+            if st.button("変更", key="confirm_rename_store", use_container_width=True):
+                if rename_input and rename_input.strip() and rename_input.strip() != selected_store:
+                    if rename_store(selected_store, rename_input.strip()):
+                        st.session_state.current_store = rename_input.strip()
+                        st.session_state.show_rename_store = False
+                        st.success(f"「{rename_input.strip()}」に変更しました")
+                        st.rerun()
+                    else:
+                        st.error("その名前は既に使われています")
+                else:
+                    st.warning("新しい名前を入力してください")
+        with ren_col2:
+            if st.button("キャンセル", key="cancel_rename_store", use_container_width=True):
+                st.session_state.show_rename_store = False
+                st.rerun()
+    
+    # 店舗削除確認
+    if st.session_state.get('show_delete_confirm', False):
+        st.warning(f"「{selected_store}」を削除しますか？")
+        del_col1, del_col2 = st.columns(2)
+        with del_col1:
+            if st.button("削除する", key="confirm_delete_store", use_container_width=True):
+                delete_store(selected_store)
+                remaining = list_stores()
+                st.session_state.current_store = remaining[0] if remaining else "店舗1"
+                st.session_state.show_delete_confirm = False
+                st.rerun()
+        with del_col2:
+            if st.button("キャンセル", key="cancel_delete_store", use_container_width=True):
+                st.session_state.show_delete_confirm = False
+                st.rerun()
+    
+    st.caption(f"📍 現在: **{selected_store}**")
+    
+    # === 保存 / 読込（店舗ファイルに対して） ===
     col_s1, col_s2 = st.columns(2)
     with col_s1:
         if st.button("📥 保存", use_container_width=True):
             try:
+                filepath = get_store_filepath(st.session_state.current_store)
                 save_settings_to_file(
                     st.session_state.staff_df,
                     st.session_state.holidays_df,
@@ -349,14 +476,16 @@ with st.sidebar:
                     st.session_state.memos,
                     st.session_state.start_date,
                     st.session_state.end_date,
-                    st.session_state.get('roles_config', DEFAULT_ROLES_CONFIG)
+                    st.session_state.get('roles_config', DEFAULT_ROLES_CONFIG),
+                    filepath=filepath
                 )
-                st.success("保存しました！")
+                st.success(f"「{st.session_state.current_store}」に保存しました！")
             except Exception as e:
                 st.error(f"保存エラー: {e}")
     with col_s2:
         if st.button("📤 読込", use_container_width=True):
-            result = load_settings_from_file()
+            filepath = get_store_filepath(st.session_state.current_store)
+            result = load_settings_from_file(filepath)
             if result[0] is not None:
                 loaded_staff, loaded_hol, loaded_req, loaded_memos, loaded_start, loaded_end, loaded_roles = result
                 st.session_state.staff_df = loaded_staff
@@ -367,10 +496,11 @@ with st.sidebar:
                 if loaded_start and loaded_end:
                     st.session_state.start_date = loaded_start
                     st.session_state.end_date = loaded_end
-                st.success("読み込みました！")
+                st.success(f"「{st.session_state.current_store}」を読み込みました！")
                 st.rerun()
             else:
                 st.warning("保存データが見つかりません")
+
 
     st.divider()
 
