@@ -30,6 +30,7 @@ desktop.ini
 
 # プロジェクト固有
 shift_settings.json
+sankou/
 app_backup_*.py
 solver_backup_*.py
 utils_backup_*.py
@@ -42,3 +43,9 @@ shift_history/
 .claude/
 .serena/sessions/
 *.log
+.agent/
+.agents/
+stores/
+skills-lock.json
+CLAUDE.md
+Plans.md

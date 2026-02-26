@@ -1,4 +1,9 @@
+# 共通（シフト管理 + 移動管理）
 streamlit>=1.30.0
 pandas>=2.0.0
 numpy>=1.24.0
 jpholiday>=0.1.8
+
+# 移動管理アプリ用
+httpx>=0.25.0
+openpyxl>=3.1.0
