@@ -21,7 +21,6 @@ _REST_CLIENT = httpx.Client(
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     },
-    http2=True,
     timeout=httpx.Timeout(15.0, connect=5.0),
     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
 )

@@ -9,10 +9,10 @@ class SupabaseAuthClient:
         self.key = key
         timeout = httpx.Timeout(15.0, connect=5.0)
         limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
-        self._client = httpx.Client(http2=True, timeout=timeout, limits=limits)
+        # HTTP/2 は追加依存が必要なため、デプロイ環境でも確実に動く既定設定で作成する。
+        self._client = httpx.Client(timeout=timeout, limits=limits)
         self._rest_client = httpx.Client(
             base_url=f"{self.url}/rest/v1/",
-            http2=True,
             timeout=timeout,
             limits=limits,
         )
