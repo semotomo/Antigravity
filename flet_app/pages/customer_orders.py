@@ -133,7 +133,6 @@ class CustomerOrdersPageController:
         )
         self.hero_banner = self._build_hero_banner()
         self.active_status_container = ft.Container(
-            expand=True,
             content=self._build_status_body(ACTIVE_TAB_STATUSES[self.state.selected_tab_index]),
         )
         self.tab_controls = self._build_tabs()
@@ -225,7 +224,6 @@ class CustomerOrdersPageController:
                 self.active_status_container,
             ],
             spacing=12,
-            expand=True,
         )
 
     def _tab_label(self, status: str) -> str:
@@ -278,7 +276,6 @@ class CustomerOrdersPageController:
     def _build_status_body(self, status: str) -> ft.Control:
         if self.state.loading:
             return ft.Container(
-                expand=True,
                 padding=24,
                 content=ft.Row(
                     [ft.ProgressRing(), ft.Text("客注データを読み込んでいます...")],
@@ -289,7 +286,6 @@ class CustomerOrdersPageController:
         orders = orders_for_status(self.state.orders, status)
         if not orders:
             return ft.Container(
-                expand=True,
                 padding=24,
                 border_radius=16,
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
@@ -308,14 +304,10 @@ class CustomerOrdersPageController:
                 ),
             )
 
-        return ft.Container(
-            expand=True,
-            content=ft.Column(
-                [self._build_order_card(order) for order in orders],
-                spacing=12,
-                scroll=ft.ScrollMode.AUTO,
-                expand=True,
-            ),
+        return ft.Column(
+            [self._build_order_card(order) for order in orders],
+            spacing=12,
+            tight=True,
         )
 
     def _build_order_card(self, order: dict) -> ft.Control:
@@ -488,16 +480,15 @@ class CustomerOrdersPageController:
         return ft.View(
             route="/customer-orders",
             appbar=appbar,
+            scroll=ft.ScrollMode.AUTO,
             controls=[
                 ft.Container(
-                    expand=True,
                     padding=ft.padding.only(left=8, right=8, top=8, bottom=8),
                     content=ft.Column(
                         [
                             self.hero_banner,
                             self.summary_cards,
                             ft.Container(
-                                expand=True,
                                 padding=14,
                                 border_radius=18,
                                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
@@ -505,7 +496,7 @@ class CustomerOrdersPageController:
                             ),
                         ],
                         spacing=14,
-                        expand=True,
+                        tight=True,
                     ),
                 )
             ],

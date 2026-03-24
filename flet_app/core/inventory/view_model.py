@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -40,6 +41,35 @@ def choose_default_from_store_id(
                 return str(store.get("id"))
 
     return str(stores[0].get("id"))
+
+
+def build_web_asset_url(current_url: str | None, route: str | None, asset_path: str) -> str:
+    """Flet Web/Render 環境でも安全に開けるアセット URL を組み立てる。"""
+    normalized_asset_path = f"/{str(asset_path or '').lstrip('/')}"
+    raw_url = str(current_url or "").strip()
+    raw_route = str(route or "").strip()
+
+    if not raw_url:
+        return normalized_asset_path
+
+    if raw_url.startswith("wss://"):
+        raw_url = "https://" + raw_url[len("wss://") :]
+    elif raw_url.startswith("ws://"):
+        raw_url = "http://" + raw_url[len("ws://") :]
+
+    parsed = urlsplit(raw_url)
+    path = parsed.path or ""
+
+    if raw_route and path.endswith(raw_route):
+        path = path[: -len(raw_route)]
+
+    if path.endswith("/ws"):
+        path = path[:-3]
+
+    base_path = path.rstrip("/")
+    final_path = f"{base_path}{normalized_asset_path}" if base_path else normalized_asset_path
+
+    return urlunsplit((parsed.scheme, parsed.netloc, final_path, "", ""))
 
 
 def make_transfer_item(

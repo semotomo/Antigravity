@@ -11,6 +11,7 @@ from flet_app.components.navigation import get_navigation_bar
 from flet_app.core.inventory import db
 from flet_app.core.inventory.view_model import (
     available_destination_stores,
+    build_web_asset_url,
     choose_default_from_store_id,
     format_product_rows,
     format_transfer_history,
@@ -616,12 +617,12 @@ def InventoryView(page: ft.Page):
         page.update()
 
     async def open_jan_scanner(e=None):
-        current_url = str(getattr(page, "url", "") or "").rstrip("/")
-        route = str(getattr(page, "route", "") or "")
-        if route and current_url.endswith(route):
-            current_url = current_url[: -len(route)].rstrip("/")
-        scanner_url = f"{current_url}{JAN_SCANNER_ASSET_URL}" if current_url else JAN_SCANNER_ASSET_URL
-        await page.launch_url(scanner_url)
+        scanner_url = build_web_asset_url(
+            getattr(page, "url", ""),
+            getattr(page, "route", ""),
+            JAN_SCANNER_ASSET_URL,
+        )
+        await page.launch_url(scanner_url, web_popup_window_name="_self")
 
     def reset_lookup_fields():
         jan_input.value = ""

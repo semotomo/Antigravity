@@ -1,5 +1,9 @@
 import unittest
+from types import SimpleNamespace
 
+import flet as ft
+
+from flet_app.pages.customer_orders import CustomerOrdersPageController
 from flet_app.core.customer_orders.view_model import (
     STATUS_LABELS,
     build_status_counts,
@@ -94,6 +98,32 @@ class CustomerOrdersViewModelTests(unittest.TestCase):
         self.assertEqual(format_order_timestamp(None), "-")
         self.assertEqual(format_order_timestamp(""), "-")
         self.assertEqual(format_order_timestamp("not-a-date"), "-")
+
+
+class CustomerOrdersPageTests(unittest.TestCase):
+    def test_build_status_body_returns_cards_for_active_orders(self):
+        controller = CustomerOrdersPageController(SimpleNamespace())
+        controller.state.loading = False
+        controller.state.orders = [
+            {
+                "id": "order-1",
+                "customer_name": "山田 太郎",
+                "phone_number": "09012345678",
+                "item_name": "電池 2個",
+                "item_details": "",
+                "staff_name": "佐藤",
+                "notes": "",
+                "status": "pending",
+                "created_at": "2026-03-24T09:15:00+09:00",
+                "updated_at": "2026-03-24T10:00:00+09:00",
+            }
+        ]
+
+        body = controller._build_status_body("pending")
+
+        self.assertIsInstance(body, ft.Column)
+        self.assertEqual(len(body.controls), 1)
+        self.assertIsInstance(body.controls[0], ft.Container)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import unittest
 
 from flet_app.core.inventory.view_model import (
     available_destination_stores,
+    build_web_asset_url,
     choose_default_from_store_id,
     format_transfer_history,
     make_transfer_item,
@@ -125,6 +126,25 @@ class InventoryViewModelTests(unittest.TestCase):
         self.assertEqual(rows[0]["移動先"], "店舗B")
         self.assertEqual(rows[0]["商品名"], "水")
         self.assertEqual(rows[0]["原価合計"], 200)
+
+
+    def test_build_web_asset_url_converts_websocket_scheme_for_render(self):
+        url = build_web_asset_url(
+            "wss://antigravity-flet.onrender.com/ws",
+            "/inventory",
+            "/assets/jan_scanner.html",
+        )
+
+        self.assertEqual(url, "https://antigravity-flet.onrender.com/assets/jan_scanner.html")
+
+    def test_build_web_asset_url_removes_current_route_suffix(self):
+        url = build_web_asset_url(
+            "https://antigravity-flet.onrender.com/inventory",
+            "/inventory",
+            "/assets/jan_scanner.html",
+        )
+
+        self.assertEqual(url, "https://antigravity-flet.onrender.com/assets/jan_scanner.html")
 
 
 if __name__ == "__main__":
