@@ -511,7 +511,7 @@ class CustomerOrdersPageController:
             ],
             floating_action_button=ft.FloatingActionButton(
                 icon=ft.Icons.ADD,
-                text="新規客注",
+                tooltip="新規客注を登録",
                 on_click=self.open_create_dialog,
             ),
             navigation_bar=get_navigation_bar(page=self.page, selected_index=3),
