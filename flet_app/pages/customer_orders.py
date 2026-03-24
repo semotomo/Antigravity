@@ -48,8 +48,7 @@ class CustomerOrdersPageController:
         self.page = page
         self.state = CustomerOrdersState()
         self.summary_value_texts: dict[str, ft.Text] = {}
-        self.tab_items: list[ft.Tab] = []
-        self.status_switchers: dict[str, ft.AnimatedSwitcher] = {}
+        self.status_buttons: dict[str, ft.OutlinedButton] = {}
 
         self.status_text = ft.Text("客注データを読み込んでいます...")
         self.archive_text = ft.Text(
@@ -132,6 +131,10 @@ class CustomerOrdersPageController:
             run_spacing=12,
         )
         self.hero_banner = self._build_hero_banner()
+        self.active_status_container = ft.Container(
+            expand=True,
+            content=self._build_status_body(ACTIVE_TAB_STATUSES[self.state.selected_tab_index]),
+        )
         self.tab_controls = self._build_tabs()
 
     def _field_container(self, control: ft.Control, full_width: bool = False) -> ft.Container:
@@ -201,42 +204,26 @@ class CustomerOrdersPageController:
         )
 
     def _build_tabs(self) -> ft.Control:
-        self.tab_items = []
-        tab_views: list[ft.Control] = []
-        for status in ACTIVE_TAB_STATUSES:
-            self.tab_items.append(ft.Tab(label=self._tab_label(status)))
-            switcher = ft.AnimatedSwitcher(
-                content=self._build_status_body(status),
-                transition=ft.AnimatedSwitcherTransition.FADE,
-                duration=220,
+        selector_buttons: list[ft.Control] = []
+        for index, status in enumerate(ACTIVE_TAB_STATUSES):
+            button = ft.OutlinedButton(
+                content=self._tab_label(status),
+                on_click=lambda e, idx=index: self.set_selected_tab(idx),
             )
-            self.status_switchers[status] = switcher
-            tab_views.append(
-                ft.Container(
-                    padding=ft.padding.only(top=10),
-                    content=switcher,
-                )
-            )
+            self.status_buttons[status] = button
+            selector_buttons.append(button)
 
-        return ft.Tabs(
-            content=ft.Column(
-                [
-                    ft.TabBar(
-                        tabs=self.tab_items,
-                        scrollable=True,
-                        label_text_style=ft.TextStyle(size=13),
-                        unselected_label_text_style=ft.TextStyle(size=13),
-                        label_padding=ft.padding.symmetric(horizontal=10, vertical=0),
-                    ),
-                    ft.TabBarView(controls=tab_views, expand=True),
-                ],
-                spacing=0,
-                expand=True,
-            ),
-            length=len(self.tab_items),
-            selected_index=self.state.selected_tab_index,
-            animation_duration=220,
-            on_change=self.on_tab_change,
+        return ft.Column(
+            [
+                ft.Row(
+                    selector_buttons,
+                    wrap=True,
+                    run_spacing=8,
+                    spacing=8,
+                ),
+                self.active_status_container,
+            ],
+            spacing=12,
             expand=True,
         )
 
@@ -290,6 +277,7 @@ class CustomerOrdersPageController:
     def _build_status_body(self, status: str) -> ft.Control:
         if self.state.loading:
             return ft.Container(
+                expand=True,
                 padding=24,
                 content=ft.Row(
                     [ft.ProgressRing(), ft.Text("客注データを読み込んでいます...")],
@@ -300,6 +288,7 @@ class CustomerOrdersPageController:
         orders = orders_for_status(self.state.orders, status)
         if not orders:
             return ft.Container(
+                expand=True,
                 padding=24,
                 border_radius=16,
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
@@ -318,10 +307,11 @@ class CustomerOrdersPageController:
                 ),
             )
 
-        return ft.Column(
-            [self._build_order_card(order) for order in orders],
+        return ft.ListView(
+            controls=[self._build_order_card(order) for order in orders],
             spacing=12,
-            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            padding=0,
         )
 
     def _build_order_card(self, order: dict) -> ft.Control:
@@ -649,8 +639,22 @@ class CustomerOrdersPageController:
             self.set_form_busy(False)
             self.page.update()
 
-    def on_tab_change(self, e):
-        self.state.selected_tab_index = int(e.data)
+    def set_selected_tab(self, index: int):
+        self.state.selected_tab_index = index
+        self.refresh_views()
+        self.page.update()
+
+    def _selected_tab_style(self, selected: bool) -> ft.ButtonStyle:
+        return ft.ButtonStyle(
+            bgcolor=ft.Colors.PRIMARY_CONTAINER if selected else ft.Colors.WHITE,
+            color=ft.Colors.PRIMARY if selected else ft.Colors.ON_SURFACE,
+            side=ft.border.BorderSide(
+                1,
+                ft.Colors.PRIMARY if selected else ft.Colors.OUTLINE_VARIANT,
+            ),
+            padding=ft.padding.symmetric(horizontal=14, vertical=10),
+            shape=ft.RoundedRectangleBorder(radius=14),
+        )
 
     def reload_orders(self, e=None):
         self.state.loading = True
@@ -685,8 +689,13 @@ class CustomerOrdersPageController:
                 value_text.value = f"{self.state.counts.get(status, 0)}件"
 
         for index, status in enumerate(ACTIVE_TAB_STATUSES):
-            self.tab_items[index].label = self._tab_label(status)
-            self.status_switchers[status].content = self._build_status_body(status)
+            button = self.status_buttons.get(status)
+            if button is not None:
+                button.content = self._tab_label(status)
+                button.style = self._selected_tab_style(index == self.state.selected_tab_index)
+
+        active_status = ACTIVE_TAB_STATUSES[self.state.selected_tab_index]
+        self.active_status_container.content = self._build_status_body(active_status)
 
         self.archive_text.value = (
             f"完了 {self.state.counts.get('completed', 0)}件 / "

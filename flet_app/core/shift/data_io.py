@@ -9,9 +9,11 @@ import pandas as pd
 from flet_app.core.shift.utils import is_holiday, DEFAULT_ROLES_CONFIG
 
 # --- 定数 ---
-SETTINGS_FILE = "shift_settings.json"
-HISTORY_DIR = "shift_history"
-STORES_DIR = "stores"
+BASE_DIR = os.path.dirname(__file__)
+SETTINGS_FILE = os.path.join(BASE_DIR, "shift_settings.json")
+HISTORY_DIR = os.path.join(BASE_DIR, "shift_history")
+STORES_DIR = os.path.join(BASE_DIR, "stores")
+DEFAULT_STORE_NAME = "店舗1"
 
 
 # --- 役割設定の読み込み ---
@@ -45,13 +47,16 @@ def save_roles_config(roles_config):
 
 # --- 店舗管理 ---
 def list_stores():
-    """stores/フォルダ内の店舗一覧を返す。フォルダがなければ作成する。"""
+    """stores/フォルダ内の店舗一覧を返す。空なら既定店舗を自動作成する。"""
     if not os.path.exists(STORES_DIR):
         os.makedirs(STORES_DIR, exist_ok=True)
     stores = []
     for f in sorted(os.listdir(STORES_DIR)):
         if f.endswith('.json'):
             stores.append(f.replace('.json', ''))
+    if not stores:
+        create_store(DEFAULT_STORE_NAME)
+        stores = [DEFAULT_STORE_NAME]
     return stores
 
 

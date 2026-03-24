@@ -8,8 +8,10 @@ import pandas as pd
 
 from flet_app.components.shift_ui import normalize_staff_entry, staff_defaults_for_roles
 from flet_app.core.shift.data_io import (
+    DEFAULT_STORE_NAME,
     delete_shift_history,
     get_default_data,
+    list_stores,
     load_settings_from_file,
     load_shift_history_detail,
     load_shift_history_list,
@@ -133,6 +135,21 @@ class ShiftHistoryTests(unittest.TestCase):
         self.assertEqual(list(loaded_df.index), ["西原", "松本"])
         self.assertEqual(loaded_df.iloc[0, 0], "A")
         self.assertTrue(deleted)
+
+
+class ShiftStoreBootstrapTests(unittest.TestCase):
+    def test_list_stores_creates_default_store_when_directory_is_empty(self):
+        temp_dir = Path("tests/.tmp") / f"stores_{uuid4().hex}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with patch("flet_app.core.shift.data_io.STORES_DIR", str(temp_dir)):
+                stores = list_stores()
+        finally:
+            for child in temp_dir.glob("*"):
+                child.unlink(missing_ok=True)
+            temp_dir.rmdir()
+
+        self.assertEqual(stores, [DEFAULT_STORE_NAME])
 
 
 class ShiftSolverCancelTests(unittest.TestCase):

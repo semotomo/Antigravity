@@ -21,6 +21,7 @@ from flet_app.core.inventory.view_model import (
 from flet_app.core.supabase_client import supabase
 
 ALL_STORES = "__ALL__"
+JAN_SCANNER_ASSET_URL = "/assets/jan_scanner.html"
 
 
 @dataclass
@@ -44,6 +45,7 @@ class InventoryState:
 
 def InventoryView(page: ft.Page):
     state = InventoryState()
+    pending_scanned_jan = ""
 
     def show_dialog(title: str, message: str):
         page.show_dialog(
@@ -498,6 +500,7 @@ def InventoryView(page: ft.Page):
         page.update()
 
     def load_initial_data():
+        nonlocal pending_scanned_jan
         try:
             stores = normalize_store_records(db.get_stores())
             state.stores = stores
@@ -518,10 +521,21 @@ def InventoryView(page: ft.Page):
 
             refresh_all_views()
             set_status("店舗と商品データを読み込みました。")
+            if pending_scanned_jan:
+                jan_input.value = pending_scanned_jan
+                search_transfer_product()
+                scanned_jan = pending_scanned_jan
+                pending_scanned_jan = ""
+                set_status(f"カメラで読み取った JANコード {scanned_jan} を検索しました。")
+                page.run_task(clear_scanned_jan_query)
         except Exception as ex:
             refresh_all_views()
             set_status(f"初期データの読み込みに失敗しました: {ex}", ft.Colors.ERROR)
         page.update()
+
+    async def clear_scanned_jan_query():
+        if getattr(page, "route", "") == "/inventory":
+            await page.push_route("/inventory")
 
     def on_from_store_change(e):
         state.from_store_id = e.control.value
@@ -599,6 +613,9 @@ def InventoryView(page: ft.Page):
 
         render_lookup_panel()
         page.update()
+
+    async def open_jan_scanner(e=None):
+        await page.launch_url(JAN_SCANNER_ASSET_URL)
 
     def reset_lookup_fields():
         jan_input.value = ""
@@ -895,6 +912,9 @@ def InventoryView(page: ft.Page):
             page.update()
             page.run_thread(load_product_data)
 
+    query_params = page.query.to_dict if hasattr(page, "query") else {}
+    pending_scanned_jan = str(query_params.get("scanned_jan", "")).strip()
+
     status_text = ft.Text("店舗と商品データを読み込んでいます...")
     current_store_text = ft.Text("", weight=ft.FontWeight.BOLD)
 
@@ -933,6 +953,12 @@ def InventoryView(page: ft.Page):
         icon=ft.Icons.SEARCH,
         on_click=search_transfer_product,
         width=140,
+    )
+    camera_scan_btn = ft.OutlinedButton(
+        content="カメラで読む",
+        icon=ft.Icons.CAMERA_ALT_OUTLINED,
+        on_click=open_jan_scanner,
+        visible=bool(getattr(page, "web", False)),
     )
     clear_transfer_btn = ft.OutlinedButton(
         content="リストを全消去",
@@ -1029,7 +1055,7 @@ def InventoryView(page: ft.Page):
                         ft.Text("商品スキャン", size=20, weight=ft.FontWeight.BOLD),
                         jan_input,
                         ft.Row(
-                            [quantity_input, search_transfer_btn],
+                            [quantity_input, search_transfer_btn, camera_scan_btn],
                             wrap=True,
                             run_spacing=12,
                             spacing=12,

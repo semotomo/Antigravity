@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JANコードスキャン</title>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: #1f2933;
+    }
+
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      line-height: 1.6;
+      color: #52606d;
+    }
+
+    #reader {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 16px;
+    }
+
+    .result {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: #eef2ff;
+      color: #1d4ed8;
+      font-weight: 600;
+      min-height: 24px;
+    }
+
+    .actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 999px;
+      text-decoration: none;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #1f2933;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .button.primary {
+      background: #1d4ed8;
+      border-color: #1d4ed8;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="card">
+      <h1>JANコードを読み取る</h1>
+      <p>スマホでは背面カメラ、パソコンでは接続カメラを使って読み取れます。読み取り後は商品管理へ戻ります。</p>
+      <div id="reader"></div>
+      <div id="result" class="result">カメラの使用を許可すると読み取りを開始します。</div>
+      <div class="actions">
+        <button id="back-button" class="button" type="button">商品管理へ戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const resultBox = document.getElementById("result");
+    const backButton = document.getElementById("back-button");
+    let scanner;
+    let navigating = false;
+
+    const supportedFormats = [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128,
+    ];
+
+    function updateResult(message) {
+      resultBox.textContent = message;
+    }
+
+    function navigateBackWithJan(janCode) {
+      if (navigating) return;
+      navigating = true;
+      updateResult(`読み取り成功: ${janCode}。商品管理へ戻ります。`);
+      window.location.replace(`/inventory?scanned_jan=${encodeURIComponent(janCode)}`);
+    }
+
+    function navigateBack() {
+      window.location.replace("/inventory");
+    }
+
+    backButton.addEventListener("click", navigateBack);
+
+    function onScanSuccess(decodedText) {
+      const janCode = String(decodedText || "").trim();
+      if (!janCode) return;
+
+      if (scanner) {
+        scanner.clear().catch(() => {});
+      }
+      navigateBackWithJan(janCode);
+    }
+
+    function onScanFailure() {
+      // 読み取り中のフレーム失敗は通常動作なので無視する。
+    }
+
+    try {
+      scanner = new Html5QrcodeScanner(
+        "reader",
+        {
+          fps: 10,
+          qrbox: { width: 280, height: 180 },
+          rememberLastUsedCamera: true,
+          supportedScanTypes: [
+            Html5QrcodeScanType.SCAN_TYPE_CAMERA,
+            Html5QrcodeScanType.SCAN_TYPE_FILE,
+          ],
+          formatsToSupport: supportedFormats,
+        },
+        false
+      );
+      scanner.render(onScanSuccess, onScanFailure);
+    } catch (error) {
+      updateResult(`スキャナーの初期化に失敗しました: ${error}`);
+    }
+  </script>
+</body>
+</html>
