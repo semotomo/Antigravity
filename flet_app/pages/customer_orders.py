@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -307,11 +308,14 @@ class CustomerOrdersPageController:
                 ),
             )
 
-        return ft.ListView(
-            controls=[self._build_order_card(order) for order in orders],
-            spacing=12,
+        return ft.Container(
             expand=True,
-            padding=0,
+            content=ft.Column(
+                [self._build_order_card(order) for order in orders],
+                spacing=12,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+            ),
         )
 
     def _build_order_card(self, order: dict) -> ft.Control:
@@ -395,61 +399,67 @@ class CustomerOrdersPageController:
                 )
             )
 
-        return ft.Card(
-            elevation=0.4,
-            content=ft.Container(
-                padding=16,
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Column(
-                                    [
-                                        ft.Text(
-                                            order["customer_name"] or "お客様名未設定",
-                                            size=20,
-                                            weight=ft.FontWeight.BOLD,
-                                        ),
-                                        ft.Text(
-                                            order["item_name"] or "-",
-                                            color=ft.Colors.ON_SURFACE_VARIANT,
-                                        ),
-                                    ],
-                                    spacing=4,
-                                    expand=True,
-                                    tight=True,
-                                ),
-                                self._status_badge(order["status"]),
-                            ],
-                            wrap=True,
-                            run_spacing=8,
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        ),
-                        ft.ResponsiveRow(
-                            [
-                                self._info_item(
-                                    "電話番号",
-                                    order["phone_number"],
-                                    selectable=True,
-                                ),
-                                self._info_item("受付スタッフ", order["staff_name"] or "-"),
-                                self._info_item("登録日時", order["created_label"]),
-                                self._info_item("更新日時", order["updated_label"]),
-                            ],
-                            spacing=10,
-                            run_spacing=10,
-                        ),
-                        *detail_controls,
-                        ft.Row(
-                            actions,
-                            wrap=True,
-                            run_spacing=8,
-                            spacing=8,
-                        ),
-                    ],
-                    spacing=14,
-                    tight=True,
-                ),
+        return ft.Container(
+            padding=16,
+            border_radius=18,
+            bgcolor=ft.Colors.WHITE,
+            border=ft.border.all(1, ft.Colors.BLUE_GREY_100),
+            shadow=ft.BoxShadow(
+                spread_radius=0,
+                blur_radius=12,
+                color=ft.Colors.with_opacity(0.08, ft.Colors.BLACK),
+                offset=ft.Offset(0, 3),
+            ),
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Column(
+                                [
+                                    ft.Text(
+                                        order["customer_name"] or "お客様名未設定",
+                                        size=20,
+                                        weight=ft.FontWeight.BOLD,
+                                    ),
+                                    ft.Text(
+                                        order["item_name"] or "-",
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                    ),
+                                ],
+                                spacing=4,
+                                expand=True,
+                                tight=True,
+                            ),
+                            self._status_badge(order["status"]),
+                        ],
+                        wrap=True,
+                        run_spacing=8,
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.ResponsiveRow(
+                        [
+                            self._info_item(
+                                "電話番号",
+                                order["phone_number"],
+                                selectable=True,
+                            ),
+                            self._info_item("受付スタッフ", order["staff_name"] or "-"),
+                            self._info_item("登録日時", order["created_label"]),
+                            self._info_item("更新日時", order["updated_label"]),
+                        ],
+                        spacing=10,
+                        run_spacing=10,
+                    ),
+                    *detail_controls,
+                    ft.Row(
+                        actions,
+                        wrap=True,
+                        run_spacing=8,
+                        spacing=8,
+                    ),
+                ],
+                spacing=14,
+                tight=True,
             ),
         )
 
@@ -616,15 +626,17 @@ class CustomerOrdersPageController:
         editing_order_id = self.state.editing_order_id
         self.set_form_busy(True)
         self.page.update()
-        self.page.run_thread(lambda: self._save_order_thread(payload, editing_order_id))
+        self.page.run_task(self._save_order_task, payload, editing_order_id)
 
-    def _save_order_thread(self, payload: dict, editing_order_id: Optional[str]):
+    async def _save_order_task(self, payload: dict, editing_order_id: Optional[str]):
         try:
             if editing_order_id:
-                saved = customer_orders_db.update_customer_order(editing_order_id, payload)
+                saved = await asyncio.to_thread(
+                    customer_orders_db.update_customer_order, editing_order_id, payload
+                )
                 self.set_status("客注を更新しました。", ft.Colors.PRIMARY)
             else:
-                saved = customer_orders_db.create_customer_order(payload)
+                saved = await asyncio.to_thread(customer_orders_db.create_customer_order, payload)
                 self.set_status("客注を登録しました。", ft.Colors.PRIMARY)
 
             if not saved:
@@ -661,11 +673,11 @@ class CustomerOrdersPageController:
         self.set_status("客注データを読み込んでいます...")
         self.refresh_views()
         self.page.update()
-        self.page.run_thread(self._load_orders_thread)
+        self.page.run_task(self._load_orders_task)
 
-    def _load_orders_thread(self):
+    async def _load_orders_task(self):
         try:
-            records = customer_orders_db.list_customer_orders(limit=500)
+            records = await asyncio.to_thread(customer_orders_db.list_customer_orders, None, 500)
             self.state.orders = sort_orders_for_display(records)
             self.state.counts = build_status_counts(self.state.orders)
             self.state.loading = False
@@ -728,11 +740,13 @@ class CustomerOrdersPageController:
     def advance_order_status(self, order_id: str, next_status: str):
         self.set_status("ステータスを更新しています...")
         self.page.update()
-        self.page.run_thread(lambda: self._update_status_thread(order_id, next_status))
+        self.page.run_task(self._update_status_task, order_id, next_status)
 
-    def _update_status_thread(self, order_id: str, next_status: str):
+    async def _update_status_task(self, order_id: str, next_status: str):
         try:
-            record = customer_orders_db.update_customer_order_status(order_id, next_status)
+            record = await asyncio.to_thread(
+                customer_orders_db.update_customer_order_status, order_id, next_status
+            )
             if not record:
                 raise RuntimeError("ステータス更新後のデータを取得できませんでした。")
             self.upsert_order(record)
@@ -766,11 +780,11 @@ class CustomerOrdersPageController:
     def delete_order(self, order_id: str):
         self.set_status("客注を削除しています...")
         self.page.update()
-        self.page.run_thread(lambda: self._delete_order_thread(order_id))
+        self.page.run_task(self._delete_order_task, order_id)
 
-    def _delete_order_thread(self, order_id: str):
+    async def _delete_order_task(self, order_id: str):
         try:
-            customer_orders_db.delete_customer_order(order_id)
+            await asyncio.to_thread(customer_orders_db.delete_customer_order, order_id)
             self.remove_order(order_id)
             self.set_status("客注を削除しました。", ft.Colors.PRIMARY)
         except Exception as ex:
@@ -816,5 +830,5 @@ def CustomerOrdersView(page: ft.Page) -> ft.View:
     controller = CustomerOrdersPageController(page)
     setattr(page, "_customer_orders_controller", controller)
     view = controller.build_view()
-    page.run_thread(controller._load_orders_thread)
+    page.run_task(controller._load_orders_task)
     return view

@@ -11,6 +11,7 @@ from flet_app.components.navigation import get_navigation_bar
 from flet_app.core.inventory import db
 from flet_app.core.inventory.view_model import (
     available_destination_stores,
+    choose_default_from_store_id,
     format_product_rows,
     format_transfer_history,
     make_transfer_item,
@@ -505,7 +506,7 @@ def InventoryView(page: ft.Page):
             stores = normalize_store_records(db.get_stores())
             state.stores = stores
             if stores and not state.from_store_id:
-                state.from_store_id = stores[0]["id"]
+                state.from_store_id = choose_default_from_store_id(stores)
             destinations = available_destination_stores(stores, state.from_store_id)
             if destinations and not state.to_store_id:
                 state.to_store_id = destinations[0]["id"]
@@ -615,7 +616,12 @@ def InventoryView(page: ft.Page):
         page.update()
 
     async def open_jan_scanner(e=None):
-        await page.launch_url(JAN_SCANNER_ASSET_URL)
+        current_url = str(getattr(page, "url", "") or "").rstrip("/")
+        route = str(getattr(page, "route", "") or "")
+        if route and current_url.endswith(route):
+            current_url = current_url[: -len(route)].rstrip("/")
+        scanner_url = f"{current_url}{JAN_SCANNER_ASSET_URL}" if current_url else JAN_SCANNER_ASSET_URL
+        await page.launch_url(scanner_url)
 
     def reset_lookup_fields():
         jan_input.value = ""

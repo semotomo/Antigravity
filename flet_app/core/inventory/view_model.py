@@ -28,6 +28,20 @@ def available_destination_stores(stores: list[dict], from_store_id: str | None) 
     return [store for store in stores if store.get("id") != from_store_id]
 
 
+def choose_default_from_store_id(
+    stores: list[dict], preferred_names: tuple[str, ...] = ("本店",)
+) -> str | None:
+    if not stores:
+        return None
+
+    for preferred_name in preferred_names:
+        for store in stores:
+            if str(store.get("name", "")).strip() == preferred_name:
+                return str(store.get("id"))
+
+    return str(stores[0].get("id"))
+
+
 def make_transfer_item(
     product: dict,
     quantity: int,

@@ -2,6 +2,7 @@ import unittest
 
 from flet_app.core.inventory.view_model import (
     available_destination_stores,
+    choose_default_from_store_id,
     format_transfer_history,
     make_transfer_item,
     normalize_store_records,
@@ -42,6 +43,15 @@ class InventoryViewModelTests(unittest.TestCase):
                 {"id": "3", "name": "店舗C"},
             ],
         )
+
+    def test_choose_default_from_store_id_prefers_honten(self):
+        stores = [
+            {"id": "2", "name": "佐世保"},
+            {"id": "1", "name": "本店"},
+            {"id": "3", "name": "マックス"},
+        ]
+
+        self.assertEqual(choose_default_from_store_id(stores), "1")
 
     def test_make_transfer_item_builds_expected_payload(self):
         item = make_transfer_item(
