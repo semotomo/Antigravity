@@ -71,7 +71,7 @@ def DashboardView(page: ft.Page):
                                     height=38,
                                     border_radius=12,
                                     bgcolor=ft.Colors.with_opacity(0.12, accent_color),
-                                    alignment=ft.alignment.center,
+                                    alignment=ft.Alignment(0, 0),
                                     content=ft.Icon(icon, color=accent_color, size=20),
                                 ),
                                 ft.Text(
@@ -132,7 +132,7 @@ def DashboardView(page: ft.Page):
                                     height=40,
                                     border_radius=12,
                                     bgcolor=ft.Colors.with_opacity(0.12, accent_color),
-                                    alignment=ft.alignment.center,
+                                    alignment=ft.Alignment(0, 0),
                                     content=ft.Icon(icon, color=accent_color),
                                 ),
                                 ft.Text(title, size=18, weight=ft.FontWeight.BOLD),
@@ -289,7 +289,7 @@ def DashboardView(page: ft.Page):
                                 width=30,
                                 height=30,
                                 border_radius=999,
-                                alignment=ft.alignment.center,
+                                alignment=ft.Alignment(0, 0),
                                 bgcolor=ft.Colors.BLUE_100 if index == 1 else ft.Colors.BLUE_GREY_100,
                                 content=ft.Text(str(index), weight=ft.FontWeight.BOLD, size=12),
                             ),
@@ -322,7 +322,7 @@ def DashboardView(page: ft.Page):
             ft.Container(
                 expand=True,
                 padding=40,
-                alignment=ft.alignment.center,
+                alignment=ft.Alignment(0, 0),
                 content=ft.Column(
                     [
                         ft.ProgressRing(),
