@@ -103,6 +103,50 @@ def InventoryView(page: ft.Page):
             ),
         )
 
+    def overview_card(
+        title: str,
+        value: str,
+        subtitle: str,
+        icon: str,
+        accent_color: str,
+        col: dict | int | None = None,
+    ) -> ft.Control:
+        return ft.Card(
+            elevation=0.2,
+            col=col or {"xs": 12, "sm": 6, "lg": 4},
+            content=ft.Container(
+                padding=16,
+                border=ft.border.all(1, ft.Colors.BLUE_GREY_100),
+                border_radius=18,
+                bgcolor=ft.Colors.WHITE,
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Icon(icon, color=accent_color, size=18),
+                                ft.Text(title, size=12, color=ft.Colors.BLUE_GREY_500),
+                            ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        ft.Text(
+                            value,
+                            size=24,
+                            weight=ft.FontWeight.BOLD,
+                            color=accent_color,
+                        ),
+                        ft.Text(
+                            subtitle,
+                            size=11,
+                            color=ft.Colors.BLUE_GREY_500,
+                        ),
+                    ],
+                    spacing=8,
+                    tight=True,
+                ),
+            ),
+        )
+
     def product_summary_card(product: dict, accent_color: str = ft.Colors.PRIMARY) -> ft.Control:
         return ft.Card(
             content=ft.Container(
@@ -180,12 +224,46 @@ def InventoryView(page: ft.Page):
 
         if not state.stores:
             current_store_text.value = "店舗マスタがまだ登録されていません。"
+            store_setup_hint_text.value = "まず店舗マスタを登録すると、店舗間移動をそのまま運用に乗せられます。"
+            store_setup_hint_text.color = ft.Colors.ERROR
         else:
             from_store_name = next(
                 (store["name"] for store in state.stores if store["id"] == state.from_store_id),
                 "未選択",
             )
             current_store_text.value = f"移動元店舗: {from_store_name}"
+            store_setup_hint_text.value = "移動元と移動先を確認してから、JANコード検索またはカメラ読取で追加します。"
+            store_setup_hint_text.color = ft.Colors.ON_SURFACE_VARIANT
+
+    def render_inventory_overview():
+        summary = summarize_transfer_items(state.transfer_list)
+        current_store_name = next(
+            (store["name"] for store in state.stores if store["id"] == state.from_store_id),
+            "未選択",
+        )
+        inventory_overview_row.controls = [
+            overview_card(
+                "店舗状態",
+                f"{len(state.stores)}店" if state.stores else "未登録",
+                f"移動元: {current_store_name}" if state.stores else "商品管理から店舗を整備してください",
+                ft.Icons.STOREFRONT,
+                ft.Colors.BLUE_700,
+            ),
+            overview_card(
+                "商品マスタ",
+                f"{state.product_count:,}件",
+                "検索・CSV取込・手動登録の基礎データです。",
+                ft.Icons.INVENTORY_2,
+                ft.Colors.TEAL_700,
+            ),
+            overview_card(
+                "今回の移動リスト",
+                f"{summary['product_count']}種 / {summary['total_quantity']}個" if state.transfer_list else "未登録",
+                f"原価合計 ¥{summary['total_cost']:,}" if state.transfer_list else "追加するとここに集計が出ます",
+                ft.Icons.LOCAL_SHIPPING_OUTLINED,
+                ft.Colors.ORANGE_800,
+            ),
+        ]
 
     def render_lookup_panel():
         if state.selected_product:
@@ -257,6 +335,7 @@ def InventoryView(page: ft.Page):
             else "移動を登録する"
         )
         clear_transfer_btn.disabled = not state.transfer_list
+        render_inventory_overview()
 
         if not state.transfer_list:
             transfer_list_column.controls = [
@@ -391,6 +470,7 @@ def InventoryView(page: ft.Page):
 
     def render_products():
         product_count_value.value = f"{state.product_count:,}件"
+        render_inventory_overview()
 
         if state.master_search_result:
             master_search_result_container.content = ft.Column(
@@ -458,6 +538,7 @@ def InventoryView(page: ft.Page):
     def refresh_all_views():
         refresh_history_date_buttons()
         refresh_store_controls()
+        render_inventory_overview()
         render_lookup_panel()
         render_transfer_list()
         render_history()
@@ -924,6 +1005,8 @@ def InventoryView(page: ft.Page):
 
     status_text = ft.Text("店舗と商品データを読み込んでいます...")
     current_store_text = ft.Text("", weight=ft.FontWeight.BOLD)
+    store_setup_hint_text = ft.Text("", color=ft.Colors.ON_SURFACE_VARIANT)
+    inventory_overview_row = ft.ResponsiveRow(spacing={"xs": 10, "md": 12}, run_spacing=10)
 
     from_store_dropdown = ft.Dropdown(
         label="移動元店舗",
@@ -1035,62 +1118,96 @@ def InventoryView(page: ft.Page):
 
     transfer_tab = ft.Column(
         [
-            ft.Container(
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                border_radius=16,
-                padding=16,
-                content=ft.Column(
-                    [
-                        ft.Text("移動入力", size=22, weight=ft.FontWeight.BOLD),
-                        current_store_text,
-                        ft.Row(
-                            [from_store_dropdown, to_store_dropdown],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
+            inventory_overview_row,
+            ft.ResponsiveRow(
+                [
+                    ft.Container(
+                        col={"xs": 12, "xl": 7},
+                        content=ft.Column(
+                            [
+                                ft.Container(
+                                    bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                                    border_radius=16,
+                                    padding=16,
+                                    content=ft.Column(
+                                        [
+                                            ft.Text("移動入力", size=22, weight=ft.FontWeight.BOLD),
+                                            current_store_text,
+                                            store_setup_hint_text,
+                                            ft.Row(
+                                                [from_store_dropdown, to_store_dropdown],
+                                                wrap=True,
+                                                run_spacing=12,
+                                                spacing=12,
+                                            ),
+                                        ],
+                                        spacing=12,
+                                    ),
+                                ),
+                                ft.Container(
+                                    bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                                    border_radius=16,
+                                    padding=16,
+                                    content=ft.Column(
+                                        [
+                                            ft.Text("商品スキャン", size=20, weight=ft.FontWeight.BOLD),
+                                            ft.Text(
+                                                "JANコードで検索し、見つかった商品をそのまま移動リストへ追加します。",
+                                                size=11,
+                                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                            ),
+                                            jan_input,
+                                            ft.Row(
+                                                [quantity_input, search_transfer_btn, camera_scan_btn],
+                                                wrap=True,
+                                                run_spacing=12,
+                                                spacing=12,
+                                            ),
+                                            memo_input,
+                                            lookup_result_container,
+                                        ],
+                                        spacing=12,
+                                    ),
+                                ),
+                            ],
+                            spacing=16,
                         ),
-                    ],
-                    spacing=12,
-                ),
-            ),
-            ft.Container(
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                border_radius=16,
-                padding=16,
-                content=ft.Column(
-                    [
-                        ft.Text("商品スキャン", size=20, weight=ft.FontWeight.BOLD),
-                        jan_input,
-                        ft.Row(
-                            [quantity_input, search_transfer_btn, camera_scan_btn],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
+                    ),
+                    ft.Container(
+                        col={"xs": 12, "xl": 5},
+                        content=ft.Column(
+                            [
+                                ft.Container(content=transfer_stats_row),
+                                ft.Container(
+                                    bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
+                                    border_radius=16,
+                                    padding=16,
+                                    content=ft.Column(
+                                        [
+                                            ft.Text("今回の移動リスト", size=20, weight=ft.FontWeight.BOLD),
+                                            ft.Text(
+                                                "追加した商品を確認して、そのまま一括で移動登録します。",
+                                                size=11,
+                                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                            ),
+                                            transfer_list_column,
+                                            ft.Row(
+                                                [commit_transfer_btn, clear_transfer_btn],
+                                                wrap=True,
+                                                run_spacing=12,
+                                                spacing=12,
+                                            ),
+                                        ],
+                                        spacing=16,
+                                    ),
+                                ),
+                            ],
+                            spacing=16,
                         ),
-                        memo_input,
-                        lookup_result_container,
-                    ],
-                    spacing=12,
-                ),
-            ),
-            ft.Container(content=transfer_stats_row),
-            ft.Container(
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST,
-                border_radius=16,
-                padding=16,
-                content=ft.Column(
-                    [
-                        ft.Text("今回の移動リスト", size=20, weight=ft.FontWeight.BOLD),
-                        transfer_list_column,
-                        ft.Row(
-                            [commit_transfer_btn, clear_transfer_btn],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
-                        ),
-                    ],
-                    spacing=16,
-                ),
+                    ),
+                ],
+                spacing={"xs": 10, "md": 12},
+                run_spacing=10,
             ),
         ],
         scroll=ft.ScrollMode.AUTO,
@@ -1159,58 +1276,80 @@ def InventoryView(page: ft.Page):
                 run_spacing=12,
                 spacing=12,
             ),
-            ft.Container(
-                padding=16,
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                border_radius=16,
-                content=ft.Column(
-                    [
-                        ft.Text("商品を手動で登録", size=20, weight=ft.FontWeight.BOLD),
-                        ft.Row(
-                            [product_jan_input, product_name_input],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
+            ft.ResponsiveRow(
+                [
+                    ft.Container(
+                        col={"xs": 12, "xl": 7},
+                        content=ft.Container(
+                            padding=16,
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                            border_radius=16,
+                            content=ft.Column(
+                                [
+                                    ft.Text("商品を手動で登録", size=20, weight=ft.FontWeight.BOLD),
+                                    ft.Text(
+                                        "CSVに載っていない商品や暫定商品をすぐに登録できます。",
+                                        size=11,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                    ),
+                                    ft.Row(
+                                        [product_jan_input, product_name_input],
+                                        wrap=True,
+                                        run_spacing=12,
+                                        spacing=12,
+                                    ),
+                                    ft.Row(
+                                        [product_cost_input, product_sell_input, product_category_input],
+                                        wrap=True,
+                                        run_spacing=12,
+                                        spacing=12,
+                                    ),
+                                    ft.Button(
+                                        content="商品を登録",
+                                        icon=ft.Icons.SAVE,
+                                        on_click=save_product,
+                                    ),
+                                ],
+                                spacing=12,
+                            ),
                         ),
-                        ft.Row(
-                            [product_cost_input, product_sell_input, product_category_input],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
+                    ),
+                    ft.Container(
+                        col={"xs": 12, "xl": 5},
+                        content=ft.Container(
+                            padding=16,
+                            bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                            border_radius=16,
+                            content=ft.Column(
+                                [
+                                    ft.Text("商品検索", size=20, weight=ft.FontWeight.BOLD),
+                                    ft.Text(
+                                        "登録済み商品を JANコードで検索し、その場で確認や削除ができます。",
+                                        size=11,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                    ),
+                                    ft.Row(
+                                        [
+                                            product_search_input,
+                                            ft.Button(
+                                                content="検索",
+                                                icon=ft.Icons.SEARCH,
+                                                on_click=search_master_product,
+                                            ),
+                                        ],
+                                        wrap=True,
+                                        run_spacing=12,
+                                        spacing=12,
+                                    ),
+                                    master_search_result_container,
+                                ],
+                                spacing=12,
+                            ),
                         ),
-                        ft.Button(
-                            content="商品を登録",
-                            icon=ft.Icons.SAVE,
-                            on_click=save_product,
-                        ),
-                    ],
-                    spacing=12,
-                ),
-            ),
-            ft.Container(
-                padding=16,
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                border_radius=16,
-                content=ft.Column(
-                    [
-                        ft.Text("商品検索", size=20, weight=ft.FontWeight.BOLD),
-                        ft.Row(
-                            [
-                                product_search_input,
-                                ft.Button(
-                                    content="検索",
-                                    icon=ft.Icons.SEARCH,
-                                    on_click=search_master_product,
-                                ),
-                            ],
-                            wrap=True,
-                            run_spacing=12,
-                            spacing=12,
-                        ),
-                        master_search_result_container,
-                    ],
-                    spacing=12,
-                ),
+                    ),
+                ],
+                spacing={"xs": 10, "md": 12},
+                run_spacing=10,
             ),
             ft.Text("登録済み商品一覧（最新100件）", size=20, weight=ft.FontWeight.BOLD),
             products_list_column,
