@@ -8,6 +8,7 @@ import flet as ft
 import pandas as pd
 
 from flet_app.components.navigation import get_navigation_bar
+from flet_app.core.auth_session import logout_page
 from flet_app.core.inventory import db
 from flet_app.core.inventory.view_model import (
     available_destination_stores,
@@ -20,7 +21,6 @@ from flet_app.core.inventory.view_model import (
     prepare_transfer_payload,
     summarize_transfer_items,
 )
-from flet_app.core.supabase_client import supabase
 
 ALL_STORES = "__ALL__"
 JAN_SCANNER_ASSET_URL = "/assets/jan_scanner.html"
@@ -71,14 +71,7 @@ def InventoryView(page: ft.Page):
             raise ValueError(f"{field_name}は数字で入力してください。") from ex
 
     async def logout(e):
-        token = getattr(page, "access_token", None)
-        if token:
-            try:
-                supabase.sign_out(token)
-            except Exception:
-                pass
-        setattr(page, "is_authenticated", False)
-        setattr(page, "access_token", None)
+        await logout_page(page)
         await page.push_route("/login")
 
     def metric_card(label: str, value: str, icon: str) -> ft.Control:
@@ -1405,5 +1398,5 @@ def InventoryView(page: ft.Page):
                 expand=True,
             )
         ],
-        navigation_bar=get_navigation_bar(page, 1),
+        navigation_bar=get_navigation_bar(page, 2),
     )

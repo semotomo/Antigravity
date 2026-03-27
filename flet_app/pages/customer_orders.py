@@ -7,6 +7,7 @@ from typing import Optional
 import flet as ft
 
 from flet_app.components.navigation import get_navigation_bar
+from flet_app.core.auth_session import logout_page
 from flet_app.core.customer_orders import db as customer_orders_db
 from flet_app.core.customer_orders.view_model import (
     ACTIVE_TAB_STATUSES,
@@ -20,7 +21,6 @@ from flet_app.core.customer_orders.view_model import (
     orders_for_status,
     sort_orders_for_display,
 )
-from flet_app.core.supabase_client import supabase
 
 
 STATUS_COLORS = {
@@ -81,8 +81,8 @@ class CustomerOrdersPageController:
         )
         self.form_error_text = ft.Text("", color=ft.Colors.ERROR, visible=False)
         self.form_progress_ring = ft.ProgressRing(width=18, height=18, visible=False)
-        self.form_submit_button = ft.Button(
-            content=ft.Text("登録する"),
+        self.form_submit_button = ft.ElevatedButton(
+            "登録する",
             icon=ft.Icons.SAVE_OUTLINED,
             on_click=self.submit_order_form,
         )
@@ -133,6 +133,7 @@ class CustomerOrdersPageController:
         )
         self.hero_banner = self._build_hero_banner()
         self.active_status_container = ft.Container(
+            padding=ft.padding.only(top=4),
             content=self._build_status_body(ACTIVE_TAB_STATUSES[self.state.selected_tab_index]),
         )
         self.tab_controls = self._build_tabs()
@@ -307,6 +308,44 @@ class CustomerOrdersPageController:
         return ft.Column(
             [self._build_order_card(order) for order in orders],
             spacing=12,
+            tight=True,
+        )
+
+    def _metadata_row(
+        self,
+        icon: str,
+        label: str,
+        value: str,
+        *,
+        selectable: bool = False,
+    ) -> ft.Control:
+        return ft.Row(
+            [
+                ft.Container(
+                    width=28,
+                    height=28,
+                    border_radius=10,
+                    bgcolor=ft.Colors.BLUE_GREY_50,
+                    alignment=ft.Alignment(0, 0),
+                    content=ft.Icon(icon, size=15, color=ft.Colors.BLUE_GREY_700),
+                ),
+                ft.Column(
+                    [
+                        ft.Text(label, size=11, color=ft.Colors.ON_SURFACE_VARIANT),
+                        ft.Text(
+                            value or "-",
+                            size=13,
+                            weight=ft.FontWeight.W_600,
+                            selectable=selectable,
+                        ),
+                    ],
+                    spacing=2,
+                    tight=True,
+                    expand=True,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _build_order_card(self, order: dict) -> ft.Control:
@@ -315,8 +354,8 @@ class CustomerOrdersPageController:
 
         if next_status and action_label:
             actions.append(
-                ft.Button(
-                    content=ft.Text(action_label),
+                ft.ElevatedButton(
+                    action_label,
                     icon=ft.Icons.ARROW_FORWARD,
                     on_click=lambda e, oid=order["id"], ns=next_status: self.advance_order_status(
                         oid, ns
@@ -326,7 +365,7 @@ class CustomerOrdersPageController:
 
         actions.append(
             ft.OutlinedButton(
-                content=ft.Text("編集"),
+                "編集",
                 icon=ft.Icons.EDIT_OUTLINED,
                 on_click=lambda e, current=order: self.open_edit_dialog(current),
             )
@@ -335,14 +374,14 @@ class CustomerOrdersPageController:
         if order["status"] not in TERMINAL_STATUSES:
             actions.append(
                 ft.TextButton(
-                    content=ft.Text("キャンセルにする"),
+                    "キャンセルにする",
                     on_click=lambda e, current=order: self.confirm_cancel_order(current),
                 )
             )
 
         actions.append(
             ft.TextButton(
-                content=ft.Text("削除"),
+                "削除",
                 on_click=lambda e, current=order: self.confirm_delete_order(current),
             )
         )
@@ -421,21 +460,46 @@ class CustomerOrdersPageController:
                         run_spacing=8,
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
-                    ft.ResponsiveRow(
+                    ft.Container(
+                        padding=14,
+                        border_radius=14,
+                        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+                        content=ft.Column(
+                            [
+                                self._metadata_row(
+                                    ft.Icons.PHONE_OUTLINED,
+                                    "電話番号",
+                                    order["phone_number"],
+                                    selectable=True,
+                                ),
+                                self._metadata_row(
+                                    ft.Icons.BADGE_OUTLINED,
+                                    "受付スタッフ",
+                                    order["staff_name"] or "-",
+                                ),
+                                self._metadata_row(
+                                    ft.Icons.CALENDAR_MONTH_OUTLINED,
+                                    "登録日時",
+                                    order["created_label"],
+                                ),
+                                self._metadata_row(
+                                    ft.Icons.UPDATE_OUTLINED,
+                                    "更新日時",
+                                    order["updated_label"],
+                                ),
+                            ],
+                            spacing=10,
+                            tight=True,
+                        ),
+                    ),
+                    ft.Row(
                         [
-                            self._info_item(
-                                "電話番号",
-                                order["phone_number"],
-                                selectable=True,
-                            ),
-                            self._info_item("受付スタッフ", order["staff_name"] or "-"),
-                            self._info_item("登録日時", order["created_label"]),
-                            self._info_item("更新日時", order["updated_label"]),
+                            *detail_controls,
                         ],
+                        wrap=True,
                         spacing=10,
                         run_spacing=10,
                     ),
-                    *detail_controls,
                     ft.Row(
                         actions,
                         wrap=True,
@@ -498,18 +562,11 @@ class CustomerOrdersPageController:
                 tooltip="新規客注を登録",
                 on_click=self.open_create_dialog,
             ),
-            navigation_bar=get_navigation_bar(page=self.page, selected_index=3),
+            navigation_bar=get_navigation_bar(page=self.page, selected_index=4),
         )
 
     async def logout(self, e):
-        token = getattr(self.page, "access_token", None)
-        if token:
-            try:
-                supabase.sign_out(token)
-            except Exception:
-                pass
-        setattr(self.page, "is_authenticated", False)
-        setattr(self.page, "access_token", None)
+        await logout_page(self.page)
         await self.page.push_route("/login")
 
     def set_status(self, message: str, color: str = ft.Colors.ON_SURFACE_VARIANT):
@@ -582,7 +639,7 @@ class CustomerOrdersPageController:
     def open_create_dialog(self, e=None):
         self.reset_form()
         self.form_dialog.title = ft.Text("新規客注を登録")
-        self.form_submit_button.content = ft.Text("登録する")
+        self.form_submit_button.content = "登録する"
         self.page.show_dialog(self.form_dialog)
         self.page.update()
 
@@ -597,7 +654,7 @@ class CustomerOrdersPageController:
         self.notes_input.value = order["notes"]
         self.status_dropdown.value = order["status"]
         self.form_dialog.title = ft.Text("客注を編集")
-        self.form_submit_button.content = ft.Text("更新する")
+        self.form_submit_button.content = "更新する"
         self.page.show_dialog(self.form_dialog)
         self.page.update()
 

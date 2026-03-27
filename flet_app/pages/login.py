@@ -1,4 +1,5 @@
 import flet as ft
+from flet_app.core.auth_session import apply_auth_session, persist_auth_session
 from flet_app.core.supabase_client import supabase
 
 def LoginView(page: ft.Page):
@@ -24,10 +25,13 @@ def LoginView(page: ft.Page):
             # Attempt to login via Supabase
             res = supabase.sign_in_with_password(email, password)
             if "access_token" in res:
-                # Login successful, save token or state
-                setattr(page, "is_authenticated", True)
-                setattr(page, "user_email", res.get("user", {}).get("email", email))
-                setattr(page, "access_token", res["access_token"])
+                auth_payload = {
+                    "access_token": res.get("access_token"),
+                    "refresh_token": res.get("refresh_token"),
+                    "user_email": res.get("user", {}).get("email", email),
+                }
+                apply_auth_session(page, auth_payload)
+                await persist_auth_session(auth_payload)
                 await page.push_route("/dashboard")
         except Exception as ex:
             # Handle login error

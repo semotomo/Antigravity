@@ -7,10 +7,12 @@ def get_navigation_bar(page: ft.Page, selected_index: int = 0, before_navigate=N
         if e.control.selected_index == 0:
             target_route = "/dashboard"
         elif e.control.selected_index == 1:
-            target_route = "/inventory"
+            target_route = "/sales"
         elif e.control.selected_index == 2:
-            target_route = "/shift"
+            target_route = "/inventory"
         elif e.control.selected_index == 3:
+            target_route = "/shift"
+        elif e.control.selected_index == 4:
             target_route = "/customer-orders"
 
         if not target_route:
@@ -35,6 +37,11 @@ def get_navigation_bar(page: ft.Page, selected_index: int = 0, before_navigate=N
                 icon=ft.Icons.DASHBOARD_OUTLINED,
                 selected_icon=ft.Icons.DASHBOARD,
                 label="ダッシュボード",
+            ),
+            ft.NavigationBarDestination(
+                icon=ft.Icons.PAID_OUTLINED,
+                selected_icon=ft.Icons.PAID,
+                label="売上管理",
             ),
             ft.NavigationBarDestination(
                 icon=ft.Icons.INVENTORY_2_OUTLINED,

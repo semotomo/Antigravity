@@ -4,7 +4,7 @@ from pathlib import Path
 import asyncio
 import copy
 from flet_app.components.navigation import get_navigation_bar
-from flet_app.core.supabase_client import supabase
+from flet_app.core.auth_session import logout_page
 from flet_app.core.shift.data_io import (
     list_stores, get_store_filepath,
     load_settings_from_file, save_settings_to_file, get_default_data, generate_custom_csv,
@@ -621,14 +621,7 @@ def ShiftView(page: ft.Page):
     async def logout_clicked(e):
         if not await confirm_navigation_while_generating("/login"):
             return
-        token = getattr(page, "access_token", None)
-        if token:
-            try:
-                supabase.sign_out(token)
-            except Exception:
-                pass
-        setattr(page, "is_authenticated", False)
-        setattr(page, "access_token", None)
+        await logout_page(page)
         if hasattr(page, "push_route"):
             await page.push_route("/login")
         else:
@@ -1137,5 +1130,5 @@ def ShiftView(page: ft.Page):
         route="/shift",
         appbar=appbar,
         controls=[content],
-        navigation_bar=get_navigation_bar(page, 2, before_navigate=confirm_navigation_while_generating),
+        navigation_bar=get_navigation_bar(page, 3, before_navigate=confirm_navigation_while_generating),
     )

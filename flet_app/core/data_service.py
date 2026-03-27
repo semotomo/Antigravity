@@ -15,7 +15,7 @@ def get_product_sales_data(token: str, limit: int = 1000) -> List[Dict]:
         return cached[1]
 
     params = {
-        "select": "store_name,product_name,total_amount,transaction_date",
+        "select": "store_name,product_name,quantity,total_amount,transaction_date",
         "order": "transaction_date.desc,total_amount.desc",
         "limit": str(limit)
     }

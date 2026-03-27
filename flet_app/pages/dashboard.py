@@ -6,12 +6,12 @@ import flet as ft
 import pandas as pd
 
 from flet_app.components.navigation import get_navigation_bar
+from flet_app.core.auth_session import logout_page
 from flet_app.core.customer_orders import db as customer_orders_db
 from flet_app.core.customer_orders.view_model import ACTIVE_TAB_STATUSES, build_status_counts
 from flet_app.core.data_service import get_product_sales_data
 from flet_app.core.inventory import db as inventory_db
 from flet_app.core.shift.data_io import load_shift_history_list
-from flet_app.core.supabase_client import supabase
 
 
 def _format_currency(value: float | int) -> str:
@@ -20,14 +20,7 @@ def _format_currency(value: float | int) -> str:
 
 def DashboardView(page: ft.Page):
     async def logout(e):
-        token = getattr(page, "access_token", None)
-        if token:
-            try:
-                supabase.sign_out(token)
-            except Exception:
-                pass
-        setattr(page, "is_authenticated", False)
-        setattr(page, "access_token", None)
+        await logout_page(page)
         await page.push_route("/login")
 
     async def open_route(route: str):
@@ -551,6 +544,17 @@ def DashboardView(page: ft.Page):
         quick_actions = ft.ResponsiveRow(
             [
                 module_card(
+                    "売上管理",
+                    "期間別の販売数、ABC分析、カテゴリ構成、店舗別売上を詳しく確認できます。",
+                    [
+                        f"最終売上日: {latest_sales_label}",
+                        f"売上明細: {len(raw_data)}件",
+                    ],
+                    "/sales",
+                    ft.Icons.PAID,
+                    ft.Colors.BLUE_700,
+                ),
+                module_card(
                     "商品管理",
                     "店舗間移動、商品スキャン、商品マスタ更新をまとめます。",
                     [
@@ -559,7 +563,7 @@ def DashboardView(page: ft.Page):
                     ],
                     "/inventory",
                     ft.Icons.INVENTORY_2,
-                    ft.Colors.BLUE_700,
+                    ft.Colors.DEEP_PURPLE_700,
                 ),
                 module_card(
                     "シフト管理",

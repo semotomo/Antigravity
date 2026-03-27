@@ -1,8 +1,10 @@
 import os
 
 import flet as ft
+from flet_app.core.auth_session import restore_auth_session
 from flet_app.pages.login import LoginView
 from flet_app.pages.dashboard import DashboardView
+from flet_app.pages.sales import SalesView
 from flet_app.pages.shift import ShiftView
 from flet_app.pages.inventory import InventoryView
 from flet_app.pages.customer_orders import CustomerOrdersView
@@ -15,12 +17,17 @@ async def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 0
     page.spacing = 0
+    await restore_auth_session(page)
 
     async def route_change(e: ft.RouteChangeEvent):
         page.views.clear()
 
         # 認証済みかどうかを確認する
         is_auth = getattr(page, "is_authenticated", False)
+
+        if is_auth and page.route == "/login":
+            await page.push_route("/dashboard")
+            return
 
         # 未認証で保護画面へ来た場合はログインへ戻す
         if not is_auth and page.route != "/login":
@@ -32,6 +39,8 @@ async def main(page: ft.Page):
             page.views.append(LoginView(page))
         elif page.route == "/dashboard":
             page.views.append(DashboardView(page))
+        elif page.route == "/sales":
+            page.views.append(SalesView(page))
         elif page.route == "/shift":
             page.views.append(ShiftView(page))
         elif page.route == "/inventory":
@@ -57,7 +66,7 @@ async def main(page: ft.Page):
 
     # 初回表示ルートを決める
     if getattr(page, "route", "") == "/":
-        await page.push_route("/login")
+        await page.push_route("/dashboard" if getattr(page, "is_authenticated", False) else "/login")
     else:
         await page.push_route(getattr(page, "route", "/login"))
 

@@ -48,6 +48,21 @@ class SupabaseAuthClient:
             error_msg = error_data.get("error_description") or error_data.get("msg") or str(error_data)
             raise Exception(error_msg)
         return resp.json()
+
+    def refresh_session(self, refresh_token: str) -> dict:
+        """
+        Refresh an authenticated session with Supabase.
+        """
+        resp = self._client.post(
+            f"{self.url}/auth/v1/token?grant_type=refresh_token",
+            headers={"apikey": self.key, "Content-Type": "application/json"},
+            json={"refresh_token": refresh_token},
+        )
+        if resp.status_code >= 400:
+            error_data = resp.json()
+            error_msg = error_data.get("error_description") or error_data.get("msg") or str(error_data)
+            raise Exception(error_msg)
+        return resp.json()
         
     def sign_out(self, token: str) -> bool:
         """
