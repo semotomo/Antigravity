@@ -89,7 +89,7 @@ def SalesView(page: ft.Page):
         value=ALL_STORES,
         options=[ft.dropdown.Option(ALL_STORES)],
         width=220,
-        on_change=lambda e: apply_filters(),
+        on_select=lambda e: apply_filters(),
     )
     period_summary_text = ft.Text(size=13, weight=ft.FontWeight.W_600)
     filter_status_text = ft.Text(color=ft.Colors.BLUE_GREY_600, size=12)
