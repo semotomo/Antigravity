@@ -82,7 +82,7 @@ class CustomerOrdersPageController:
         self.form_error_text = ft.Text("", color=ft.Colors.ERROR, visible=False)
         self.form_progress_ring = ft.ProgressRing(width=18, height=18, visible=False)
         self.form_submit_button = ft.Button(
-            content="登録する",
+            content=ft.Text("登録する"),
             icon=ft.Icons.SAVE_OUTLINED,
             on_click=self.submit_order_form,
         )
@@ -207,7 +207,7 @@ class CustomerOrdersPageController:
         selector_buttons: list[ft.Control] = []
         for index, status in enumerate(ACTIVE_TAB_STATUSES):
             button = ft.OutlinedButton(
-                content=self._tab_label(status),
+                content=ft.Text(self._tab_label(status)),
                 on_click=lambda e, idx=index: self.set_selected_tab(idx),
             )
             self.status_buttons[status] = button
@@ -307,7 +307,6 @@ class CustomerOrdersPageController:
         return ft.Column(
             [self._build_order_card(order) for order in orders],
             spacing=12,
-            tight=True,
         )
 
     def _build_order_card(self, order: dict) -> ft.Control:
@@ -317,7 +316,7 @@ class CustomerOrdersPageController:
         if next_status and action_label:
             actions.append(
                 ft.Button(
-                    content=action_label,
+                    content=ft.Text(action_label),
                     icon=ft.Icons.ARROW_FORWARD,
                     on_click=lambda e, oid=order["id"], ns=next_status: self.advance_order_status(
                         oid, ns
@@ -327,7 +326,7 @@ class CustomerOrdersPageController:
 
         actions.append(
             ft.OutlinedButton(
-                content="編集",
+                content=ft.Text("編集"),
                 icon=ft.Icons.EDIT_OUTLINED,
                 on_click=lambda e, current=order: self.open_edit_dialog(current),
             )
@@ -336,14 +335,14 @@ class CustomerOrdersPageController:
         if order["status"] not in TERMINAL_STATUSES:
             actions.append(
                 ft.TextButton(
-                    "キャンセルにする",
+                    content=ft.Text("キャンセルにする"),
                     on_click=lambda e, current=order: self.confirm_cancel_order(current),
                 )
             )
 
         actions.append(
             ft.TextButton(
-                "削除",
+                content=ft.Text("削除"),
                 on_click=lambda e, current=order: self.confirm_delete_order(current),
             )
         )
@@ -396,12 +395,6 @@ class CustomerOrdersPageController:
             border_radius=18,
             bgcolor=ft.Colors.WHITE,
             border=ft.border.all(1, ft.Colors.BLUE_GREY_100),
-            shadow=ft.BoxShadow(
-                spread_radius=0,
-                blur_radius=12,
-                color=ft.Colors.with_opacity(0.08, ft.Colors.BLACK),
-                offset=ft.Offset(0, 3),
-            ),
             content=ft.Column(
                 [
                     ft.Row(
@@ -589,7 +582,7 @@ class CustomerOrdersPageController:
     def open_create_dialog(self, e=None):
         self.reset_form()
         self.form_dialog.title = ft.Text("新規客注を登録")
-        self.form_submit_button.content = "登録する"
+        self.form_submit_button.content = ft.Text("登録する")
         self.page.show_dialog(self.form_dialog)
         self.page.update()
 
@@ -604,7 +597,7 @@ class CustomerOrdersPageController:
         self.notes_input.value = order["notes"]
         self.status_dropdown.value = order["status"]
         self.form_dialog.title = ft.Text("客注を編集")
-        self.form_submit_button.content = "更新する"
+        self.form_submit_button.content = ft.Text("更新する")
         self.page.show_dialog(self.form_dialog)
         self.page.update()
 
@@ -694,7 +687,7 @@ class CustomerOrdersPageController:
         for index, status in enumerate(ACTIVE_TAB_STATUSES):
             button = self.status_buttons.get(status)
             if button is not None:
-                button.content = self._tab_label(status)
+                button.content = ft.Text(self._tab_label(status))
                 button.style = self._selected_tab_style(index == self.state.selected_tab_index)
 
         active_status = ACTIVE_TAB_STATUSES[self.state.selected_tab_index]
