@@ -2,6 +2,8 @@
 
 本計画は、既存の Streamlit 業務アプリを Flet ベースの単一アプリへ集約しつつ、将来的に「顧客」「予約」「売上」「在庫」「見積書」「請求書」までを一体化した社内ダッシュボードへ発展させるための実装方針を整理したものです。
 
+完成イメージの要約は [completion_definition.md](/Users/kirik/Desktop/Antigravity/docs/app_migration/completion_definition.md) を参照。
+
 ## 現状整理
 
 2026-03-27 時点で、`flet_app/` 側には以下のモジュールがすでに存在します。
