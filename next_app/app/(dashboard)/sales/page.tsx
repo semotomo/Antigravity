@@ -169,7 +169,7 @@ export default async function SalesPage({
         <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,max-content,minmax(0,1fr),max-content] lg:items-end">
         <form className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="store" value={storeName} />
           <input type="hidden" name="category" value={category} />
@@ -205,10 +205,10 @@ export default async function SalesPage({
 
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">表示店舗</span>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             <Link
               href={`/sales?${buildSearchParams(currentSearchParams, { store: undefined })}`}
-              className={`rounded-full border px-3 py-1 text-xs ${
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
                 !storeName
                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                   : 'border-gray-300 bg-white text-gray-600'
@@ -220,7 +220,7 @@ export default async function SalesPage({
               <Link
                 key={store}
                 href={`/sales?${buildSearchParams(currentSearchParams, { store })}`}
-                className={`rounded-full border px-3 py-1 text-xs ${
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
                   storeName === store
                     ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                     : 'border-gray-300 bg-white text-gray-600'
@@ -232,12 +232,12 @@ export default async function SalesPage({
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1 lg:min-w-[24rem]">
           <span className="text-xs font-medium text-gray-500">カテゴリ</span>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-1">
             <Link
               href={`/sales?${buildSearchParams(currentSearchParams, { category: undefined })}`}
-              className={`rounded-full border px-3 py-1 text-xs ${
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
                 !category
                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                   : 'border-gray-300 bg-white text-gray-600'
@@ -249,7 +249,7 @@ export default async function SalesPage({
               <Link
                 key={categoryOption}
                 href={`/sales?${buildSearchParams(currentSearchParams, { category: categoryOption })}`}
-                className={`rounded-full border px-3 py-1 text-xs ${
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
                   category === categoryOption
                     ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                     : 'border-gray-300 bg-white text-gray-600'
@@ -261,7 +261,7 @@ export default async function SalesPage({
           </div>
         </div>
 
-        <div className="ml-auto flex flex-col gap-1">
+        <div className="flex flex-col gap-1 lg:self-end">
           <Link
             href={`/sales?${buildSearchParams(currentSearchParams, {
               unmatched: unmatchedOnly ? undefined : 'true',
