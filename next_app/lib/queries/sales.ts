@@ -9,7 +9,9 @@ export type SalesFilter = {
   dateTo?: string
   storeName?: string
   category?: string
+  excludeCategory?: string
   unmatchedOnly?: boolean
+  sortOrder?: 'asc' | 'desc'
 }
 
 export async function fetchSales(filter: SalesFilter): Promise<SaleRow[]> {
@@ -17,13 +19,14 @@ export async function fetchSales(filter: SalesFilter): Promise<SaleRow[]> {
   let query = supabase
     .from('sales_enriched_v')
     .select('*')
-    .order('sale_date', { ascending: false })
+    .order('sale_date', { ascending: filter.sortOrder === 'asc' })
     .order('sales_amount', { ascending: false })
 
   if (filter.dateFrom) query = query.gte('sale_date', filter.dateFrom)
   if (filter.dateTo) query = query.lte('sale_date', filter.dateTo)
   if (filter.storeName) query = query.eq('store_name', filter.storeName)
   if (filter.category) query = query.eq('category', filter.category)
+  if (filter.excludeCategory) query = query.neq('category', filter.excludeCategory)
   if (filter.unmatchedOnly) query = query.eq('unmatched_master', true)
 
   const { data, error } = await query
