@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
+import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
+import { DecodeHintType } from '@zxing/library'
 import { Camera, ScanLine, X } from 'lucide-react'
 
 type JanCodeScannerFieldProps = {
@@ -21,16 +23,18 @@ type BarcodeDetectorConstructor = new (options?: {
   formats?: string[]
 }) => BarcodeDetectorLike
 
+type BarcodeFormatLike = string | BarcodeFormat | null | undefined
+
 declare global {
   interface Window {
     BarcodeDetector?: BarcodeDetectorConstructor
   }
 }
 
-function normalizeDetectedJanCode(rawValue: string, format?: string) {
+function normalizeDetectedJanCode(rawValue: string, format?: BarcodeFormatLike) {
   const digits = rawValue.replace(/\D/g, '')
 
-  if (format === 'upc_a' && digits.length === 12) {
+  if ((format === 'upc_a' || format === BarcodeFormat.UPC_A) && digits.length === 12) {
     return `0${digits}`
   }
 
@@ -68,11 +72,28 @@ function getUnavailableScannerMessage() {
     return 'この端末ではカメラが利用できません。JAN コードを手入力してください。'
   }
 
-  if (!window.BarcodeDetector) {
-    return 'このブラウザではバーコード読取に未対応です。JAN コードを手入力してください。'
-  }
-
   return ''
+}
+
+function isRecoverableDecodeError(error: unknown) {
+  const name = error instanceof Error ? error.name : ''
+  return (
+    name === 'NotFoundException' ||
+    name === 'ChecksumException' ||
+    name === 'FormatException'
+  )
+}
+
+function createFallbackReader() {
+  const hints = new Map()
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.EAN_13,
+    BarcodeFormat.EAN_8,
+    BarcodeFormat.UPC_A,
+    BarcodeFormat.UPC_E,
+  ])
+
+  return new BrowserMultiFormatReader(hints)
 }
 
 export function JanCodeScannerField({
@@ -84,6 +105,7 @@ export function JanCodeScannerField({
   const detectorRef = useRef<BarcodeDetectorLike | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timeoutRef = useRef<number | null>(null)
+  const fallbackControlsRef = useRef<IScannerControls | null>(null)
   const [value, setValue] = useState(defaultValue)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scannerMessage, setScannerMessage] = useState('')
@@ -94,6 +116,13 @@ export function JanCodeScannerField({
       window.clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
+
+    if (fallbackControlsRef.current) {
+      fallbackControlsRef.current.stop()
+      fallbackControlsRef.current = null
+    }
+
+    detectorRef.current = null
 
     if (videoRef.current) {
       videoRef.current.pause()
@@ -123,10 +152,6 @@ export function JanCodeScannerField({
     }
 
     let cancelled = false
-    const Detector = window.BarcodeDetector
-    if (!Detector) {
-      return
-    }
 
     const scheduleScan = () => {
       timeoutRef.current = window.setTimeout(() => {
@@ -164,8 +189,13 @@ export function JanCodeScannerField({
       scheduleScan()
     }
 
-    const startScanner = async () => {
+    const startNativeScanner = async () => {
       try {
+        const Detector = window.BarcodeDetector
+        if (!Detector) {
+          return false
+        }
+
         detectorRef.current = new Detector({
           formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'],
         })
@@ -180,21 +210,86 @@ export function JanCodeScannerField({
 
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop())
-          return
+          return true
         }
 
         streamRef.current = stream
 
         if (!videoRef.current) {
           stopScanner()
-          return
+          return true
         }
 
         videoRef.current.srcObject = stream
         await videoRef.current.play()
         scheduleScan()
+        return true
       } catch (cameraError) {
         setScannerMessage(getCameraErrorMessage(cameraError))
+        return true
+      }
+    }
+
+    const startFallbackScanner = async () => {
+      try {
+        if (!videoRef.current) {
+          setScannerMessage('カメラの初期化に失敗しました。JAN コードを手入力してください。')
+          return
+        }
+
+        const reader = createFallbackReader()
+        setScannerMessage(
+          'Safari / iPad 向けの互換モードで読取中です。バーコードをカメラに映してください。'
+        )
+
+        const controls = await reader.decodeFromConstraints(
+          {
+            video: {
+              facingMode: { ideal: 'environment' },
+            },
+            audio: false,
+          },
+          videoRef.current,
+          (result, decodeError, activeControls) => {
+            if (cancelled) {
+              return
+            }
+
+            if (result) {
+              const detectedCode = normalizeDetectedJanCode(
+                result.getText(),
+                result.getBarcodeFormat()
+              )
+
+              if (detectedCode) {
+                activeControls.stop()
+                fallbackControlsRef.current = null
+                setValue(detectedCode)
+                setScannerMessage('JAN コードを読み取りました。')
+                setScannerOpen(false)
+                return
+              }
+            }
+
+            if (decodeError && !isRecoverableDecodeError(decodeError)) {
+              setScannerMessage(
+                'バーコードを読み取れませんでした。明るさや距離を調整して再度お試しください。'
+              )
+            }
+          }
+        )
+
+        fallbackControlsRef.current = controls
+      } catch (cameraError) {
+        setScannerMessage(getCameraErrorMessage(cameraError))
+      }
+    }
+
+    const startScanner = async () => {
+      const startedWithNative = await startNativeScanner()
+
+      if (!startedWithNative && !cancelled) {
+        await startFallbackScanner()
       }
     }
 
