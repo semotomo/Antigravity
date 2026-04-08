@@ -3,25 +3,30 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
+  ArrowRightLeft,
   BarChart3,
   CalendarDays,
   ClipboardList,
   ListOrdered,
   LogOut,
   Package,
+  type LucideIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+
+type NavMatch = 'exact' | 'products' | 'transfers'
 
 type NavItem = {
   name: string
   href: string
-  icon: typeof ClipboardList
-  match: 'exact' | 'startsWith'
+  icon: LucideIcon
+  match: NavMatch
 }
 
 const navItems: NavItem[] = [
   { name: '客注管理', href: '/orders', icon: ClipboardList, match: 'exact' },
-  { name: '商品管理', href: '/products', icon: Package, match: 'startsWith' },
+  { name: '商品管理', href: '/products', icon: Package, match: 'products' },
+  { name: '店舗間移動', href: '/products/transfers', icon: ArrowRightLeft, match: 'transfers' },
   { name: '売上一覧', href: '/sales', icon: ListOrdered, match: 'exact' },
   { name: '日次集計', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
   { name: '商品別集計', href: '/sales/products', icon: Package, match: 'exact' },
@@ -29,8 +34,16 @@ const navItems: NavItem[] = [
 ]
 
 function isActivePath(pathname: string, item: NavItem) {
-  if (item.match === 'startsWith') {
-    return pathname.startsWith('/products')
+  if (item.match === 'products') {
+    return (
+      pathname === '/products' ||
+      pathname.startsWith('/products/aliases') ||
+      pathname.startsWith('/products/unmatched')
+    )
+  }
+
+  if (item.match === 'transfers') {
+    return pathname.startsWith('/products/transfers')
   }
 
   return pathname === item.href
@@ -48,7 +61,7 @@ export default function SideNav() {
   }
 
   return (
-    <div className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col border-r border-gray-800 bg-gray-900">
+    <div className="hidden border-r border-gray-800 bg-gray-900 md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col">
       <div className="flex h-16 flex-shrink-0 items-center bg-gray-900 px-4">
         <span className="text-xl font-bold uppercase tracking-widest text-white">Kennel</span>
       </div>

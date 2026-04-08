@@ -6,9 +6,9 @@ import { usePathname } from 'next/navigation'
 import { MoreHorizontal } from 'lucide-react'
 
 const PRODUCT_NAV_ITEMS = [
+  { href: '/products/transfers', label: '店舗間移動' },
   { href: '/products', label: '商品マスタ' },
   { href: '/products/aliases', label: 'エイリアス管理' },
-  { href: '/products/transfers', label: '店舗間移動' },
 ] as const
 
 const PRODUCT_MENU_ITEMS = [{ href: '/products/unmatched', label: '未一致解消' }] as const
