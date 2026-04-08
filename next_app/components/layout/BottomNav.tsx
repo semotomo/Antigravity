@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  AlertTriangle,
+  BarChart3,
   CalendarDays,
   ClipboardList,
   ListOrdered,
@@ -19,10 +19,11 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { name: '客注', href: '/orders', icon: ClipboardList, match: 'exact' },
-  { name: '未一致', href: '/products/unmatched', icon: AlertTriangle, match: 'startsWith' },
+  { name: '商品', href: '/products', icon: Package, match: 'startsWith' },
   { name: '一覧', href: '/sales', icon: ListOrdered, match: 'exact' },
   { name: '日次', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
   { name: '商品別', href: '/sales/products', icon: Package, match: 'exact' },
+  { name: 'ABC', href: '/sales/abc', icon: BarChart3, match: 'exact' },
 ]
 
 function isActivePath(pathname: string, item: NavItem) {

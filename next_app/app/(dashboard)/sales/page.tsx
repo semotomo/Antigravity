@@ -1,18 +1,19 @@
 import Link from 'next/link'
+import { ArrowUpDown } from 'lucide-react'
+import { SalesImportButton } from '@/components/sales/SalesImportButton'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import {
-  fetchSales,
-  fetchSalesFilterOptions,
-  type SaleRow,
-} from '@/lib/queries/sales'
+import { fetchSales, fetchSalesFilterOptions, type SaleRow } from '@/lib/queries/sales'
 
 type SalesSearchParams = { [key: string]: string | string[] | undefined }
 
 function buildSearchParams(
   params: SalesSearchParams,
   updates: Partial<
-    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'unmatched', string | undefined>
+    Record<
+      'dateFrom' | 'dateTo' | 'store' | 'category' | 'unmatched' | 'excludeCategory' | 'sort',
+      string | undefined
+    >
   >
 ) {
   const nextParams = new URLSearchParams()
@@ -92,14 +93,18 @@ export default async function SalesPage({
 
   const storeName = getStringParam(resolvedParams.store)
   const category = getStringParam(resolvedParams.category)
+  const excludeCategory = getStringParam(resolvedParams.excludeCategory)
   const unmatchedOnly = resolvedParams.unmatched === 'true'
+  const sortOrder = resolvedParams.sort === 'asc' ? 'asc' : 'desc'
 
   const currentSearchParams: SalesSearchParams = {
     ...(hasDateFrom || dateFrom ? { dateFrom } : {}),
     ...(hasDateTo || dateTo ? { dateTo } : {}),
     ...(storeName ? { store: storeName } : {}),
     ...(category ? { category } : {}),
+    ...(excludeCategory ? { excludeCategory } : {}),
     ...(unmatchedOnly ? { unmatched: 'true' } : {}),
+    ...(sortOrder !== 'desc' ? { sort: sortOrder } : {}),
   }
 
   const [salesData, { stores, categories }] = await Promise.all([
@@ -108,12 +113,12 @@ export default async function SalesPage({
       dateTo: dateTo || undefined,
       storeName: storeName || undefined,
       category: category || undefined,
+      excludeCategory: excludeCategory || undefined,
       unmatchedOnly,
+      sortOrder,
     }),
     fetchSalesFilterOptions(),
   ])
-
-  const getRowClass = (item: SaleRow) => (item.unmatched_master ? 'bg-red-50 hover:bg-red-100' : '')
 
   const columns: DataTableColumn<SaleRow>[] = [
     { key: 'sale_date', header: '日付' },
@@ -161,18 +166,23 @@ export default async function SalesPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">売上一覧</h1>
           <p className="mt-1 text-sm text-gray-500">POSデータから集計された日々の販売記録です。</p>
         </div>
-        <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
+        <div className="flex flex-col items-start gap-3 lg:items-end">
+          <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
+          <SalesImportButton />
+        </div>
       </div>
 
-      <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,max-content,minmax(0,1fr),max-content] lg:items-end">
+      <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[minmax(0,1.2fr),minmax(0,0.8fr),max-content] lg:items-end">
         <form className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="store" value={storeName} />
           <input type="hidden" name="category" value={category} />
+          <input type="hidden" name="excludeCategory" value={excludeCategory} />
+          <input type="hidden" name="sort" value={sortOrder} />
           {unmatchedOnly ? <input type="hidden" name="unmatched" value="true" /> : null}
 
           <label className="flex flex-col gap-1">
@@ -203,6 +213,36 @@ export default async function SalesPage({
           </button>
         </form>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/sales?${buildSearchParams(currentSearchParams, {
+              unmatched: unmatchedOnly ? undefined : 'true',
+            })}`}
+            className={`rounded-full border px-4 py-2 text-sm font-medium ${
+              unmatchedOnly
+                ? 'border-gray-900 bg-gray-900 text-white'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            要対応（未紐付け）のみ表示
+          </Link>
+          <Link
+            href={`/sales?${buildSearchParams(currentSearchParams, {
+              sort: sortOrder === 'desc' ? 'asc' : undefined,
+            })}`}
+            className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            {sortOrder === 'desc' ? '日付: 新しい順' : '日付: 古い順'}
+          </Link>
+        </div>
+
+        <div className="text-sm text-gray-500 lg:text-right">
+          サービス除外や未紐付け確認、日付並び替えをここから切り替えられます。
+        </div>
+      </div>
+
+      <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,minmax(0,1fr)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">表示店舗</span>
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -232,23 +272,42 @@ export default async function SalesPage({
           </div>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-1 lg:min-w-[24rem]">
+        <div className="flex min-w-0 flex-col gap-1">
           <span className="text-xs font-medium text-gray-500">カテゴリ</span>
           <div className="flex gap-2 overflow-x-auto pb-1">
             <Link
-              href={`/sales?${buildSearchParams(currentSearchParams, { category: undefined })}`}
+              href={`/sales?${buildSearchParams(currentSearchParams, {
+                category: undefined,
+                excludeCategory: undefined,
+              })}`}
               className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
-                !category
+                !category && !excludeCategory
                   ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
                   : 'border-gray-300 bg-white text-gray-600'
               }`}
             >
               すべて
             </Link>
+            <Link
+              href={`/sales?${buildSearchParams(currentSearchParams, {
+                category: undefined,
+                excludeCategory: 'サービス',
+              })}`}
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                !category && excludeCategory === 'サービス'
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 bg-white text-gray-600'
+              }`}
+            >
+              サービス以外
+            </Link>
             {categories.map((categoryOption) => (
               <Link
                 key={categoryOption}
-                href={`/sales?${buildSearchParams(currentSearchParams, { category: categoryOption })}`}
+                href={`/sales?${buildSearchParams(currentSearchParams, {
+                  category: categoryOption,
+                  excludeCategory: undefined,
+                })}`}
                 className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
                   category === categoryOption
                     ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
@@ -260,30 +319,14 @@ export default async function SalesPage({
             ))}
           </div>
         </div>
-
-        <div className="flex flex-col gap-1 lg:self-end">
-          <Link
-            href={`/sales?${buildSearchParams(currentSearchParams, {
-              unmatched: unmatchedOnly ? undefined : 'true',
-            })}`}
-            className={`flex items-center gap-2 rounded border px-3 py-1.5 text-sm font-medium transition-colors ${
-              unmatchedOnly
-                ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <span>要対応（未紐付け）のみ表示</span>
-            {unmatchedOnly ? <span>✕</span> : null}
-          </Link>
-        </div>
       </div>
 
       <DataTable
         data={salesData}
         columns={columns}
         keyExtractor={(item) => String(item.sales_row_id)}
-        rowClassName={getRowClass}
-        emptyMessage="条件に一致する売上データが見つかりませんでした。"
+        emptyMessage="条件に一致する売上が見つかりませんでした。"
+        rowClassName={(item) => (item.unmatched_master ? 'bg-red-50 hover:bg-red-100' : '')}
       />
     </div>
   )

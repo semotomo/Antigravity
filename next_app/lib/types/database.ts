@@ -162,6 +162,51 @@ export interface Database {
         }
         Relationships: []
       }
+      transfers: {
+        Row: {
+          id: number
+          transfer_date: string
+          from_store_id: number
+          to_store_id: number
+          jan_code: string
+          product_name: string
+          quantity: number
+          cost_price: number
+          total_cost: number
+          selling_price: number
+          memo: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: number
+          transfer_date?: string
+          from_store_id: number
+          to_store_id: number
+          jan_code: string
+          product_name: string
+          quantity: number
+          cost_price: number
+          total_cost?: number
+          selling_price: number
+          memo?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: number
+          transfer_date?: string
+          from_store_id?: number
+          to_store_id?: number
+          jan_code?: string
+          product_name?: string
+          quantity?: number
+          cost_price?: number
+          total_cost?: number
+          selling_price?: number
+          memo?: string | null
+          created_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       sales_daily_summary_v: {
