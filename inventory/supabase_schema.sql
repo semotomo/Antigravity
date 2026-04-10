@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS transfers (
     cost_price INTEGER DEFAULT 0,
     total_cost INTEGER DEFAULT 0,
     selling_price INTEGER DEFAULT 0,
+    entry_type TEXT NOT NULL DEFAULT 'transfer' CHECK (entry_type IN ('transfer', 'usage')),
+    usage_category TEXT CHECK (usage_category IN ('expired', 'internal_use', 'gift')),
     memo TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -56,6 +58,8 @@ CREATE TABLE IF NOT EXISTS transfers (
 CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers (transfer_date);
 CREATE INDEX IF NOT EXISTS idx_transfers_from_store ON transfers (from_store_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_to_store ON transfers (to_store_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_entry_type ON transfers (entry_type);
+CREATE INDEX IF NOT EXISTS idx_transfers_usage_category ON transfers (usage_category);
 
 -- 4. RLS（Row Level Security）ポリシー — 全アクセス許可（社内ツール用）
 ALTER TABLE stores ENABLE ROW LEVEL SECURITY;

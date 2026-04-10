@@ -6,10 +6,13 @@ import { deleteTransferAction } from '@/app/actions/transfers'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { TransferFormModal } from '@/components/transfers/TransferFormModal'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatYen } from '@/lib/products'
 import {
+  formatTransferEntryTypeLabel,
   formatTransferDateKey,
   formatTransferDateTime,
+  formatTransferUsageCategoryLabel,
   type TransferListRow,
   type TransferProductOption,
   type TransferStoreOption,
@@ -93,12 +96,26 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
       render: (transfer) => formatTransferDateTime(transfer.transfer_date),
     },
     {
+      key: 'entry_type',
+      header: '区分',
+      align: 'center',
+      render: (transfer) => (
+        <StatusBadge variant={transfer.entry_type === 'usage' ? 'warning' : 'info'}>
+          {formatTransferEntryTypeLabel(transfer.entry_type)}
+        </StatusBadge>
+      ),
+    },
+    {
       key: 'stores',
       header: '店舗',
       render: (transfer) => (
         <div className="min-w-[180px]">
           <p className="font-semibold text-gray-900">{transfer.from_store?.name ?? '-'}</p>
-          <p className="mt-1 text-xs text-gray-500">→ {transfer.to_store?.name ?? '-'}</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {transfer.entry_type === 'usage'
+              ? '物品使用'
+              : `→ ${transfer.to_store?.name ?? '-'}`}
+          </p>
         </div>
       ),
     },
@@ -111,6 +128,11 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
           <p className="mt-1 text-xs text-gray-500">JAN: {transfer.jan_code}</p>
         </div>
       ),
+    },
+    {
+      key: 'usage_category',
+      header: '物品使用区分',
+      render: (transfer) => formatTransferUsageCategoryLabel(transfer.usage_category),
     },
     {
       key: 'quantity',
@@ -171,9 +193,10 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
             </p>
             <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h1 className="text-3xl font-bold tracking-tight">店舗間移動</h1>
+                <h1 className="text-3xl font-bold tracking-tight">店舗間移動・物品使用</h1>
                 <p className="mt-2 max-w-2xl text-sm text-emerald-50/90">
-                  他店舗への商品移動を登録し、履歴をまとめて確認できます。JAN コードの読取にも対応しています。
+                  他店舗への商品移動と物品使用を登録し、履歴をまとめて確認できます。JAN
+                  コードの読取にも対応しています。
                 </p>
               </div>
               <button
@@ -182,7 +205,7 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
               >
                 <PlusCircle className="h-4 w-4" />
-                新規移動を登録
+                新規登録
               </button>
             </div>
           </div>
@@ -190,14 +213,14 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
           <div className="grid gap-4 px-6 py-5 md:grid-cols-3">
             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-                今日の移動件数
+                今日の登録件数
               </p>
               <p className="mt-3 text-3xl font-bold text-gray-900">{summary.todayCount}</p>
-              <p className="mt-1 text-sm text-gray-500">本日登録された移動</p>
+              <p className="mt-1 text-sm text-gray-500">本日登録された履歴</p>
             </div>
             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-                今月の移動件数
+                今月の登録件数
               </p>
               <p className="mt-3 text-3xl font-bold text-gray-900">{summary.monthCount}</p>
               <p className="mt-1 text-sm text-gray-500">表示中データから集計</p>
@@ -293,7 +316,7 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
             <div className="flex items-start gap-3">
               <ArrowRightLeft className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                登録した移動はすぐに確定扱いになります。誤登録時は履歴の削除から取り消してください。
+                登録した店舗間移動と物品使用はすぐに確定扱いになります。誤登録時は履歴の削除から取り消してください。
               </p>
             </div>
           </div>

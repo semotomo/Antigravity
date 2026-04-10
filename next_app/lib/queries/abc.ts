@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase/server'
 import type { ProductSummaryRow } from '@/lib/queries/summary'
 
 export type AbcRank = 'A' | 'B' | 'C'
-export type AbcAnalysisView = 'product' | 'category'
 
 export type AbcAnalysisRow = {
   key: string
@@ -22,27 +21,8 @@ function normalizeCategory(category: string | null | undefined) {
   return text.length > 0 ? text : '未分類'
 }
 
-function resolveDimension(row: ProductSummaryRow, view: AbcAnalysisView) {
-  const category = normalizeCategory(row.category)
-
-  if (view === 'category') {
-    return {
-      key: `category:${category}`,
-      label: category,
-      jan_code: '',
-      category,
-    }
-  }
-
-  const productName = row.product_name?.trim() || '商品名未設定'
-  const janCode = row.jan_code?.trim() ?? ''
-
-  return {
-    key: [row.product_id ?? 'unknown', janCode, productName].join(':'),
-    label: productName,
-    jan_code: janCode,
-    category,
-  }
+function buildGroupKey(row: ProductSummaryRow) {
+  return [row.product_id ?? 'unknown', row.jan_code, row.product_name].join(':')
 }
 
 function resolveRank(cumulativeSalesShare: number): AbcRank {
@@ -61,7 +41,8 @@ export async function fetchAbcAnalysis(
   dateFrom: string,
   dateTo: string,
   storeName?: string,
-  view: AbcAnalysisView = 'product'
+  category?: string,
+  excludeCategory?: string
 ): Promise<AbcAnalysisRow[]> {
   const supabase = await createClient()
   let query = supabase
@@ -74,6 +55,14 @@ export async function fetchAbcAnalysis(
     query = query.eq('store_name', storeName)
   }
 
+  if (category) {
+    query = query.eq('category', category)
+  }
+
+  if (excludeCategory) {
+    query = query.neq('category', excludeCategory)
+  }
+
   const { data, error } = await query
 
   if (error) {
@@ -84,11 +73,14 @@ export async function fetchAbcAnalysis(
   const grouped = new Map<string, AbcAnalysisRow>()
 
   for (const row of (data ?? []) as ProductSummaryRow[]) {
-    const dimension = resolveDimension(row, view)
+    const key = buildGroupKey(row)
     const current =
-      grouped.get(dimension.key) ??
+      grouped.get(key) ??
       ({
-        ...dimension,
+        key,
+        label: row.product_name?.trim() || '商品名未設定',
+        jan_code: row.jan_code?.trim() ?? '',
+        category: normalizeCategory(row.category),
         total_quantity: 0,
         total_sales_amount: 0,
         estimated_profit: 0,
@@ -100,7 +92,7 @@ export async function fetchAbcAnalysis(
     current.total_quantity += row.total_quantity ?? 0
     current.total_sales_amount += row.total_sales_amount ?? 0
     current.estimated_profit += row.estimated_profit ?? 0
-    grouped.set(dimension.key, current)
+    grouped.set(key, current)
   }
 
   const rows = Array.from(grouped.values()).sort(

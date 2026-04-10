@@ -167,13 +167,15 @@ export interface Database {
           id: number
           transfer_date: string
           from_store_id: number
-          to_store_id: number
+          to_store_id: number | null
           jan_code: string
           product_name: string
           quantity: number
           cost_price: number
           total_cost: number
           selling_price: number
+          entry_type: string
+          usage_category: string | null
           memo: string | null
           created_at: string | null
         }
@@ -181,13 +183,15 @@ export interface Database {
           id?: number
           transfer_date?: string
           from_store_id: number
-          to_store_id: number
+          to_store_id?: number | null
           jan_code: string
           product_name: string
           quantity: number
           cost_price: number
           total_cost?: number
           selling_price: number
+          entry_type?: string
+          usage_category?: string | null
           memo?: string | null
           created_at?: string | null
         }
@@ -195,13 +199,15 @@ export interface Database {
           id?: number
           transfer_date?: string
           from_store_id?: number
-          to_store_id?: number
+          to_store_id?: number | null
           jan_code?: string
           product_name?: string
           quantity?: number
           cost_price?: number
           total_cost?: number
           selling_price?: number
+          entry_type?: string
+          usage_category?: string | null
           memo?: string | null
           created_at?: string | null
         }
