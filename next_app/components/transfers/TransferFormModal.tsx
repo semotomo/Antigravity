@@ -9,6 +9,7 @@ import { formatYen } from '@/lib/products'
 import {
   TRANSFER_ENTRY_TYPE_OPTIONS,
   TRANSFER_USAGE_CATEGORY_OPTIONS,
+  buildJanCodeCandidates,
   chooseDefaultTransferFromStoreId,
   chooseDefaultTransferToStoreId,
   formatTransferEntryTypeLabel,
@@ -73,9 +74,9 @@ export function TransferFormModal({
   const productsByJan = useMemo(
     () =>
       new Map(
-        products
-          .filter((product) => product.jan_code)
-          .map((product) => [normalizeJanCode(product.jan_code ?? ''), product])
+        products.flatMap((product) =>
+          buildJanCodeCandidates(product.jan_code ?? '').map((candidate) => [candidate, product] as const)
+        )
       ),
     [products]
   )
@@ -134,7 +135,7 @@ export function TransferFormModal({
     if (!isValidJanCode(janCode)) {
       setSelectedProduct(null)
       setManualMode(false)
-      setLookupMessage('JAN コードは 8 桁または 13 桁で入力してください。')
+      setLookupMessage('JAN コードは 8 桁・12 桁・13 桁のいずれかで入力してください。')
       return
     }
 
@@ -179,7 +180,7 @@ export function TransferFormModal({
     }
 
     if (!isValidJanCode(janCode)) {
-      setLookupMessage('JAN コードは 8 桁または 13 桁で入力してください。')
+      setLookupMessage('JAN コードは 8 桁・12 桁・13 桁のいずれかで入力してください。')
       return
     }
 

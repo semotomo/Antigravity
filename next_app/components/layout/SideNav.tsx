@@ -69,7 +69,7 @@ export default function SideNav({ collapsed, onToggle }: SideNavProps) {
 
   return (
     <div
-      className={`hidden border-r border-gray-800 bg-gray-900 transition-[width] duration-200 md:fixed md:inset-y-0 md:flex md:flex-col ${
+      className={`hidden border-r border-gray-800 bg-gray-900 transition-[width] duration-200 md:fixed md:inset-y-0 md:z-40 md:flex md:flex-col ${
         collapsed ? 'md:w-20' : 'md:w-64'
       }`}
     >

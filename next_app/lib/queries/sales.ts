@@ -3,6 +3,30 @@ import { Database } from '../types/database'
 
 export type SaleRow = Database['public']['Views']['sales_enriched_v']['Row']
 type ProductCategoryRow = Pick<Database['public']['Tables']['products']['Row'], 'category'>
+type ServiceProductRow = Pick<
+  Database['public']['Tables']['products']['Row'],
+  'product_name' | 'product_group'
+>
+export type ServiceLikeCandidate = Pick<SaleRow, 'category' | 'product_group' | 'product_name'>
+
+const SERVICE_CATEGORY = 'サービス'
+const SERVICE_PRODUCT_GROUPS = new Set(['トリミング', 'オプション', '送迎', 'ホテル'])
+const SERVICE_KEYWORDS = ['マイクロチップ']
+const SERVICE_NAME_PATTERNS = [
+  /（[CcＣｃ]）$/,
+  /\([Cc]\)$/,
+  /一時預かり/,
+  /送迎料/,
+  /保定料/,
+  /爪切り/,
+  /足裏バリカン/,
+  /耳掃除/,
+  /肛門腺/,
+  /部分カット/,
+  /ハミガキ/,
+  /歯みがき/,
+  /歯磨き/,
+]
 
 export type SalesFilter = {
   dateFrom?: string
@@ -12,6 +36,69 @@ export type SalesFilter = {
   excludeCategory?: string
   unmatchedOnly?: boolean
   sortOrder?: 'asc' | 'desc'
+}
+
+function normalizeServiceLabel(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/\s+/g, '')
+}
+
+async function fetchServiceProductNameSet() {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('products')
+    .select('product_name, product_group')
+    .eq('category', SERVICE_CATEGORY)
+    .eq('is_active', true)
+
+  if (error) {
+    console.error('Error fetching service product names:', error)
+    return new Set<string>()
+  }
+
+  return new Set(
+    ((data ?? []) as ServiceProductRow[])
+      .flatMap((product) => [product.product_name, product.product_group])
+      .map((value) => normalizeServiceLabel(value))
+      .filter((value): value is string => value.length > 0)
+  )
+}
+
+export function isServiceLikeSaleRow(
+  row: ServiceLikeCandidate,
+  serviceProductNames: ReadonlySet<string>
+) {
+  const category = normalizeServiceLabel(row.category)
+  const productGroup = normalizeServiceLabel(row.product_group)
+  const productName = normalizeServiceLabel(row.product_name)
+
+  if (category === SERVICE_CATEGORY) {
+    return true
+  }
+
+  if (SERVICE_PRODUCT_GROUPS.has(productGroup)) {
+    return true
+  }
+
+  if (productName && serviceProductNames.has(productName)) {
+    return true
+  }
+
+  return (
+    SERVICE_KEYWORDS.some((keyword) => productName.includes(keyword)) ||
+    SERVICE_NAME_PATTERNS.some((pattern) => pattern.test(productName))
+  )
+}
+
+export async function applyServiceCategoryFilter<T extends ServiceLikeCandidate>(
+  rows: T[],
+  mode: 'include' | 'exclude'
+) {
+  const serviceProductNames = await fetchServiceProductNameSet()
+
+  return rows.filter((row) => {
+    const isService = isServiceLikeSaleRow(row, serviceProductNames)
+    return mode === 'include' ? isService : !isService
+  })
 }
 
 export async function fetchSales(filter: SalesFilter): Promise<SaleRow[]> {
@@ -25,8 +112,10 @@ export async function fetchSales(filter: SalesFilter): Promise<SaleRow[]> {
   if (filter.dateFrom) query = query.gte('sale_date', filter.dateFrom)
   if (filter.dateTo) query = query.lte('sale_date', filter.dateTo)
   if (filter.storeName) query = query.eq('store_name', filter.storeName)
-  if (filter.category) query = query.eq('category', filter.category)
-  if (filter.excludeCategory) query = query.neq('category', filter.excludeCategory)
+  if (filter.category && filter.category !== SERVICE_CATEGORY) query = query.eq('category', filter.category)
+  if (filter.excludeCategory && filter.excludeCategory !== SERVICE_CATEGORY) {
+    query = query.neq('category', filter.excludeCategory)
+  }
   if (filter.unmatchedOnly) query = query.eq('unmatched_master', true)
 
   const { data, error } = await query
@@ -35,7 +124,17 @@ export async function fetchSales(filter: SalesFilter): Promise<SaleRow[]> {
     return []
   }
 
-  return data || []
+  let rows = data || []
+
+  if (filter.category === SERVICE_CATEGORY) {
+    rows = await applyServiceCategoryFilter(rows, 'include')
+  }
+
+  if (filter.excludeCategory === SERVICE_CATEGORY) {
+    rows = await applyServiceCategoryFilter(rows, 'exclude')
+  }
+
+  return rows
 }
 
 function uniqueSortedValues(values: Array<string | null | undefined>) {

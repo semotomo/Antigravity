@@ -10,7 +10,7 @@ export type TransferProductOption = Pick<
 >
 
 export type TransferEntryType = 'transfer' | 'usage'
-export type TransferUsageCategory = 'expired' | 'internal_use' | 'gift'
+export type TransferUsageCategory = 'expired' | 'internal_use' | 'gift' | 'other'
 
 export const TRANSFER_ENTRY_TYPE_OPTIONS: Array<{
   value: TransferEntryType
@@ -27,6 +27,7 @@ export const TRANSFER_USAGE_CATEGORY_OPTIONS: Array<{
   { value: 'expired', label: '賞味期限切れ' },
   { value: 'internal_use', label: '店内使用' },
   { value: 'gift', label: 'プレゼント用' },
+  { value: 'other', label: 'その他' },
 ]
 
 export type TransferListRow = TransferRow & {
@@ -77,11 +78,31 @@ export const initialTransferMutationState: TransferMutationState = {
 }
 
 export function isValidJanCode(value: string) {
-  return /^(\d{8}|\d{13})$/.test(value)
+  return /^(\d{8}|\d{12}|\d{13})$/.test(value)
 }
 
 export function normalizeJanCode(value: string) {
   return value.replace(/\D/g, '')
+}
+
+export function buildJanCodeCandidates(value: string) {
+  const normalized = normalizeJanCode(value)
+
+  if (!normalized) {
+    return []
+  }
+
+  const candidates = new Set<string>([normalized])
+
+  if (normalized.length === 12) {
+    candidates.add(`0${normalized}`)
+  }
+
+  if (normalized.length === 13 && normalized.startsWith('0')) {
+    candidates.add(normalized.slice(1))
+  }
+
+  return Array.from(candidates)
 }
 
 export function isValidTransferEntryType(value: string): value is TransferEntryType {
@@ -89,7 +110,7 @@ export function isValidTransferEntryType(value: string): value is TransferEntryT
 }
 
 export function isValidTransferUsageCategory(value: string): value is TransferUsageCategory {
-  return value === 'expired' || value === 'internal_use' || value === 'gift'
+  return value === 'expired' || value === 'internal_use' || value === 'gift' || value === 'other'
 }
 
 export function normalizeOptionalText(value: FormDataEntryValue | string | null | undefined) {
@@ -179,6 +200,8 @@ export function formatTransferUsageCategoryLabel(
       return '店内使用'
     case 'gift':
       return 'プレゼント用'
+    case 'other':
+      return 'その他'
     default:
       return '-'
   }

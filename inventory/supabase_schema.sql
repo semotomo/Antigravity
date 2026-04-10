@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS transfers (
     total_cost INTEGER DEFAULT 0,
     selling_price INTEGER DEFAULT 0,
     entry_type TEXT NOT NULL DEFAULT 'transfer' CHECK (entry_type IN ('transfer', 'usage')),
-    usage_category TEXT CHECK (usage_category IN ('expired', 'internal_use', 'gift')),
+    usage_category TEXT CHECK (usage_category IN ('expired', 'internal_use', 'gift', 'other')),
     memo TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

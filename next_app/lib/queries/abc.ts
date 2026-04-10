@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import type { ProductSummaryRow } from '@/lib/queries/summary'
+import { applyServiceCategoryFilter } from '@/lib/queries/sales'
 
 export type AbcRank = 'A' | 'B' | 'C'
 
@@ -55,11 +56,11 @@ export async function fetchAbcAnalysis(
     query = query.eq('store_name', storeName)
   }
 
-  if (category) {
+  if (category && category !== 'サービス') {
     query = query.eq('category', category)
   }
 
-  if (excludeCategory) {
+  if (excludeCategory && excludeCategory !== 'サービス') {
     query = query.neq('category', excludeCategory)
   }
 
@@ -70,9 +71,19 @@ export async function fetchAbcAnalysis(
     return []
   }
 
+  let sourceRows = (data ?? []) as ProductSummaryRow[]
+
+  if (category === 'サービス') {
+    sourceRows = await applyServiceCategoryFilter(sourceRows, 'include')
+  }
+
+  if (excludeCategory === 'サービス') {
+    sourceRows = await applyServiceCategoryFilter(sourceRows, 'exclude')
+  }
+
   const grouped = new Map<string, AbcAnalysisRow>()
 
-  for (const row of (data ?? []) as ProductSummaryRow[]) {
+  for (const row of sourceRows) {
     const key = buildGroupKey(row)
     const current =
       grouped.get(key) ??

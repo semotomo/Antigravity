@@ -34,11 +34,13 @@ declare global {
 function normalizeDetectedJanCode(rawValue: string, format?: BarcodeFormatLike) {
   const digits = rawValue.replace(/\D/g, '')
 
-  if ((format === 'upc_a' || format === BarcodeFormat.UPC_A) && digits.length === 12) {
-    return `0${digits}`
-  }
-
-  if (digits.length === 8 || digits.length === 13) {
+  if (
+    format === 'upc_a' ||
+    format === BarcodeFormat.UPC_A ||
+    digits.length === 8 ||
+    digits.length === 12 ||
+    digits.length === 13
+  ) {
     return digits
   }
 
@@ -94,6 +96,51 @@ function createFallbackReader() {
   ])
 
   return new BrowserMultiFormatReader(hints)
+}
+
+function loadImageElement(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('画像の読み込みに失敗しました。'))
+    image.src = src
+  })
+}
+
+async function buildPreparedImageUrl(file: File) {
+  const originalUrl = URL.createObjectURL(file)
+
+  try {
+    const image = await loadImageElement(originalUrl)
+    const maxDimension = 1800
+    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height))
+    const canvas = document.createElement('canvas')
+
+    canvas.width = Math.max(1, Math.round(image.width * scale))
+    canvas.height = Math.max(1, Math.round(image.height * scale))
+
+    const context = canvas.getContext('2d')
+
+    if (!context) {
+      return {
+        originalUrl,
+        decodeTargets: [originalUrl],
+      }
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    return {
+      originalUrl,
+      decodeTargets: [canvas.toDataURL('image/jpeg', 0.92), originalUrl],
+    }
+  } catch {
+    return {
+      originalUrl,
+      decodeTargets: [originalUrl],
+    }
+  }
 }
 
 function shouldPreferStillCapture() {
@@ -165,31 +212,46 @@ export function JanCodeScannerField({
       return
     }
 
-    const objectUrl = URL.createObjectURL(file)
     setScannerMessage('写真を解析しています。バーコードがはっきり写っているか確認してください。')
 
     try {
       const reader = createFallbackReader()
-      const result = await reader.decodeFromImageUrl(objectUrl)
-      const detectedCode = normalizeDetectedJanCode(result.getText(), result.getBarcodeFormat())
+      const { originalUrl, decodeTargets } = await buildPreparedImageUrl(file)
+      let detectedCode: string | null = null
+
+      try {
+        for (const target of decodeTargets) {
+          try {
+            const result = await reader.decodeFromImageUrl(target)
+            detectedCode = normalizeDetectedJanCode(result.getText(), result.getBarcodeFormat())
+
+            if (detectedCode) {
+              break
+            }
+          } catch {
+            continue
+          }
+        }
+      } finally {
+        URL.revokeObjectURL(originalUrl)
+      }
 
       if (!detectedCode) {
         setScannerMessage(
-          '写真から JAN コードを判別できませんでした。明るい場所でバーコード全体が写るように再撮影してください。'
+          '写真から JAN / UPC コードを判別できませんでした。バーコードだけが大きく写るように再撮影してください。'
         )
         return
       }
 
       cleanupScannerResources()
       setValue(detectedCode)
-      setScannerMessage('写真から JAN コードを読み取りました。')
+      setScannerMessage('写真から JAN / UPC コードを読み取りました。')
       setScannerOpen(false)
     } catch {
       setScannerMessage(
         '写真からバーコードを読み取れませんでした。ピントを合わせて再度撮影してください。'
       )
     } finally {
-      URL.revokeObjectURL(objectUrl)
       event.target.value = ''
     }
   }
@@ -294,7 +356,7 @@ export function JanCodeScannerField({
 
         const reader = createFallbackReader()
         setScannerMessage(
-          'Safari / iPad 向けの互換モードで読取中です。バーコードをカメラに映してください。'
+          'Safari / iPad 向けの互換モードで読取中です。難しい場合は写真から読取をお試しください。'
         )
 
         const controls = await reader.decodeFromConstraints(
@@ -430,7 +492,7 @@ export function JanCodeScannerField({
         </div>
       ) : (
         <p className="text-xs text-gray-500">
-          8桁または13桁の JAN コードを入力できます。スマホのカメラ読取は HTTPS または
+          8桁・12桁・13桁の JAN / UPC コードを入力できます。スマホのカメラ読取は HTTPS または
           localhost で利用できます。iPad / iPhone では撮影ベースの読取が安定するため、「カメラで読取」または
           「写真から読取」で撮影して読み取ってください。
         </p>
