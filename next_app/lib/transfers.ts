@@ -9,6 +9,26 @@ export type TransferProductOption = Pick<
   'id' | 'jan_code' | 'product_name' | 'cost_price' | 'selling_price' | 'category'
 >
 
+export type TransferEntryType = 'transfer' | 'usage'
+export type TransferUsageCategory = 'expired' | 'internal_use' | 'gift'
+
+export const TRANSFER_ENTRY_TYPE_OPTIONS: Array<{
+  value: TransferEntryType
+  label: string
+}> = [
+  { value: 'transfer', label: '店舗間移動' },
+  { value: 'usage', label: '物品使用' },
+]
+
+export const TRANSFER_USAGE_CATEGORY_OPTIONS: Array<{
+  value: TransferUsageCategory
+  label: string
+}> = [
+  { value: 'expired', label: '賞味期限切れ' },
+  { value: 'internal_use', label: '店内使用' },
+  { value: 'gift', label: 'プレゼント用' },
+]
+
 export type TransferListRow = TransferRow & {
   from_store: TransferStoreOption | null
   to_store: TransferStoreOption | null
@@ -27,6 +47,8 @@ export type TransferDraftItem = {
   quantity: number
   cost_price: number
   selling_price: number
+  entry_type: TransferEntryType
+  usage_category: TransferUsageCategory | null
   memo: string | null
 }
 
@@ -38,6 +60,8 @@ export type TransferActionField =
   | 'quantity'
   | 'cost_price'
   | 'selling_price'
+  | 'entry_type'
+  | 'usage_category'
   | 'items'
 
 export type TransferMutationState = {
@@ -58,6 +82,14 @@ export function isValidJanCode(value: string) {
 
 export function normalizeJanCode(value: string) {
   return value.replace(/\D/g, '')
+}
+
+export function isValidTransferEntryType(value: string): value is TransferEntryType {
+  return value === 'transfer' || value === 'usage'
+}
+
+export function isValidTransferUsageCategory(value: string): value is TransferUsageCategory {
+  return value === 'expired' || value === 'internal_use' || value === 'gift'
 }
 
 export function normalizeOptionalText(value: FormDataEntryValue | string | null | undefined) {
@@ -126,5 +158,28 @@ export function summarizeTransferDraftItems(items: TransferDraftItem[]) {
     productCount: items.length,
     totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
     totalCost: items.reduce((sum, item) => sum + item.cost_price * item.quantity, 0),
+  }
+}
+
+export function formatTransferEntryTypeLabel(value: TransferEntryType | string | null | undefined) {
+  if (value === 'usage') {
+    return '物品使用'
+  }
+
+  return '店舗間移動'
+}
+
+export function formatTransferUsageCategoryLabel(
+  value: TransferUsageCategory | string | null | undefined
+) {
+  switch (value) {
+    case 'expired':
+      return '賞味期限切れ'
+    case 'internal_use':
+      return '店内使用'
+    case 'gift':
+      return 'プレゼント用'
+    default:
+      return '-'
   }
 }

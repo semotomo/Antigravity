@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState, type ChangeEvent } from 'react'
 import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { DecodeHintType } from '@zxing/library'
-import { Camera, ScanLine, X } from 'lucide-react'
+import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
 
 type JanCodeScannerFieldProps = {
   defaultValue?: string
@@ -96,12 +96,25 @@ function createFallbackReader() {
   return new BrowserMultiFormatReader(hints)
 }
 
+function shouldPreferStillCapture() {
+  if (typeof navigator === 'undefined') {
+    return false
+  }
+
+  const userAgent = navigator.userAgent
+  return (
+    /iPad|iPhone|iPod/.test(userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+}
+
 export function JanCodeScannerField({
   defaultValue = '',
   error,
 }: JanCodeScannerFieldProps) {
   const inputId = useId()
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const detectorRef = useRef<BarcodeDetectorLike | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const timeoutRef = useRef<number | null>(null)
@@ -111,7 +124,7 @@ export function JanCodeScannerField({
   const [scannerMessage, setScannerMessage] = useState('')
   const unavailableScannerMessage = scannerOpen ? getUnavailableScannerMessage() : ''
 
-  const stopScanner = useEffectEvent(() => {
+  function cleanupScannerResources() {
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current)
       timeoutRef.current = null
@@ -133,6 +146,10 @@ export function JanCodeScannerField({
       streamRef.current.getTracks().forEach((track) => track.stop())
       streamRef.current = null
     }
+  }
+
+  const stopScanner = useEffectEvent(() => {
+    cleanupScannerResources()
   })
 
   useEffect(() => {
@@ -140,6 +157,42 @@ export function JanCodeScannerField({
       stopScanner()
     }
   }, [])
+
+  async function handlePhotoSelection(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    setScannerMessage('写真を解析しています。バーコードがはっきり写っているか確認してください。')
+
+    try {
+      const reader = createFallbackReader()
+      const result = await reader.decodeFromImageUrl(objectUrl)
+      const detectedCode = normalizeDetectedJanCode(result.getText(), result.getBarcodeFormat())
+
+      if (!detectedCode) {
+        setScannerMessage(
+          '写真から JAN コードを判別できませんでした。明るい場所でバーコード全体が写るように再撮影してください。'
+        )
+        return
+      }
+
+      cleanupScannerResources()
+      setValue(detectedCode)
+      setScannerMessage('写真から JAN コードを読み取りました。')
+      setScannerOpen(false)
+    } catch {
+      setScannerMessage(
+        '写真からバーコードを読み取れませんでした。ピントを合わせて再度撮影してください。'
+      )
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+      event.target.value = ''
+    }
+  }
 
   useEffect(() => {
     if (!scannerOpen) {
@@ -204,6 +257,8 @@ export function JanCodeScannerField({
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
           audio: false,
         })
@@ -246,6 +301,8 @@ export function JanCodeScannerField({
           {
             video: {
               facingMode: { ideal: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
             },
             audio: false,
           },
@@ -307,17 +364,35 @@ export function JanCodeScannerField({
         <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
           JANコード
         </label>
-        <button
-          type="button"
-          onClick={() => {
-            setScannerMessage('')
-            setScannerOpen((current) => !current)
-          }}
-          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-        >
-          {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
-          {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setScannerMessage('')
+
+              if (shouldPreferStillCapture()) {
+                cleanupScannerResources()
+                setScannerOpen(false)
+                fileInputRef.current?.click()
+                return
+              }
+
+              setScannerOpen((current) => !current)
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+            {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
+          >
+            <ImagePlus className="h-4 w-4" />
+            写真から読取
+          </button>
+        </div>
       </div>
 
       <input
@@ -328,6 +403,14 @@ export function JanCodeScannerField({
         value={value}
         onChange={(event) => setValue(event.target.value.replace(/\D/g, ''))}
         className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handlePhotoSelection}
+        className="hidden"
       />
 
       {scannerOpen ? (
@@ -348,7 +431,8 @@ export function JanCodeScannerField({
       ) : (
         <p className="text-xs text-gray-500">
           8桁または13桁の JAN コードを入力できます。スマホのカメラ読取は HTTPS または
-          localhost で利用できます。
+          localhost で利用できます。iPad / iPhone では撮影ベースの読取が安定するため、「カメラで読取」または
+          「写真から読取」で撮影して読み取ってください。
         </p>
       )}
 

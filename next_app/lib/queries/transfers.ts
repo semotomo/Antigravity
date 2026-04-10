@@ -72,6 +72,8 @@ export async function fetchTransferHistory(
         cost_price,
         total_cost,
         selling_price,
+        entry_type,
+        usage_category,
         memo,
         created_at,
         from_store:stores!transfers_from_store_id_fkey(id, name),

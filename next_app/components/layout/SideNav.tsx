@@ -10,6 +10,8 @@ import {
   ListOrdered,
   LogOut,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   type LucideIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -21,6 +23,11 @@ type NavItem = {
   href: string
   icon: LucideIcon
   match: NavMatch
+}
+
+type SideNavProps = {
+  collapsed: boolean
+  onToggle: () => void
 }
 
 const navItems: NavItem[] = [
@@ -49,7 +56,7 @@ function isActivePath(pathname: string, item: NavItem) {
   return pathname === item.href
 }
 
-export default function SideNav() {
+export default function SideNav({ collapsed, onToggle }: SideNavProps) {
   const pathname = usePathname()
   const router = useRouter()
 
@@ -61,12 +68,47 @@ export default function SideNav() {
   }
 
   return (
-    <div className="hidden border-r border-gray-800 bg-gray-900 md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col">
-      <div className="flex h-16 flex-shrink-0 items-center bg-gray-900 px-4">
-        <span className="text-xl font-bold uppercase tracking-widest text-white">Kennel</span>
+    <div
+      className={`hidden border-r border-gray-800 bg-gray-900 transition-[width] duration-200 md:fixed md:inset-y-0 md:flex md:flex-col ${
+        collapsed ? 'md:w-20' : 'md:w-64'
+      }`}
+    >
+      <div
+        className={`flex h-16 flex-shrink-0 items-center border-b border-gray-800 bg-gray-900 ${
+          collapsed ? 'justify-center px-2' : 'justify-between px-4'
+        }`}
+      >
+        <span className="text-xl font-bold uppercase tracking-widest text-white">
+          {collapsed ? 'K' : 'Kennel'}
+        </span>
+        {!collapsed ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="rounded-lg p-2 text-gray-400 transition hover:bg-gray-800 hover:text-white"
+            aria-label="サイドバーを最小化"
+            title="サイドバーを最小化"
+          >
+            <PanelLeftClose className="h-5 w-5" />
+          </button>
+        ) : null}
       </div>
       <div className="flex flex-1 flex-col overflow-y-auto">
-        <nav className="flex-1 space-y-1 px-2 py-4">
+        {collapsed ? (
+          <div className="flex justify-center px-2 py-3">
+            <button
+              type="button"
+              onClick={onToggle}
+              className="rounded-xl border border-gray-700 bg-gray-800 p-2 text-gray-300 transition hover:border-gray-600 hover:text-white"
+              aria-label="サイドバーを展開"
+              title="サイドバーを展開"
+            >
+              <PanelLeftOpen className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
+
+        <nav className={`flex-1 space-y-1 py-4 ${collapsed ? 'px-2' : 'px-2'}`}>
           {navItems.map((item) => {
             const isActive = isActivePath(pathname, item)
 
@@ -74,19 +116,28 @@ export default function SideNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`group flex items-center rounded-md px-2 py-2 text-sm font-medium transition-colors ${
+                title={collapsed ? item.name : undefined}
+                className={`group flex items-center rounded-md text-sm font-medium transition-colors ${
+                  collapsed
+                    ? 'justify-center px-0 py-3'
+                    : 'px-2 py-2'
+                } ${
                   isActive
                     ? 'bg-gray-800 text-white'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`}
               >
                 <item.icon
-                  className={`mr-3 h-5 w-5 flex-shrink-0 ${
-                    isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'
+                  className={`h-5 w-5 flex-shrink-0 ${
+                    collapsed
+                      ? isActive
+                        ? 'text-white'
+                        : 'text-gray-400 group-hover:text-gray-300'
+                      : `mr-3 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'}`
                   }`}
                   aria-hidden="true"
                 />
-                {item.name}
+                {collapsed ? <span className="sr-only">{item.name}</span> : item.name}
               </Link>
             )
           })}
@@ -94,10 +145,13 @@ export default function SideNav() {
         <div className="border-t border-gray-800 p-4">
           <button
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+            title={collapsed ? 'ログアウト' : undefined}
+            className={`flex w-full items-center rounded-md text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white ${
+              collapsed ? 'justify-center px-0 py-3' : 'gap-3 px-2 py-2'
+            }`}
           >
             <LogOut className="h-5 w-5" />
-            ログアウト
+            {collapsed ? <span className="sr-only">ログアウト</span> : 'ログアウト'}
           </button>
         </div>
       </div>

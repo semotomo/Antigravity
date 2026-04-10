@@ -1,14 +1,41 @@
 import Link from 'next/link'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import {
-  fetchAbcAnalysis,
-  type AbcAnalysisRow,
-  type AbcAnalysisView,
-} from '@/lib/queries/abc'
+import { fetchAbcAnalysis, type AbcAnalysisRow } from '@/lib/queries/abc'
 import { fetchSalesFilterOptions } from '@/lib/queries/sales'
 
 type AbcSearchParams = { [key: string]: string | string[] | undefined }
+
+function buildSearchParams(
+  params: AbcSearchParams,
+  updates: Partial<
+    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'excludeCategory', string | undefined>
+  >
+) {
+  const nextParams = new URLSearchParams()
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => nextParams.append(key, entry))
+      return
+    }
+
+    if (typeof value === 'string') {
+      nextParams.set(key, value)
+    }
+  })
+
+  Object.entries(updates).forEach(([key, value]) => {
+    if (value !== undefined) {
+      nextParams.set(key, value)
+      return
+    }
+
+    nextParams.delete(key)
+  })
+
+  return nextParams.toString()
+}
 
 function getTodayInJst() {
   const parts = new Intl.DateTimeFormat('ja-JP', {
@@ -34,28 +61,6 @@ function getStringParam(value: string | string[] | undefined) {
   return typeof value === 'string' ? value : ''
 }
 
-function getViewParam(value: string | string[] | undefined): AbcAnalysisView {
-  return getStringParam(value) === 'category' ? 'category' : 'product'
-}
-
-function buildAbcHref(params: {
-  dateFrom: string
-  dateTo: string
-  storeName: string
-  view: AbcAnalysisView
-}) {
-  const searchParams = new URLSearchParams()
-  searchParams.set('dateFrom', params.dateFrom)
-  searchParams.set('dateTo', params.dateTo)
-  searchParams.set('view', params.view)
-
-  if (params.storeName) {
-    searchParams.set('store', params.storeName)
-  }
-
-  return `/sales/abc?${searchParams.toString()}`
-}
-
 export const metadata = {
   title: 'ABC分析 | Kennel Dashboard',
 }
@@ -66,19 +71,35 @@ export default async function SalesAbcPage({
   searchParams: Promise<AbcSearchParams>
 }) {
   const resolvedParams = await searchParams
-  const dateFrom = getStringParam(resolvedParams.dateFrom) || getMonthStartInJst()
-  const dateTo = getStringParam(resolvedParams.dateTo) || getTodayInJst()
-  const storeName = getStringParam(resolvedParams.store)
-  const view = getViewParam(resolvedParams.view)
+  let dateFrom = getStringParam(resolvedParams.dateFrom) || getMonthStartInJst()
+  let dateTo = getStringParam(resolvedParams.dateTo) || getTodayInJst()
 
-  const [rows, { stores }] = await Promise.all([
-    fetchAbcAnalysis(dateFrom, dateTo, storeName || undefined, view),
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    ;[dateFrom, dateTo] = [dateTo, dateFrom]
+  }
+
+  const storeName = getStringParam(resolvedParams.store)
+  const category = getStringParam(resolvedParams.category)
+  const excludeCategory = getStringParam(resolvedParams.excludeCategory)
+
+  const currentSearchParams: AbcSearchParams = {
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dateTo ? { dateTo } : {}),
+    ...(storeName ? { store: storeName } : {}),
+    ...(category ? { category } : {}),
+    ...(excludeCategory ? { excludeCategory } : {}),
+  }
+
+  const [rows, { stores, categories }] = await Promise.all([
+    fetchAbcAnalysis(
+      dateFrom,
+      dateTo,
+      storeName || undefined,
+      category || undefined,
+      excludeCategory || undefined
+    ),
     fetchSalesFilterOptions(),
   ])
-
-  const subjectLabel = view === 'category' ? 'カテゴリ' : '商品'
-  const productViewHref = buildAbcHref({ dateFrom, dateTo, storeName, view: 'product' })
-  const categoryViewHref = buildAbcHref({ dateFrom, dateTo, storeName, view: 'category' })
 
   const columns: DataTableColumn<AbcAnalysisRow>[] = [
     {
@@ -95,21 +116,15 @@ export default async function SalesAbcPage({
     },
     {
       key: 'label',
-      header: subjectLabel,
-      render: (item) =>
-        view === 'category' ? (
-          <div className="min-w-[220px]">
-            <p className="font-semibold text-gray-900">{item.label}</p>
-            <p className="mt-1 text-xs text-gray-500">カテゴリ別の売上構成を集計しています。</p>
-          </div>
-        ) : (
-          <div className="min-w-[240px]">
-            <p className="font-semibold text-gray-900">{item.label}</p>
-            <p className="mt-1 text-xs text-gray-500">
-              JAN: {item.jan_code || '-'} / カテゴリ: {item.category || '-'}
-            </p>
-          </div>
-        ),
+      header: '商品',
+      render: (item) => (
+        <div className="min-w-[240px]">
+          <p className="font-semibold text-gray-900">{item.label}</p>
+          <p className="mt-1 text-xs text-gray-500">
+            JAN: {item.jan_code || '-'} / カテゴリ: {item.category || '-'}
+          </p>
+        </div>
+      ),
     },
     {
       key: 'total_quantity',
@@ -148,37 +163,14 @@ export default async function SalesAbcPage({
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">ABC分析</h1>
         <p className="text-sm text-gray-500">
-          {subjectLabel}ごとの売上構成比でランク分けしています。A=70%以下、B=70〜90%以下、C=90〜100%
-          です。
+          商品ごとの売上構成比でランク分けしています。カテゴリは売上一覧と同じ条件で絞り込めます。
         </p>
       </div>
 
       <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={productViewHref}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-              view === 'product'
-                ? 'border-gray-900 bg-gray-900 text-white'
-                : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900'
-            }`}
-          >
-            商品別ABC
-          </Link>
-          <Link
-            href={categoryViewHref}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-              view === 'category'
-                ? 'border-gray-900 bg-gray-900 text-white'
-                : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900'
-            }`}
-          >
-            カテゴリ別ABC
-          </Link>
-        </div>
-
-        <form className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-[repeat(3,minmax(0,1fr)),auto] xl:items-end">
-          <input type="hidden" name="view" value={view} />
+        <form className="grid gap-4 md:grid-cols-3 xl:grid-cols-[repeat(3,minmax(0,1fr)),auto] xl:items-end">
+          <input type="hidden" name="category" value={category} />
+          <input type="hidden" name="excludeCategory" value={excludeCategory} />
 
           <label className="space-y-2">
             <span className="text-sm font-medium text-gray-700">期間 (From)</span>
@@ -224,7 +216,7 @@ export default async function SalesAbcPage({
               分析する
             </button>
             <Link
-              href={`/sales/abc?view=${view}`}
+              href="/sales/abc"
               className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
             >
               リセット
@@ -233,27 +225,98 @@ export default async function SalesAbcPage({
         </form>
       </div>
 
+      <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,minmax(0,1fr)] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-xs font-medium text-gray-500">表示店舗</span>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <Link
+              href={`/sales/abc?${buildSearchParams(currentSearchParams, { store: undefined })}`}
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                !storeName
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 bg-white text-gray-600'
+              }`}
+            >
+              すべて
+            </Link>
+            {stores.map((store) => (
+              <Link
+                key={store}
+                href={`/sales/abc?${buildSearchParams(currentSearchParams, { store })}`}
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                  storeName === store
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-300 bg-white text-gray-600'
+                }`}
+              >
+                {store}
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-xs font-medium text-gray-500">カテゴリ</span>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <Link
+              href={`/sales/abc?${buildSearchParams(currentSearchParams, {
+                category: undefined,
+                excludeCategory: undefined,
+              })}`}
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                !category && !excludeCategory
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 bg-white text-gray-600'
+              }`}
+            >
+              すべて
+            </Link>
+            <Link
+              href={`/sales/abc?${buildSearchParams(currentSearchParams, {
+                category: undefined,
+                excludeCategory: 'サービス',
+              })}`}
+              className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                !category && excludeCategory === 'サービス'
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-300 bg-white text-gray-600'
+              }`}
+            >
+              サービス以外
+            </Link>
+            {categories.map((categoryOption) => (
+              <Link
+                key={categoryOption}
+                href={`/sales/abc?${buildSearchParams(currentSearchParams, {
+                  category: categoryOption,
+                  excludeCategory: undefined,
+                })}`}
+                className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs ${
+                  category === categoryOption
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-300 bg-white text-gray-600'
+                }`}
+              >
+                {categoryOption}
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-            対象{subjectLabel}数
-          </p>
-          <p className="mt-3 text-3xl font-bold text-gray-900">
-            {rows.length.toLocaleString('ja-JP')}
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">対象商品数</p>
+          <p className="mt-3 text-3xl font-bold text-gray-900">{rows.length.toLocaleString('ja-JP')}</p>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-            Aランク{subjectLabel}数
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Aランク商品数</p>
           <p className="mt-3 text-3xl font-bold text-gray-900">
             {rows.filter((row) => row.rank === 'A').length.toLocaleString('ja-JP')}
           </p>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-            B/Cランク{subjectLabel}数
-          </p>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">B/Cランク商品数</p>
           <p className="mt-3 text-3xl font-bold text-gray-900">
             {rows.filter((row) => row.rank !== 'A').length.toLocaleString('ja-JP')}
           </p>
@@ -264,7 +327,7 @@ export default async function SalesAbcPage({
         data={rows}
         columns={columns}
         keyExtractor={(item) => item.key}
-        emptyMessage={`指定期間に集計できる${subjectLabel}データが見つかりませんでした。`}
+        emptyMessage="指定期間に集計できる商品データが見つかりませんでした。"
       />
     </div>
   )

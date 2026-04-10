@@ -7,15 +7,21 @@ import { createTransfersAction } from '@/app/actions/transfers'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { formatYen } from '@/lib/products'
 import {
+  TRANSFER_ENTRY_TYPE_OPTIONS,
+  TRANSFER_USAGE_CATEGORY_OPTIONS,
   chooseDefaultTransferFromStoreId,
   chooseDefaultTransferToStoreId,
+  formatTransferEntryTypeLabel,
+  formatTransferUsageCategoryLabel,
   initialTransferMutationState,
   isValidJanCode,
   normalizeJanCode,
   summarizeTransferDraftItems,
   type TransferDraftItem,
+  type TransferEntryType,
   type TransferProductOption,
   type TransferStoreOption,
+  type TransferUsageCategory,
 } from '@/lib/transfers'
 
 type TransferFormModalProps = {
@@ -57,6 +63,8 @@ export function TransferFormModal({
   const [manualProductName, setManualProductName] = useState('')
   const [manualCostPrice, setManualCostPrice] = useState('0')
   const [manualSellingPrice, setManualSellingPrice] = useState('0')
+  const [entryType, setEntryType] = useState<TransferEntryType>('transfer')
+  const [usageCategory, setUsageCategory] = useState<TransferUsageCategory>('expired')
   const [fromStoreId, setFromStoreId] = useState<number | null>(chooseDefaultTransferFromStoreId(stores))
   const [toStoreId, setToStoreId] = useState<number | null>(
     chooseDefaultTransferToStoreId(stores, chooseDefaultTransferFromStoreId(stores))
@@ -144,19 +152,29 @@ export function TransferFormModal({
     setManualProductName('')
     setManualCostPrice('0')
     setManualSellingPrice('0')
-    setLookupMessage('商品マスタに見つからなかったため、手入力で移動リストへ追加できます。')
+    setLookupMessage('商品マスタに見つからなかったため、手入力で登録リストへ追加できます。')
   }
 
   function handleAddItem() {
     const janCode = readJanCodeFromForm()
 
-    if (!selectedFromStoreId || !selectedToStoreId) {
-      setLookupMessage('移動元と移動先の店舗を先に選択してください。')
+    if (!selectedFromStoreId) {
+      setLookupMessage('使用店舗または移動元店舗を先に選択してください。')
       return
     }
 
-    if (selectedFromStoreId === selectedToStoreId) {
+    if (entryType === 'transfer' && !selectedToStoreId) {
+      setLookupMessage('店舗間移動を登録する場合は移動先店舗を選択してください。')
+      return
+    }
+
+    if (entryType === 'transfer' && selectedFromStoreId === selectedToStoreId) {
       setLookupMessage('移動元と移動先に同じ店舗は選べません。')
+      return
+    }
+
+    if (entryType === 'usage' && !usageCategory) {
+      setLookupMessage('物品使用の区分を選択してください。')
       return
     }
 
@@ -197,6 +215,8 @@ export function TransferFormModal({
         quantity,
         cost_price: costPrice,
         selling_price: sellingPrice,
+        entry_type: entryType,
+        usage_category: entryType === 'usage' ? usageCategory : null,
         memo: memo.trim() || null,
       },
     ])
@@ -234,9 +254,9 @@ export function TransferFormModal({
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
               Product Transfers
             </p>
-            <h2 className="mt-2 text-2xl font-bold text-gray-900">新規移動を登録</h2>
+            <h2 className="mt-2 text-2xl font-bold text-gray-900">新規登録</h2>
             <p className="mt-1 text-sm text-gray-500">
-              移動元と移動先を選び、JAN コードから商品を追加してまとめて登録します。
+              店舗間移動と物品使用を、JAN コードからまとめて登録できます。
             </p>
           </div>
           <button
@@ -252,9 +272,9 @@ export function TransferFormModal({
         <form ref={formRef} action={formAction} className="space-y-6 px-6 py-6">
           <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">移動元店舗</span>
+              <span className="text-sm font-medium text-gray-700">使用店舗 / 移動元店舗</span>
               <select
                 name="from_store_id"
                 value={selectedFromStoreId ?? ''}
@@ -279,7 +299,8 @@ export function TransferFormModal({
                 name="to_store_id"
                 value={selectedToStoreId ?? ''}
                 onChange={(event) => setToStoreId(Number(event.target.value) || null)}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                disabled={entryType === 'usage'}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition disabled:bg-gray-100 disabled:text-gray-400 focus:border-gray-900"
               >
                 <option value="">選択してください</option>
                 {destinationStores.map((store) => (
@@ -288,8 +309,53 @@ export function TransferFormModal({
                   </option>
                 ))}
               </select>
+              {entryType === 'usage' ? (
+                <span className="text-xs text-gray-500">物品使用では保存に使いません。</span>
+              ) : null}
               {state.fieldErrors.to_store_id ? (
                 <span className="text-xs text-red-600">{state.fieldErrors.to_store_id}</span>
+              ) : null}
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700">登録区分</span>
+              <select
+                value={entryType}
+                onChange={(event) => setEntryType(event.target.value as TransferEntryType)}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+              >
+                {TRANSFER_ENTRY_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {state.fieldErrors.entry_type ? (
+                <span className="text-xs text-red-600">{state.fieldErrors.entry_type}</span>
+              ) : null}
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700">物品使用の区分</span>
+              <select
+                value={usageCategory}
+                onChange={(event) => setUsageCategory(event.target.value as TransferUsageCategory)}
+                disabled={entryType !== 'usage'}
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition disabled:bg-gray-100 disabled:text-gray-400 focus:border-gray-900"
+              >
+                {TRANSFER_USAGE_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-gray-500">
+                {entryType === 'usage'
+                  ? '物品使用として登録する場合のみ保存されます。'
+                  : '店舗間移動では使用しません。'}
+              </span>
+              {state.fieldErrors.usage_category ? (
+                <span className="text-xs text-red-600">{state.fieldErrors.usage_category}</span>
               ) : null}
             </label>
           </div>
@@ -298,7 +364,7 @@ export function TransferFormModal({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">商品を追加</h3>
-                <p className="text-sm text-gray-500">JAN コードから検索して移動リストに積み上げます。</p>
+                <p className="text-sm text-gray-500">JAN コードから検索して登録リストに積み上げます。</p>
               </div>
               <button
                 type="button"
@@ -335,8 +401,18 @@ export function TransferFormModal({
                     {selectedProduct.product_name ?? '商品名未設定'}
                   </p>
                   <p className="mt-1 text-xs text-gray-500">
-                    JAN: {selectedProduct.jan_code || '-'} / 区分: {selectedProduct.category || '-'}
+                    JAN: {selectedProduct.jan_code || '-'} / カテゴリ: {selectedProduct.category || '-'}
                   </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                      {formatTransferEntryTypeLabel(entryType)}
+                    </span>
+                    {entryType === 'usage' ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                        {formatTransferUsageCategoryLabel(usageCategory)}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mt-3 grid gap-4 md:grid-cols-3">
                     <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
@@ -379,6 +455,16 @@ export function TransferFormModal({
 
               {manualMode ? (
                 <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4">
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
+                      {formatTransferEntryTypeLabel(entryType)}
+                    </span>
+                    {entryType === 'usage' ? (
+                      <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
+                        {formatTransferUsageCategoryLabel(usageCategory)}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <label className="space-y-2 md:col-span-2">
                       <span className="text-sm font-medium text-gray-700">商品名</span>
@@ -439,7 +525,7 @@ export function TransferFormModal({
                   className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800"
                 >
                   <PackagePlus className="h-4 w-4" />
-                  移動リストに追加
+                  登録リストに追加
                 </button>
               </div>
             </div>
@@ -448,8 +534,10 @@ export function TransferFormModal({
           <div className="space-y-4">
             <div className="flex flex-col gap-3 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">今回の移動リスト</h3>
-                <p className="text-sm text-gray-500">複数商品を積み上げてまとめて登録できます。</p>
+                <h3 className="text-lg font-semibold text-gray-900">今回の登録リスト</h3>
+                <p className="text-sm text-gray-500">
+                  複数商品を積み上げて、店舗間移動と物品使用をまとめて登録できます。
+                </p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
@@ -479,7 +567,7 @@ export function TransferFormModal({
 
             {items.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
-                まだ商品が追加されていません。JAN コードを検索して移動リストへ追加してください。
+                まだ商品が追加されていません。JAN コードを検索して登録リストへ追加してください。
               </div>
             ) : (
               <div className="space-y-3">
@@ -492,6 +580,16 @@ export function TransferFormModal({
                       <div>
                         <p className="font-semibold text-gray-900">{item.product_name}</p>
                         <p className="mt-1 text-xs text-gray-500">JAN: {item.jan_code}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                            {formatTransferEntryTypeLabel(item.entry_type)}
+                          </span>
+                          {item.usage_category ? (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                              {formatTransferUsageCategoryLabel(item.usage_category)}
+                            </span>
+                          ) : null}
+                        </div>
                         {item.memo ? (
                           <p className="mt-2 text-sm text-gray-600">メモ: {item.memo}</p>
                         ) : null}
