@@ -118,7 +118,7 @@ function parseTransferDraftItems(
       )
 
       if (!isValidJanCode(janCode)) {
-        fieldErrors.jan_code = 'JAN コードは 8 桁または 13 桁で入力してください。'
+        fieldErrors.jan_code = 'JAN コードは 8 桁・12 桁・13 桁のいずれかで入力してください。'
         return null
       }
 

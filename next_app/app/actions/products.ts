@@ -12,7 +12,7 @@ import {
 import { createClient } from '@/lib/supabase/server'
 
 const POS_SOURCE_SYSTEM = 'pos'
-const JAN_CODE_PATTERN = /^(\d{8}|\d{13})$/
+const JAN_CODE_PATTERN = /^(\d{8}|\d{12}|\d{13})$/
 
 function getTrimmedValue(formData: FormData, key: string) {
   const value = formData.get(key)
@@ -78,7 +78,7 @@ function parseOptionalJanCode(
   }
 
   if (!JAN_CODE_PATTERN.test(value)) {
-    fieldErrors.jan_code = 'JAN コードは 8 桁または 13 桁の数字で入力してください。'
+    fieldErrors.jan_code = 'JAN コードは 8 桁・12 桁・13 桁の数字で入力してください。'
     return null
   }
 
