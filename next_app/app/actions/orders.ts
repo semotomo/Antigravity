@@ -2,6 +2,7 @@
 
 import { revalidatePath, refresh } from 'next/cache'
 import {
+  getTodayDateInputValue,
   initialOrderMutationState,
   isOrderStatus,
   normalizeOptionalText,
@@ -13,6 +14,16 @@ import {
 import { createClient } from '@/lib/supabase/server'
 
 const JAN_CODE_PATTERN = /^(\d{8}|\d{12}|\d{13})$/
+const ORDER_NO_BATCH_SIZE = 1000
+const AUTO_ORDER_NO_RETRY_LIMIT = 5
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
+type CustomerOrderNoRow = Pick<CustomerOrderInsert, 'order_no'>
+type PostgrestErrorLike = {
+  code?: string
+  message?: string
+  details?: string
+}
 
 function getTrimmedValue(formData: FormData, key: string) {
   const value = formData.get(key)
@@ -89,6 +100,68 @@ function parseOptionalJanCode(
   return normalizedValue
 }
 
+function isDuplicateOrderNoError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const candidate = error as PostgrestErrorLike
+  const combinedMessage = `${candidate.message ?? ''} ${candidate.details ?? ''}`
+  return candidate.code === '23505' && combinedMessage.includes('order_no')
+}
+
+function formatOrderNo(value: number) {
+  return String(value).padStart(5, '0')
+}
+
+async function fetchExistingOrderNos(supabase: SupabaseServerClient) {
+  const orderNos: string[] = []
+  let from = 0
+
+  while (true) {
+    const to = from + ORDER_NO_BATCH_SIZE - 1
+    const { data, error } = await supabase
+      .from('customer_orders')
+      .select('order_no')
+      .not('order_no', 'is', null)
+      .order('order_no', { ascending: true })
+      .range(from, to)
+
+    if (error) {
+      console.error('Error fetching order numbers:', error)
+      throw new Error('受付No.の自動採番に失敗しました。')
+    }
+
+    const batch = (data ?? []) as CustomerOrderNoRow[]
+    orderNos.push(
+      ...batch
+        .map((row) => row.order_no)
+        .filter((orderNo): orderNo is string => Boolean(orderNo))
+    )
+
+    if (batch.length < ORDER_NO_BATCH_SIZE) {
+      break
+    }
+
+    from += batch.length
+  }
+
+  return orderNos
+}
+
+async function generateNextOrderNo(supabase: SupabaseServerClient) {
+  const existingOrderNos = await fetchExistingOrderNos(supabase)
+  const maxNumericOrderNo = existingOrderNos.reduce((max, orderNo) => {
+    if (!/^\d+$/.test(orderNo)) {
+      return max
+    }
+
+    return Math.max(max, Number(orderNo))
+  }, 0)
+
+  return formatOrderNo(maxNumericOrderNo + 1)
+}
+
 async function requireAuthenticatedClient() {
   const supabase = await createClient()
   const {
@@ -127,10 +200,6 @@ function buildOrderPayload(formData: FormData) {
 
   if (!customerName) {
     fieldErrors.customer_name = 'お客様名を入力してください。'
-  }
-
-  if (!phoneNumber) {
-    fieldErrors.phone_number = '電話番号を入力してください。'
   }
 
   if (!itemName) {
@@ -202,6 +271,17 @@ export async function saveOrderAction(
 
       if (error) {
         console.error('Error updating order:', error)
+
+        if (isDuplicateOrderNoError(error)) {
+          return {
+            status: 'error',
+            message: '受付No.が重複しています。別の番号に変更してください。',
+            fieldErrors: {
+              order_no: 'この受付No.はすでに使われています。',
+            },
+          }
+        }
+
         return {
           status: 'error',
           message: '客注の更新に失敗しました。',
@@ -219,16 +299,55 @@ export async function saveOrderAction(
       }
     }
 
-    const insertPayload: CustomerOrderInsert = {
+    const baseInsertPayload: CustomerOrderInsert = {
       ...payload,
+      order_date: payload.order_date ?? getTodayDateInputValue(),
       created_at: now,
       updated_at: now,
     }
 
-    const { error } = await supabase.from('customer_orders').insert(insertPayload as never)
+    let insertError: unknown = null
+    const usesManualOrderNo = Boolean(baseInsertPayload.order_no)
 
-    if (error) {
-      console.error('Error creating order:', error)
+    for (let attempt = 0; attempt < AUTO_ORDER_NO_RETRY_LIMIT; attempt += 1) {
+      const insertPayload: CustomerOrderInsert = {
+        ...baseInsertPayload,
+        order_no: usesManualOrderNo
+          ? baseInsertPayload.order_no
+          : await generateNextOrderNo(supabase),
+      }
+
+      const { error } = await supabase.from('customer_orders').insert(insertPayload as never)
+
+      if (!error) {
+        insertError = null
+        break
+      }
+
+      insertError = error
+
+      if (usesManualOrderNo || !isDuplicateOrderNoError(error)) {
+        break
+      }
+    }
+
+    if (insertError) {
+      console.error('Error creating order:', insertError)
+
+      if (isDuplicateOrderNoError(insertError)) {
+        return {
+          status: 'error',
+          message: usesManualOrderNo
+            ? '受付No.が重複しています。別の番号に変更してください。'
+            : '受付No.の自動採番が重複しました。もう一度登録してください。',
+          fieldErrors: {
+            order_no: usesManualOrderNo
+              ? 'この受付No.はすでに使われています。'
+              : '自動採番に失敗しました。',
+          },
+        }
+      }
+
       return {
         status: 'error',
         message: '客注の登録に失敗しました。',

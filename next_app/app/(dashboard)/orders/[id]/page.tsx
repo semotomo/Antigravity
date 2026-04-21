@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Package, Phone, ScanLine, Store, UserRound } from 'lucide-react'
+import { cancelOrderAction } from '@/app/actions/orders'
 import { OrderDetailView } from '@/components/orders/OrderDetailView'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
@@ -8,6 +9,7 @@ import {
   getOrderStatusLabel,
   isOrderStatus,
   ORDER_STATUS_BADGE_VARIANTS,
+  TERMINAL_ORDER_STATUSES,
 } from '@/lib/orders'
 import { fetchOrderDetails, fetchOrderFormOptions } from '@/lib/queries/orders'
 
@@ -31,6 +33,9 @@ export default async function OrderDetailPage({
     ? ORDER_STATUS_BADGE_VARIANTS[order.status]
     : 'gray'
   const janCode = order.jan_code ?? order.product?.jan_code ?? '未設定'
+  const canCancel =
+    isOrderStatus(order.status) &&
+    !(TERMINAL_ORDER_STATUSES as readonly string[]).includes(order.status)
 
   return (
     <div className="space-y-6">
@@ -64,6 +69,17 @@ export default async function OrderDetailPage({
               <p className="mt-2 text-sm font-semibold">{formatOrderDateTime(order.updated_at)}</p>
             </div>
           </div>
+          {canCancel ? (
+            <form action={cancelOrderAction} className="mt-6">
+              <input type="hidden" name="id" value={order.id} />
+              <button
+                type="submit"
+                className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+              >
+                キャンセルにする
+              </button>
+            </form>
+          ) : null}
         </div>
 
         <div className="grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-5">
@@ -72,7 +88,9 @@ export default async function OrderDetailPage({
               <Phone className="h-4 w-4" />
               電話番号
             </div>
-            <p className="mt-3 text-base font-semibold text-gray-900">{order.phone_number}</p>
+            <p className="mt-3 text-base font-semibold text-gray-900">
+              {order.phone_number || '未入力'}
+            </p>
           </div>
           <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">

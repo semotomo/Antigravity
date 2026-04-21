@@ -5,12 +5,46 @@ import type {
   OrderStoreOption,
 } from '@/lib/orders'
 
+const ORDER_PRODUCT_BATCH_SIZE = 1000
+
+type BatchedQueryResult<T> = {
+  data: T[] | null
+  error: unknown | null
+}
+
+async function fetchAllRows<T>(
+  fetchBatch: (from: number, to: number) => Promise<BatchedQueryResult<T>>,
+  label: string
+) {
+  const rows: T[] = []
+  let from = 0
+
+  while (true) {
+    const to = from + ORDER_PRODUCT_BATCH_SIZE - 1
+    const { data, error } = await fetchBatch(from, to)
+
+    if (error) {
+      console.error(`Error fetching ${label}:`, error)
+      return []
+    }
+
+    const batch = data ?? []
+    rows.push(...batch)
+
+    if (batch.length < ORDER_PRODUCT_BATCH_SIZE) {
+      break
+    }
+
+    from += batch.length
+  }
+
+  return rows
+}
+
 export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
   const supabase = await createClient()
-  const [{ data: orders, error: ordersError }, { data: stores, error: storesError }, {
-    data: products,
-    error: productsError,
-  }] = await Promise.all([
+  const [{ data: orders, error: ordersError }, { data: stores, error: storesError }, products] =
+    await Promise.all([
     supabase
       .from('customer_orders')
       .select(`
@@ -38,7 +72,16 @@ export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase.from('stores').select('id, name'),
-    supabase.from('products').select('id, product_name, jan_code, category'),
+    fetchAllRows<OrderProductOption>(
+      async (from, to) =>
+        await supabase
+          .from('products')
+          .select('id, product_name, jan_code, category')
+          .order('product_name', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to),
+      'products for customer orders'
+    ),
   ])
 
   if (ordersError) {
@@ -50,13 +93,9 @@ export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
     console.error('Error fetching stores for customer orders:', storesError)
   }
 
-  if (productsError) {
-    console.error('Error fetching products for customer orders:', productsError)
-  }
-
   const storeMap = new Map(((stores ?? []) as OrderStoreOption[]).map((store) => [store.id, store]))
   const productMap = new Map(
-    ((products ?? []) as OrderProductOption[]).map((product) => [product.id, product])
+    products.map((product) => [product.id, product])
   )
 
   return ((orders ?? []) as Omit<OrderListRow, 'store' | 'product'>[]).map((order) => ({
@@ -146,28 +185,28 @@ export async function fetchOrderFormOptions(): Promise<{
 }> {
   const supabase = await createClient()
 
-  const [{ data: stores, error: storesError }, { data: products, error: productsError }] =
+  const [{ data: stores, error: storesError }, products] =
     await Promise.all([
       supabase.from('stores').select('id, name').order('id', { ascending: true }),
-      supabase
-        .from('products')
-        .select('id, product_name, jan_code, category')
-        .eq('is_active', true)
-        .order('product_name', { ascending: true }),
+      fetchAllRows<OrderProductOption>(
+        async (from, to) =>
+          await supabase
+            .from('products')
+            .select('id, product_name, jan_code, category')
+            .eq('is_active', true)
+            .order('product_name', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+        'active products for customer orders'
+      ),
     ])
 
   if (storesError) {
     console.error('Error fetching stores:', storesError)
   }
 
-  if (productsError) {
-    console.error('Error fetching products:', productsError)
-  }
-
   return {
     stores: (stores ?? []) as OrderStoreOption[],
-    products: ((products ?? []) as OrderProductOption[]).filter(
-      (product) => Boolean(product.product_name)
-    ),
+    products: products.filter((product) => Boolean(product.product_name)),
   }
 }

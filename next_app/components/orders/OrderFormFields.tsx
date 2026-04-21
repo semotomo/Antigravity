@@ -1,10 +1,13 @@
+'use client'
+
+import { useMemo, useState } from 'react'
 import type {
   OrderListRow,
   OrderMutationState,
   OrderProductOption,
   OrderStoreOption,
 } from '@/lib/orders'
-import { ORDER_STATUSES, ORDER_STATUS_LABELS } from '@/lib/orders'
+import { getTodayDateInputValue, ORDER_STATUSES, ORDER_STATUS_LABELS } from '@/lib/orders'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 
 type OrderFormFieldsProps = {
@@ -13,6 +16,14 @@ type OrderFormFieldsProps = {
   stores: OrderStoreOption[]
   products: OrderProductOption[]
   fieldErrors: OrderMutationState['fieldErrors']
+}
+
+function normalizeJanCode(value: string) {
+  return value.replace(/\D/g, '')
+}
+
+function hasCompleteJanCodeLength(value: string) {
+  return value.length === 8 || value.length === 12 || value.length === 13
 }
 
 export function OrderFormFields({
@@ -30,6 +41,39 @@ export function OrderFormFields({
         ? String(mainStore.id)
         : ''
   const defaultJanCode = order?.jan_code ?? order?.product?.jan_code ?? ''
+  const defaultOrderDate = order?.order_date ?? (mode === 'create' ? getTodayDateInputValue() : '')
+  const [itemName, setItemName] = useState(order?.item_name ?? '')
+  const [janCode, setJanCode] = useState(defaultJanCode)
+  const [selectedProductId, setSelectedProductId] = useState(
+    order?.product_id ? String(order.product_id) : ''
+  )
+  const productsByJanCode = useMemo(() => {
+    const productMap = new Map<string, OrderProductOption>()
+
+    products.forEach((product) => {
+      const normalizedJanCode = normalizeJanCode(product.jan_code ?? '')
+
+      if (normalizedJanCode && !productMap.has(normalizedJanCode)) {
+        productMap.set(normalizedJanCode, product)
+      }
+    })
+
+    return productMap
+  }, [products])
+  const normalizedJanCode = normalizeJanCode(janCode)
+  const matchedProduct = normalizedJanCode ? productsByJanCode.get(normalizedJanCode) : null
+
+  function handleJanCodeChange(value: string) {
+    setJanCode(value)
+
+    const normalizedValue = normalizeJanCode(value)
+    const product = normalizedValue ? productsByJanCode.get(normalizedValue) : null
+
+    if (product) {
+      setSelectedProductId(String(product.id))
+      setItemName(product.product_name || '')
+    }
+  }
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -47,11 +91,11 @@ export function OrderFormFields({
       </label>
 
       <label className="space-y-2">
-        <span className="text-sm font-medium text-gray-700">電話番号 *</span>
+        <span className="text-sm font-medium text-gray-700">電話番号</span>
         <input
           name="phone_number"
-          required
           defaultValue={order?.phone_number ?? ''}
+          placeholder="未入力でも登録できます"
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         />
         {fieldErrors.phone_number ? (
@@ -64,7 +108,8 @@ export function OrderFormFields({
         <input
           name="item_name"
           required
-          defaultValue={order?.item_name ?? ''}
+          value={itemName}
+          onChange={(event) => setItemName(event.target.value)}
           placeholder="例: ロイヤルカナン 3kg 1袋"
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         />
@@ -82,7 +127,23 @@ export function OrderFormFields({
         />
       </label>
 
-      <JanCodeScannerField defaultValue={defaultJanCode} error={fieldErrors.jan_code} />
+      <div className="space-y-2 md:col-span-2">
+        <JanCodeScannerField
+          defaultValue={defaultJanCode}
+          error={fieldErrors.jan_code}
+          onValueChange={handleJanCodeChange}
+        />
+        {matchedProduct ? (
+          <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+            JANコードに一致: {matchedProduct.product_name}
+            {matchedProduct.category ? ` / ${matchedProduct.category}` : ''}
+          </p>
+        ) : hasCompleteJanCodeLength(normalizedJanCode) ? (
+          <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+            商品マスタに一致するJANコードが見つかりません。商品名は手入力できます。
+          </p>
+        ) : null}
+      </div>
 
       <label className="space-y-2">
         <span className="text-sm font-medium text-gray-700">受付担当</span>
@@ -155,7 +216,8 @@ export function OrderFormFields({
         <span className="text-sm font-medium text-gray-700">商品マスタ紐付け</span>
         <select
           name="product_id"
-          defaultValue={order?.product_id ?? ''}
+          value={selectedProductId}
+          onChange={(event) => setSelectedProductId(event.target.value)}
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         >
           <option value="">未設定</option>
@@ -174,7 +236,7 @@ export function OrderFormFields({
         <input
           name="order_date"
           type="date"
-          defaultValue={order?.order_date ?? ''}
+          defaultValue={defaultOrderDate}
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         />
         {fieldErrors.order_date ? (

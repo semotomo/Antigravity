@@ -16,6 +16,7 @@ import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
 type JanCodeScannerFieldProps = {
   defaultValue?: string
   error?: string
+  onValueChange?: (value: string) => void
 }
 
 type DetectedBarcode = {
@@ -181,6 +182,7 @@ function subscribeToDeviceProfile() {
 export function JanCodeScannerField({
   defaultValue = '',
   error,
+  onValueChange,
 }: JanCodeScannerFieldProps) {
   const inputId = useId()
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -198,6 +200,16 @@ export function JanCodeScannerField({
     () => false
   )
   const unavailableScannerMessage = scannerOpen ? getUnavailableScannerMessage() : ''
+
+  const onDetectedValue = useEffectEvent((nextValue: string) => {
+    setValue(nextValue)
+    onValueChange?.(nextValue)
+  })
+
+  function updateValue(nextValue: string) {
+    setValue(nextValue)
+    onValueChange?.(nextValue)
+  }
 
   function cleanupScannerResources() {
     if (timeoutRef.current !== null) {
@@ -272,7 +284,7 @@ export function JanCodeScannerField({
       }
 
       cleanupScannerResources()
-      setValue(detectedCode)
+      updateValue(detectedCode)
       setScannerMessage('写真から JAN / UPC コードを読み取りました。')
       setScannerOpen(false)
     } catch {
@@ -320,7 +332,7 @@ export function JanCodeScannerField({
 
         if (detectedCode) {
           stopScanner()
-          setValue(detectedCode)
+          onDetectedValue(detectedCode)
           setScannerMessage('JAN コードを読み取りました。')
           setScannerOpen(false)
           return
@@ -411,7 +423,7 @@ export function JanCodeScannerField({
               if (detectedCode) {
                 activeControls.stop()
                 fallbackControlsRef.current = null
-                setValue(detectedCode)
+                onDetectedValue(detectedCode)
                 setScannerMessage('JAN コードを読み取りました。')
                 setScannerOpen(false)
                 return
@@ -485,7 +497,7 @@ export function JanCodeScannerField({
         inputMode="numeric"
         placeholder="例: 4901234567894"
         value={value}
-        onChange={(event) => setValue(event.target.value.replace(/\D/g, ''))}
+        onChange={(event) => updateValue(event.target.value.replace(/\D/g, ''))}
         className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
       />
       <input

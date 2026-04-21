@@ -1,34 +1,24 @@
 'use client'
 
 import Link from 'next/link'
-import type { ReactNode } from 'react'
 import {
   ArrowRight,
   CalendarClock,
-  ClipboardList,
-  Package,
-  Phone,
-  SquarePen,
-  Store,
-  UserRound,
 } from 'lucide-react'
 import { useFormStatus } from 'react-dom'
-import { advanceOrderStatusAction, cancelOrderAction } from '@/app/actions/orders'
+import { advanceOrderStatusAction } from '@/app/actions/orders'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
   formatOrderDate,
-  formatOrderDateTime,
   getNextOrderAction,
   getOrderStatusLabel,
   isOrderStatus,
   ORDER_STATUS_BADGE_VARIANTS,
-  TERMINAL_ORDER_STATUSES,
   type OrderListRow,
 } from '@/lib/orders'
 
 type OrderCardProps = {
   order: OrderListRow
-  onEdit: (order: OrderListRow) => void
 }
 
 function ActionSubmitButton({
@@ -60,33 +50,8 @@ function ActionSubmitButton({
   )
 }
 
-function MetaRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-2xl bg-gray-50 px-3 py-2.5">
-      <div className="mt-0.5 text-gray-500">{icon}</div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-400">
-          {label}
-        </p>
-        <p className="mt-1 break-words text-sm text-gray-700">{value}</p>
-      </div>
-    </div>
-  )
-}
-
-export function OrderCard({ order, onEdit }: OrderCardProps) {
+export function OrderCard({ order }: OrderCardProps) {
   const nextAction = getNextOrderAction(order.status)
-  const isTerminal =
-    isOrderStatus(order.status) &&
-    (order.status === TERMINAL_ORDER_STATUSES[0] || order.status === TERMINAL_ORDER_STATUSES[1])
   const badgeVariant = isOrderStatus(order.status)
     ? ORDER_STATUS_BADGE_VARIANTS[order.status]
     : 'gray'
@@ -104,7 +69,6 @@ export function OrderCard({ order, onEdit }: OrderCardProps) {
               </span>
             ) : null}
           </div>
-          <p className="mt-2 text-sm text-gray-500">更新順で受付内容を確認しやすい客注カードです。</p>
         </div>
         <StatusBadge variant={badgeVariant}>{getOrderStatusLabel(order.status)}</StatusBadge>
       </div>
@@ -125,39 +89,14 @@ export function OrderCard({ order, onEdit }: OrderCardProps) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3">
-        <MetaRow
-          icon={<Phone className="h-4 w-4" />}
-          label="電話番号"
-          value={order.phone_number}
-        />
-        <MetaRow
-          icon={<Store className="h-4 w-4" />}
-          label="受付店舗"
-          value={order.store?.name ?? '未設定'}
-        />
-        <MetaRow
-          icon={<UserRound className="h-4 w-4" />}
-          label="受付担当"
-          value={order.staff_name || '未設定'}
-        />
-        <MetaRow
-          icon={<Package className="h-4 w-4" />}
-          label="補足"
-          value={order.item_details || order.notes || '補足情報なし'}
-        />
-        <MetaRow
-          icon={<CalendarClock className="h-4 w-4" />}
-          label="受付日"
-          value={formatOrderDate(order.order_date)}
-        />
-        <MetaRow
-          icon={<ClipboardList className="h-4 w-4" />}
-          label="更新"
-          value={`登録 ${formatOrderDateTime(order.created_at)} / 更新 ${formatOrderDateTime(
-            order.updated_at
-          )}`}
-        />
+      <div className="mt-4 flex items-center gap-3 rounded-2xl bg-gray-50 px-3 py-2.5">
+        <CalendarClock className="h-4 w-4 shrink-0 text-gray-500" />
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-400">
+            受付日
+          </p>
+          <p className="mt-1 text-sm font-medium text-gray-700">{formatOrderDate(order.order_date)}</p>
+        </div>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -169,15 +108,6 @@ export function OrderCard({ order, onEdit }: OrderCardProps) {
           </form>
         ) : null}
 
-        <button
-          type="button"
-          onClick={() => onEdit(order)}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-        >
-          <SquarePen className="h-4 w-4" />
-          編集
-        </button>
-
         <Link
           href={`/orders/${order.id}`}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
@@ -185,13 +115,6 @@ export function OrderCard({ order, onEdit }: OrderCardProps) {
           <ArrowRight className="h-4 w-4" />
           詳細を見る
         </Link>
-
-        {!isTerminal ? (
-          <form action={cancelOrderAction}>
-            <input type="hidden" name="id" value={order.id} />
-            <ActionSubmitButton label="キャンセルにする" tone="danger" />
-          </form>
-        ) : null}
       </div>
     </article>
   )

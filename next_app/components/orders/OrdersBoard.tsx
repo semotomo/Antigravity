@@ -24,8 +24,8 @@ type OrdersBoardProps = {
 
 type DialogState =
   | {
-      mode: 'create' | 'edit'
-      order: OrderListRow | null
+      mode: 'create'
+      order: null
       nonce: number
     }
   | null
@@ -57,14 +57,6 @@ export function OrdersBoard({
     setDialogState({
       mode: 'create',
       order: null,
-      nonce: Date.now(),
-    })
-  }
-
-  const openEditDialog = (order: OrderListRow) => {
-    setDialogState({
-      mode: 'edit',
-      order,
       nonce: Date.now(),
     })
   }
@@ -148,7 +140,7 @@ export function OrdersBoard({
           {filteredOrders.length > 0 ? (
             <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
               {filteredOrders.map((order) => (
-                <OrderCard key={order.id} order={order} onEdit={openEditDialog} />
+                <OrderCard key={order.id} order={order} />
               ))}
             </div>
           ) : (
@@ -172,7 +164,7 @@ export function OrdersBoard({
 
       {dialogState ? (
         <OrderFormModal
-          key={`${dialogState.mode}-${dialogState.order?.id ?? 'new'}-${dialogState.nonce}`}
+          key={`${dialogState.mode}-new-${dialogState.nonce}`}
           open
           mode={dialogState.mode}
           order={dialogState.order}
