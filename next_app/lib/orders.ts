@@ -186,6 +186,18 @@ export function formatOrderDateTime(value: string | null | undefined) {
   })
 }
 
+export function getTodayDateInputValue(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
 export function normalizeOptionalText(value: FormDataEntryValue | null) {
   const text = typeof value === 'string' ? value.trim() : ''
   return text.length > 0 ? text : null
