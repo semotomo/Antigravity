@@ -1,6 +1,14 @@
 'use client'
 
-import { useEffect, useEffectEvent, useId, useRef, useState, type ChangeEvent } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+} from 'react'
 import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { DecodeHintType } from '@zxing/library'
 import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
@@ -166,6 +174,10 @@ function isAppleMobileDevice() {
   )
 }
 
+function subscribeToDeviceProfile() {
+  return () => {}
+}
+
 export function JanCodeScannerField({
   defaultValue = '',
   error,
@@ -180,6 +192,11 @@ export function JanCodeScannerField({
   const [value, setValue] = useState(defaultValue)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scannerMessage, setScannerMessage] = useState('')
+  const shouldUsePhotoScannerOnly = useSyncExternalStore(
+    subscribeToDeviceProfile,
+    isAppleMobileDevice,
+    () => false
+  )
   const unavailableScannerMessage = scannerOpen ? getUnavailableScannerMessage() : ''
 
   function cleanupScannerResources() {
@@ -438,24 +455,26 @@ export function JanCodeScannerField({
           JANコード
         </label>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setScannerMessage('')
-              setScannerOpen((current) => !current)
-            }}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-          >
-            {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
-            {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
-          </button>
+          {shouldUsePhotoScannerOnly ? null : (
+            <button
+              type="button"
+              onClick={() => {
+                setScannerMessage('')
+                setScannerOpen((current) => !current)
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            >
+              {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+              {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
           >
             <ImagePlus className="h-4 w-4" />
-            写真から読取
+            {shouldUsePhotoScannerOnly ? '写真で撮影して読取' : '写真から読取'}
           </button>
         </div>
       </div>
@@ -495,8 +514,10 @@ export function JanCodeScannerField({
         </div>
       ) : (
         <p className="text-xs text-gray-500">
-          8桁・12桁・13桁の JAN / UPC コードを入力できます。スマホのカメラ読取は HTTPS または
-          localhost で利用できます。iPad / iPhone ではライブ読取を優先し、写真読取では回転補正も試します。
+          8桁・12桁・13桁の JAN / UPC コードを入力できます。
+          {shouldUsePhotoScannerOnly
+            ? 'iPad / iPhone では「写真で撮影して読取」を使ってください。'
+            : 'スマホのカメラ読取は HTTPS または localhost で利用できます。'}
         </p>
       )}
 
