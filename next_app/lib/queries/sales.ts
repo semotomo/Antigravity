@@ -11,7 +11,7 @@ export type ServiceLikeCandidate = Pick<SaleRow, 'category' | 'product_group' | 
 
 const SERVICE_CATEGORY = 'サービス'
 const SERVICE_PRODUCT_GROUPS = new Set(['トリミング', 'オプション', '送迎', 'ホテル'])
-const SERVICE_KEYWORDS = ['マイクロチップ']
+const SERVICE_KEYWORDS = ['マイクロチップ', 'ホテル', '一時預かり', '１時間毎', '1時間毎']
 const SERVICE_NAME_PATTERNS = [
   /（[CcＣｃ]）$/,
   /\([Cc]\)$/,
@@ -27,6 +27,8 @@ const SERVICE_NAME_PATTERNS = [
   /歯みがき/,
   /歯磨き/,
 ]
+const ANIMAL_WEIGHT_SERVICE_PATTERN =
+  /^(犬|ネコ|猫|ウサギ|フェレット|小動物)(?:[（(]|[\s　]|$).*(\d|[０-９]).*(kg|ｋｇ|KG|ＫＧ|㎏)/i
 
 export type SalesFilter = {
   dateFrom?: string
@@ -85,6 +87,7 @@ export function isServiceLikeSaleRow(
 
   return (
     SERVICE_KEYWORDS.some((keyword) => productName.includes(keyword)) ||
+    ANIMAL_WEIGHT_SERVICE_PATTERN.test(productName) ||
     SERVICE_NAME_PATTERNS.some((pattern) => pattern.test(productName))
   )
 }
