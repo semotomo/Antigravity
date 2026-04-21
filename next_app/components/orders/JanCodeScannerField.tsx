@@ -108,32 +108,43 @@ function loadImageElement(src: string) {
   })
 }
 
-async function buildPreparedImageUrl(file: File) {
+function buildPreparedCanvasImageUrl(image: HTMLImageElement, rotationDegrees: number) {
+  const maxDimension = 1600
+  const scale = Math.min(1, maxDimension / Math.max(image.width, image.height))
+  const width = Math.max(1, Math.round(image.width * scale))
+  const height = Math.max(1, Math.round(image.height * scale))
+  const isSideways = Math.abs(rotationDegrees) % 180 === 90
+  const canvas = document.createElement('canvas')
+
+  canvas.width = isSideways ? height : width
+  canvas.height = isSideways ? width : height
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    return null
+  }
+
+  // iOSの撮影画像は向きが崩れることがあるため、複数方向を試せるようにする。
+  context.translate(canvas.width / 2, canvas.height / 2)
+  context.rotate((rotationDegrees * Math.PI) / 180)
+  context.drawImage(image, -width / 2, -height / 2, width, height)
+
+  return canvas.toDataURL('image/jpeg', 0.92)
+}
+
+async function buildPreparedImageUrls(file: File) {
   const originalUrl = URL.createObjectURL(file)
 
   try {
     const image = await loadImageElement(originalUrl)
-    const maxDimension = 1800
-    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height))
-    const canvas = document.createElement('canvas')
-
-    canvas.width = Math.max(1, Math.round(image.width * scale))
-    canvas.height = Math.max(1, Math.round(image.height * scale))
-
-    const context = canvas.getContext('2d')
-
-    if (!context) {
-      return {
-        originalUrl,
-        decodeTargets: [originalUrl],
-      }
-    }
-
-    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const preparedTargets = [0, 90, -90, 180]
+      .map((rotation) => buildPreparedCanvasImageUrl(image, rotation))
+      .filter((target): target is string => Boolean(target))
 
     return {
       originalUrl,
-      decodeTargets: [canvas.toDataURL('image/jpeg', 0.92), originalUrl],
+      decodeTargets: [...preparedTargets, originalUrl],
     }
   } catch {
     return {
@@ -143,7 +154,7 @@ async function buildPreparedImageUrl(file: File) {
   }
 }
 
-function shouldPreferStillCapture() {
+function isAppleMobileDevice() {
   if (typeof navigator === 'undefined') {
     return false
   }
@@ -216,7 +227,7 @@ export function JanCodeScannerField({
 
     try {
       const reader = createFallbackReader()
-      const { originalUrl, decodeTargets } = await buildPreparedImageUrl(file)
+      const { originalUrl, decodeTargets } = await buildPreparedImageUrls(file)
       let detectedCode: string | null = null
 
       try {
@@ -405,7 +416,7 @@ export function JanCodeScannerField({
     }
 
     const startScanner = async () => {
-      const startedWithNative = await startNativeScanner()
+      const startedWithNative = isAppleMobileDevice() ? false : await startNativeScanner()
 
       if (!startedWithNative && !cancelled) {
         await startFallbackScanner()
@@ -431,14 +442,6 @@ export function JanCodeScannerField({
             type="button"
             onClick={() => {
               setScannerMessage('')
-
-              if (shouldPreferStillCapture()) {
-                cleanupScannerResources()
-                setScannerOpen(false)
-                fileInputRef.current?.click()
-                return
-              }
-
               setScannerOpen((current) => !current)
             }}
             className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
@@ -493,8 +496,7 @@ export function JanCodeScannerField({
       ) : (
         <p className="text-xs text-gray-500">
           8桁・12桁・13桁の JAN / UPC コードを入力できます。スマホのカメラ読取は HTTPS または
-          localhost で利用できます。iPad / iPhone では撮影ベースの読取が安定するため、「カメラで読取」または
-          「写真から読取」で撮影して読み取ってください。
+          localhost で利用できます。iPad / iPhone ではライブ読取を優先し、写真読取では回転補正も試します。
         </p>
       )}
 
