@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useMemo, useState } from 'react'
 import { Search, SquarePen } from 'lucide-react'
+import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { ProductFormModal } from '@/components/products/ProductFormModal'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
@@ -183,18 +184,27 @@ export function ProductsBoard({ products }: ProductsBoardProps) {
 
         <section className="space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-            <label className="block space-y-2">
-              <span className="text-sm font-medium text-gray-700">商品を検索</span>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="商品名 / JAN / カテゴリ / ブランド"
-                  className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-3 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                />
-              </div>
-            </label>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+              <label className="block space-y-2">
+                <span className="text-sm font-medium text-gray-700">商品を検索</span>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="商品名 / JAN / カテゴリ / ブランド"
+                    className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-3 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                  />
+                </div>
+              </label>
+              <JanCodeScannerField
+                label="JANコード検索"
+                showInput={false}
+                wrapperClassName="space-y-2"
+                helpText="読み取ったJAN / UPCコードで商品を絞り込みます。"
+                onValueChange={(value) => setQuery(value)}
+              />
+            </div>
           </div>
 
           <DataTable

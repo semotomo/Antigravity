@@ -16,7 +16,13 @@ import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
 type JanCodeScannerFieldProps = {
   defaultValue?: string
   error?: string
+  helpText?: string
+  label?: string
+  name?: string
   onValueChange?: (value: string) => void
+  placeholder?: string
+  showInput?: boolean
+  wrapperClassName?: string
 }
 
 type DetectedBarcode = {
@@ -182,7 +188,13 @@ function subscribeToDeviceProfile() {
 export function JanCodeScannerField({
   defaultValue = '',
   error,
+  helpText,
+  label = 'JANコード',
+  name = 'jan_code',
   onValueChange,
+  placeholder = '例: 4901234567894',
+  showInput = true,
+  wrapperClassName = 'space-y-2 md:col-span-2',
 }: JanCodeScannerFieldProps) {
   const inputId = useId()
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -460,12 +472,25 @@ export function JanCodeScannerField({
     }
   }, [scannerOpen, unavailableScannerMessage])
 
+  const defaultHelpText = (
+    <>
+      8桁・12桁・13桁の JAN / UPC コードを入力できます。
+      {shouldUsePhotoScannerOnly
+        ? 'iPad / iPhone では「写真で撮影して読取」を使ってください。'
+        : 'スマホのカメラ読取は HTTPS または localhost で利用できます。'}
+    </>
+  )
+
   return (
-    <div className="space-y-2 md:col-span-2">
+    <div className={wrapperClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
-          JANコード
-        </label>
+        {showInput ? (
+          <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
+            {label}
+          </label>
+        ) : (
+          <span className="text-sm font-medium text-gray-700">{label}</span>
+        )}
         <div className="flex flex-wrap gap-2">
           {shouldUsePhotoScannerOnly ? null : (
             <button
@@ -491,15 +516,17 @@ export function JanCodeScannerField({
         </div>
       </div>
 
-      <input
-        id={inputId}
-        name="jan_code"
-        inputMode="numeric"
-        placeholder="例: 4901234567894"
-        value={value}
-        onChange={(event) => updateValue(event.target.value.replace(/\D/g, ''))}
-        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-      />
+      {showInput ? (
+        <input
+          id={inputId}
+          name={name}
+          inputMode="numeric"
+          placeholder={placeholder}
+          value={value}
+          onChange={(event) => updateValue(event.target.value.replace(/\D/g, ''))}
+          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+        />
+      ) : null}
       <input
         ref={fileInputRef}
         type="file"
@@ -526,10 +553,7 @@ export function JanCodeScannerField({
         </div>
       ) : (
         <p className="text-xs text-gray-500">
-          8桁・12桁・13桁の JAN / UPC コードを入力できます。
-          {shouldUsePhotoScannerOnly
-            ? 'iPad / iPhone では「写真で撮影して読取」を使ってください。'
-            : 'スマホのカメラ読取は HTTPS または localhost で利用できます。'}
+          {helpText ?? defaultHelpText}
         </p>
       )}
 
