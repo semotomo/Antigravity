@@ -8,22 +8,30 @@ import {
   useState,
   useSyncExternalStore,
   type ChangeEvent,
+  type KeyboardEvent,
+  type Ref,
 } from 'react'
 import { BarcodeFormat, BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser'
 import { DecodeHintType } from '@zxing/library'
 import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
 
 type JanCodeScannerFieldProps = {
+  continuousScan?: boolean
   defaultValue?: string
   error?: string
   helpText?: string
+  inputRef?: Ref<HTMLInputElement>
   label?: string
   name?: string
+  onDetectedCode?: (value: string, source: DetectedCodeSource) => void
+  onEnterKey?: (value: string) => void
   onValueChange?: (value: string) => void
   placeholder?: string
   showInput?: boolean
   wrapperClassName?: string
 }
+
+type DetectedCodeSource = 'camera' | 'photo'
 
 type DetectedBarcode = {
   rawValue: string
@@ -186,11 +194,15 @@ function subscribeToDeviceProfile() {
 }
 
 export function JanCodeScannerField({
+  continuousScan = false,
   defaultValue = '',
   error,
   helpText,
+  inputRef,
   label = 'JANコード',
   name = 'jan_code',
+  onDetectedCode,
+  onEnterKey,
   onValueChange,
   placeholder = '例: 4901234567894',
   showInput = true,
@@ -203,6 +215,7 @@ export function JanCodeScannerField({
   const streamRef = useRef<MediaStream | null>(null)
   const timeoutRef = useRef<number | null>(null)
   const fallbackControlsRef = useRef<IScannerControls | null>(null)
+  const lastProcessedCodeRef = useRef<string | null>(null)
   const [value, setValue] = useState(defaultValue)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scannerMessage, setScannerMessage] = useState('')
@@ -213,9 +226,12 @@ export function JanCodeScannerField({
   )
   const unavailableScannerMessage = scannerOpen ? getUnavailableScannerMessage() : ''
 
-  const onDetectedValue = useEffectEvent((nextValue: string) => {
-    setValue(nextValue)
-    onValueChange?.(nextValue)
+  const onDetectedValue = useEffectEvent((nextValue: string, source: DetectedCodeSource) => {
+    const inputValue = continuousScan && source === 'camera' ? '' : nextValue
+
+    setValue(inputValue)
+    onValueChange?.(inputValue)
+    onDetectedCode?.(nextValue, source)
   })
 
   function updateValue(nextValue: string) {
@@ -223,7 +239,37 @@ export function JanCodeScannerField({
     onValueChange?.(nextValue)
   }
 
+  function updatePhotoDetectedValue(nextValue: string) {
+    setValue(nextValue)
+    onValueChange?.(nextValue)
+    onDetectedCode?.(nextValue, 'photo')
+  }
+
+  function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter' || !onEnterKey) {
+      return
+    }
+
+    event.preventDefault()
+    onEnterKey(value)
+  }
+
+  const shouldSkipContinuousDuplicate = useEffectEvent((nextValue: string) => {
+    if (!continuousScan) {
+      return false
+    }
+
+    if (lastProcessedCodeRef.current === nextValue) {
+      return true
+    }
+
+    lastProcessedCodeRef.current = nextValue
+    return false
+  })
+
   function cleanupScannerResources() {
+    lastProcessedCodeRef.current = null
+
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current)
       timeoutRef.current = null
@@ -296,7 +342,7 @@ export function JanCodeScannerField({
       }
 
       cleanupScannerResources()
-      updateValue(detectedCode)
+      updatePhotoDetectedValue(detectedCode)
       setScannerMessage('写真から JAN / UPC コードを読み取りました。')
       setScannerOpen(false)
     } catch {
@@ -343,12 +389,26 @@ export function JanCodeScannerField({
           .find((barcode): barcode is string => Boolean(barcode))
 
         if (detectedCode) {
+          if (shouldSkipContinuousDuplicate(detectedCode)) {
+            scheduleScan()
+            return
+          }
+
+          if (continuousScan) {
+            onDetectedValue(detectedCode, 'camera')
+            setScannerMessage('JANコードを読み取りました。続けて次の商品を映してください。')
+            scheduleScan()
+            return
+          }
+
           stopScanner()
-          onDetectedValue(detectedCode)
+          onDetectedValue(detectedCode, 'camera')
           setScannerMessage('JAN コードを読み取りました。')
           setScannerOpen(false)
           return
         }
+
+        lastProcessedCodeRef.current = null
       } catch {
         setScannerMessage('バーコードを読み取れませんでした。カメラ位置を調整して再度お試しください。')
       }
@@ -433,13 +493,28 @@ export function JanCodeScannerField({
               )
 
               if (detectedCode) {
+                if (shouldSkipContinuousDuplicate(detectedCode)) {
+                  return
+                }
+
+                if (continuousScan) {
+                  onDetectedValue(detectedCode, 'camera')
+                  setScannerMessage('JANコードを読み取りました。続けて次の商品を映してください。')
+                  return
+                }
+
                 activeControls.stop()
                 fallbackControlsRef.current = null
-                onDetectedValue(detectedCode)
+                onDetectedValue(detectedCode, 'camera')
                 setScannerMessage('JAN コードを読み取りました。')
                 setScannerOpen(false)
                 return
               }
+            }
+
+            if (decodeError && isRecoverableDecodeError(decodeError)) {
+              lastProcessedCodeRef.current = null
+              return
             }
 
             if (decodeError && !isRecoverableDecodeError(decodeError)) {
@@ -470,7 +545,7 @@ export function JanCodeScannerField({
       cancelled = true
       stopScanner()
     }
-  }, [scannerOpen, unavailableScannerMessage])
+  }, [continuousScan, scannerOpen, unavailableScannerMessage])
 
   const defaultHelpText = (
     <>
@@ -519,11 +594,13 @@ export function JanCodeScannerField({
       {showInput ? (
         <input
           id={inputId}
+          ref={inputRef}
           name={name}
           inputMode="numeric"
           placeholder={placeholder}
           value={value}
           onChange={(event) => updateValue(event.target.value.replace(/\D/g, ''))}
+          onKeyDown={handleInputKeyDown}
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         />
       ) : null}
