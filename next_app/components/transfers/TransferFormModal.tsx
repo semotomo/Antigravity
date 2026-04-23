@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useMemo, useRef, useState } from 'react'
+import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useFormStatus } from 'react-dom'
 import { Minus, PackagePlus, Plus, Search, Trash2, X } from 'lucide-react'
 import { createTransfersAction } from '@/app/actions/transfers'
@@ -32,6 +32,20 @@ type TransferFormModalProps = {
   onClose: () => void
 }
 
+type JanCommitSource = 'manual' | 'scanner'
+
+type UnmatchedTransferDraftItem = {
+  id: string
+  jan_code: string
+  product_name: string
+  quantity: number
+  cost_price: string
+  selling_price: string
+  entry_type: TransferEntryType
+  usage_category: TransferUsageCategory | null
+  memo: string
+}
+
 function SubmitButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus()
 
@@ -54,11 +68,14 @@ export function TransferFormModal({
 }: TransferFormModalProps) {
   const [state, formAction] = useActionState(createTransfersAction, initialTransferMutationState)
   const formRef = useRef<HTMLFormElement | null>(null)
+  const janInputRef = useRef<HTMLInputElement | null>(null)
   const [scannerNonce, setScannerNonce] = useState(0)
   const [items, setItems] = useState<TransferDraftItem[]>([])
+  const [unmatchedItems, setUnmatchedItems] = useState<UnmatchedTransferDraftItem[]>([])
   const [quantity, setQuantity] = useState(1)
   const [memo, setMemo] = useState('')
   const [lookupMessage, setLookupMessage] = useState('')
+  const [submitWarning, setSubmitWarning] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<TransferProductOption | null>(null)
   const [manualMode, setManualMode] = useState(false)
   const [manualProductName, setManualProductName] = useState('')
@@ -108,7 +125,7 @@ export function TransferFormModal({
     return null
   }
 
-  function resetLookupArea() {
+  function clearProductEntryArea(resetScanner: boolean) {
     setSelectedProduct(null)
     setManualMode(false)
     setManualProductName('')
@@ -116,8 +133,16 @@ export function TransferFormModal({
     setManualSellingPrice('0')
     setQuantity(1)
     setMemo('')
+
+    if (resetScanner) {
+      setScannerNonce((current) => current + 1)
+    }
+  }
+
+  function resetLookupArea() {
+    clearProductEntryArea(true)
     setLookupMessage('')
-    setScannerNonce((current) => current + 1)
+    setSubmitWarning('')
   }
 
   function readJanCodeFromForm() {
@@ -127,6 +152,141 @@ export function TransferFormModal({
 
     const formData = new FormData(formRef.current)
     return normalizeJanCode(String(formData.get('jan_code') ?? ''))
+  }
+
+  function focusJanInputSoon() {
+    window.setTimeout(() => janInputRef.current?.focus(), 0)
+  }
+
+  function getTransferContextError() {
+    if (!selectedFromStoreId) {
+      return '使用店舗 / 移動元店舗を先に選択してください。'
+    }
+
+    if (entryType === 'transfer' && !selectedToStoreId) {
+      return '店舗間移動では移動先店舗を選択してください。'
+    }
+
+    if (entryType === 'transfer' && selectedFromStoreId === selectedToStoreId) {
+      return '移動元と移動先に同じ店舗は選べません。'
+    }
+
+    if (entryType === 'usage' && !usageCategory) {
+      return '物品使用の区分を選択してください。'
+    }
+
+    return ''
+  }
+
+  function createTransferDraftItem(
+    janCode: string,
+    productName: string,
+    costPrice: number,
+    sellingPrice: number
+  ): TransferDraftItem {
+    return {
+      jan_code: janCode,
+      product_name: productName,
+      quantity,
+      cost_price: costPrice,
+      selling_price: sellingPrice,
+      entry_type: entryType,
+      usage_category: entryType === 'usage' ? usageCategory : null,
+      memo: memo.trim() || null,
+    }
+  }
+
+  function handleJanCodeCommit(rawJanCode: string, source: JanCommitSource) {
+    const janCode = normalizeJanCode(rawJanCode)
+    const resetScanner = source === 'manual'
+
+    setSubmitWarning('')
+
+    if (!isValidJanCode(janCode)) {
+      setSelectedProduct(null)
+      setManualMode(false)
+      setLookupMessage('JANコードは8桁、12桁、13桁のいずれかで入力してください。')
+      focusJanInputSoon()
+      return
+    }
+
+    const contextError = getTransferContextError()
+
+    if (contextError) {
+      setLookupMessage(contextError)
+      focusJanInputSoon()
+      return
+    }
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      setLookupMessage('数量は1以上で入力してください。')
+      focusJanInputSoon()
+      return
+    }
+
+    const foundProduct = productsByJan.get(janCode) ?? null
+    const itemUsageCategory = entryType === 'usage' ? usageCategory : null
+
+    if (foundProduct) {
+      const productName = foundProduct.product_name?.trim() || '商品名未設定'
+      const costPrice = Number(foundProduct.cost_price ?? 0)
+      const sellingPrice = Number(foundProduct.selling_price ?? 0)
+
+      setItems((current) => [
+        ...current,
+        createTransferDraftItem(
+          janCode,
+          productName,
+          Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
+          Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0
+        ),
+      ])
+      clearProductEntryArea(resetScanner)
+      setLookupMessage(`${productName} を登録リストに追加しました。続けてJANを読み取れます。`)
+      focusJanInputSoon()
+      return
+    }
+
+    setUnmatchedItems((current) => {
+      const matchedIndex = current.findIndex(
+        (item) =>
+          item.jan_code === janCode &&
+          item.entry_type === entryType &&
+          item.usage_category === itemUsageCategory &&
+          item.memo === memo.trim()
+      )
+
+      if (matchedIndex >= 0) {
+        return current.map((item, index) =>
+          index === matchedIndex
+            ? {
+                ...item,
+                quantity: item.quantity + quantity,
+              }
+            : item
+        )
+      }
+
+      return [
+        ...current,
+        {
+          id: `${janCode}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          jan_code: janCode,
+          product_name: '',
+          quantity,
+          cost_price: '0',
+          selling_price: '0',
+          entry_type: entryType,
+          usage_category: itemUsageCategory,
+          memo: memo.trim(),
+        },
+      ]
+    })
+    clearProductEntryArea(resetScanner)
+    setLookupMessage(
+      `JAN ${janCode} は商品マスタ未一致です。手入力待ちに追加しました。続けてJANを読み取れます。`
+    )
+    focusJanInputSoon()
   }
 
   function handleSearchProduct() {
@@ -241,6 +401,78 @@ export function TransferFormModal({
     setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
   }
 
+  function updateUnmatchedItem(
+    id: string,
+    patch: Partial<Omit<UnmatchedTransferDraftItem, 'id' | 'jan_code' | 'entry_type' | 'usage_category'>>
+  ) {
+    setUnmatchedItems((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
+    )
+  }
+
+  function removeUnmatchedItem(id: string) {
+    setUnmatchedItems((current) => current.filter((item) => item.id !== id))
+    setSubmitWarning('')
+  }
+
+  function resolveUnmatchedItem(item: UnmatchedTransferDraftItem) {
+    const productName = item.product_name.trim()
+    const costPrice = Number(item.cost_price)
+    const sellingPrice = Number(item.selling_price)
+    const itemQuantity = Math.max(1, Number(item.quantity) || 1)
+
+    if (!productName) {
+      setSubmitWarning(`JAN ${item.jan_code} の商品名を入力してください。`)
+      return
+    }
+
+    if (!Number.isFinite(costPrice) || costPrice < 0) {
+      setSubmitWarning(`JAN ${item.jan_code} の原価は0以上で入力してください。`)
+      return
+    }
+
+    if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+      setSubmitWarning(`JAN ${item.jan_code} の売価は0以上で入力してください。`)
+      return
+    }
+
+    setItems((current) => [
+      ...current,
+      {
+        jan_code: item.jan_code,
+        product_name: productName,
+        quantity: itemQuantity,
+        cost_price: costPrice,
+        selling_price: sellingPrice,
+        entry_type: item.entry_type,
+        usage_category: item.usage_category,
+        memo: item.memo.trim() || null,
+      },
+    ])
+    removeUnmatchedItem(item.id)
+    setLookupMessage(`${productName} を登録リストに追加しました。`)
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (unmatchedItems.length > 0) {
+      event.preventDefault()
+      setSubmitWarning('商品マスタ未一致の商品が残っています。手入力を完了して登録リストへ移してください。')
+      return
+    }
+
+    if (items.length === 0) {
+      event.preventDefault()
+      setSubmitWarning('登録リストに商品を追加してください。')
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4"
@@ -270,7 +502,7 @@ export function TransferFormModal({
           </button>
         </div>
 
-        <form ref={formRef} action={formAction} className="space-y-6 px-6 py-6">
+        <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="space-y-6 px-6 py-6">
           <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -377,7 +609,16 @@ export function TransferFormModal({
             </div>
 
             <div className="mt-5 space-y-4">
-              <JanCodeScannerField key={scannerNonce} />
+              <JanCodeScannerField
+                key={scannerNonce}
+                continuousScan
+                helpText="JANを入力してEnter、またはカメラで読み取ると登録リストへ追加します。未一致の商品は手入力待ちに退避します。"
+                inputRef={janInputRef}
+                onDetectedCode={(value, source) =>
+                  handleJanCodeCommit(value, source === 'photo' ? 'manual' : 'scanner')
+                }
+                onEnterKey={(value) => handleJanCodeCommit(value, 'manual')}
+              />
 
               <div className="flex justify-end">
                 <button
@@ -566,6 +807,113 @@ export function TransferFormModal({
               <span className="text-xs text-red-600">{state.fieldErrors.items}</span>
             ) : null}
 
+            {submitWarning ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+                {submitWarning}
+              </div>
+            ) : null}
+
+            {unmatchedItems.length > 0 ? (
+              <div className="space-y-3 rounded-3xl border border-amber-200 bg-amber-50 p-4">
+                <div>
+                  <h4 className="text-base font-semibold text-amber-950">商品マスタ未一致</h4>
+                  <p className="mt-1 text-sm text-amber-900">
+                    読み取りは止めずに続けられます。登録前に商品名・原価・売価を入力して登録リストへ移してください。
+                  </p>
+                </div>
+                {unmatchedItems.map((item) => (
+                  <div key={item.id} className="rounded-2xl border border-amber-200 bg-white p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">JAN: {item.jan_code}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                            {formatTransferEntryTypeLabel(item.entry_type)}
+                          </span>
+                          {item.usage_category ? (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                              {formatTransferUsageCategoryLabel(item.usage_category)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeUnmatchedItem(item.id)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        削除
+                      </button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <label className="space-y-2 md:col-span-2">
+                        <span className="text-sm font-medium text-gray-700">商品名</span>
+                        <input
+                          value={item.product_name}
+                          onChange={(event) => updateUnmatchedItem(item.id, { product_name: event.target.value })}
+                          placeholder="商品名を入力"
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">数量</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={item.quantity}
+                          onChange={(event) =>
+                            updateUnmatchedItem(item.id, {
+                              quantity: Math.max(1, Number(event.target.value) || 1),
+                            })
+                          }
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">原価</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.cost_price}
+                          onChange={(event) => updateUnmatchedItem(item.id, { cost_price: event.target.value })}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">売価</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.selling_price}
+                          onChange={(event) => updateUnmatchedItem(item.id, { selling_price: event.target.value })}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2 md:col-span-2 xl:col-span-4">
+                        <span className="text-sm font-medium text-gray-700">メモ</span>
+                        <input
+                          value={item.memo}
+                          onChange={(event) => updateUnmatchedItem(item.id, { memo: event.target.value })}
+                          placeholder="任意"
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={() => resolveUnmatchedItem(item)}
+                          className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700"
+                        >
+                          登録リストへ移す
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             {items.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
                 まだ商品が追加されていません。JAN コードを検索して登録リストへ追加してください。
@@ -664,7 +1012,7 @@ export function TransferFormModal({
             >
               閉じる
             </button>
-            <SubmitButton disabled={items.length === 0} />
+            <SubmitButton disabled={items.length === 0 && unmatchedItems.length === 0} />
           </div>
         </form>
       </div>
