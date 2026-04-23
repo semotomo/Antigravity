@@ -4,13 +4,12 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   ArrowRightLeft,
-  BarChart3,
-  CalendarDays,
   ClipboardList,
   ListOrdered,
   Package,
   type LucideIcon,
 } from 'lucide-react'
+import { SalesMoreMenu } from '@/components/layout/SalesMoreMenu'
 
 type NavMatch = 'exact' | 'products' | 'transfers'
 
@@ -26,9 +25,6 @@ const navItems: NavItem[] = [
   { name: '商品', href: '/products', icon: Package, match: 'products' },
   { name: '移動', href: '/products/transfers', icon: ArrowRightLeft, match: 'transfers' },
   { name: '一覧', href: '/sales', icon: ListOrdered, match: 'exact' },
-  { name: '日次', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
-  { name: '集計', href: '/sales/products', icon: Package, match: 'exact' },
-  { name: 'ABC', href: '/sales/abc', icon: BarChart3, match: 'exact' },
 ]
 
 function isActivePath(pathname: string, item: NavItem) {
@@ -52,7 +48,7 @@ export default function BottomNav() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white pb-safe md:hidden">
-      <div className="grid h-16 grid-cols-7">
+      <div className="grid h-16 grid-cols-5">
         {navItems.map((item) => {
           const isActive = isActivePath(pathname, item)
 
@@ -69,6 +65,7 @@ export default function BottomNav() {
             </Link>
           )
         })}
+        <SalesMoreMenu variant="bottom" />
       </div>
     </div>
   )

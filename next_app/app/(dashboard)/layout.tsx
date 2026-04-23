@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react'
 import SideNav from '@/components/layout/SideNav'
 import BottomNav from '@/components/layout/BottomNav'
+import { SalesMoreMenu } from '@/components/layout/SalesMoreMenu'
 
 const SIDEBAR_STORAGE_KEY = 'dashboard-sidebar-collapsed'
 const SIDEBAR_STORAGE_EVENT = 'dashboard-sidebar-storage-change'
@@ -89,8 +90,9 @@ export default function DashboardLayout({
           sidebarCollapsed ? 'md:pl-20' : 'md:pl-64'
         }`}
       >
-        <header className="flex h-14 shrink-0 items-center bg-white px-4 shadow-sm md:hidden">
+        <header className="flex h-14 shrink-0 items-center justify-between bg-white px-4 shadow-sm md:hidden">
           <span className="font-bold tracking-wider text-gray-900">KENNEL</span>
+          <SalesMoreMenu variant="header" />
         </header>
 
         <main className="mx-auto flex-1 w-full max-w-7xl overflow-auto p-4 pb-20 md:p-6 md:pb-6">
