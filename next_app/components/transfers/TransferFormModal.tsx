@@ -3,7 +3,10 @@
 import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useFormStatus } from 'react-dom'
 import { Minus, PackagePlus, Plus, Search, Trash2, X } from 'lucide-react'
-import { createTransfersAction } from '@/app/actions/transfers'
+import {
+  createTransfersAction,
+  lookupTransferProductByJanAction,
+} from '@/app/actions/transfers'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { formatYen } from '@/lib/products'
 import {
@@ -78,15 +81,19 @@ export function TransferFormModal({
   onClose,
 }: TransferFormModalProps) {
   const [state, formAction] = useActionState(createTransfersAction, initialTransferMutationState)
-  const formRef = useRef<HTMLFormElement | null>(null)
   const janInputRef = useRef<HTMLInputElement | null>(null)
+  const pendingLookupKeysRef = useRef(new Set<string>())
+  const unmatchedItemsRef = useRef<UnmatchedTransferDraftItem[]>([])
   const [scannerNonce, setScannerNonce] = useState(0)
+  const [lookupOverrides, setLookupOverrides] = useState<Record<string, TransferProductOption>>({})
   const [items, setItems] = useState<TransferDraftItem[]>([])
   const [unmatchedItems, setUnmatchedItems] = useState<UnmatchedTransferDraftItem[]>([])
+  const [janInputValue, setJanInputValue] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [memo, setMemo] = useState('')
   const [lookupMessage, setLookupMessage] = useState('')
   const [lookupPending, setLookupPending] = useState(false)
+  const [backgroundLookupCount, setBackgroundLookupCount] = useState(0)
   const [resolvingUnmatchedId, setResolvingUnmatchedId] = useState<string | null>(null)
   const [submitWarning, setSubmitWarning] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<TransferProductOption | null>(null)
@@ -115,9 +122,17 @@ export function TransferFormModal({
         }
       }
 
+      for (const [candidate, product] of Object.entries(lookupOverrides)) {
+        const existing = candidateMap.get(candidate)
+
+        if (!existing || (!existing.is_active && product.is_active)) {
+          candidateMap.set(candidate, product)
+        }
+      }
+
       return candidateMap
     },
-    [products]
+    [lookupOverrides, products]
   )
 
   const selectedFromStoreId = fromStoreId ?? chooseDefaultTransferFromStoreId(stores)
@@ -146,6 +161,25 @@ export function TransferFormModal({
     [unmatchedItems]
   )
 
+  const hasDraftChanges =
+    Boolean(normalizeJanCode(janInputValue)) ||
+    Boolean(selectedProduct) ||
+    manualMode ||
+    Boolean(manualProductName.trim()) ||
+    Boolean(memo.trim()) ||
+    manualCostPrice !== '0' ||
+    manualSellingPrice !== '0' ||
+    quantity !== 1 ||
+    items.length > 0 ||
+    unmatchedItems.length > 0 ||
+    lookupPending ||
+    backgroundLookupCount > 0 ||
+    resolvingUnmatchedId !== null
+
+  useEffect(() => {
+    unmatchedItemsRef.current = unmatchedItems
+  }, [unmatchedItems])
+
   useEffect(() => {
     if (state.status === 'success') {
       onClose()
@@ -162,6 +196,7 @@ export function TransferFormModal({
     setManualProductName('')
     setManualCostPrice('0')
     setManualSellingPrice('0')
+    setJanInputValue('')
     setQuantity(1)
     setMemo('')
 
@@ -177,16 +212,91 @@ export function TransferFormModal({
   }
 
   function readJanCodeFromForm() {
-    if (!formRef.current) {
-      return ''
-    }
-
-    const formData = new FormData(formRef.current)
-    return normalizeJanCode(String(formData.get('jan_code') ?? ''))
+    return normalizeJanCode(janInputValue)
   }
 
-  function focusJanInputSoon() {
+  function focusJanInputSoon(shouldFocus: boolean) {
+    if (!shouldFocus) {
+      return
+    }
+
     window.setTimeout(() => janInputRef.current?.focus(), 0)
+  }
+
+  function rememberLookupProduct(product: TransferProductOption) {
+    setLookupOverrides((current) => {
+      const next = { ...current }
+      let changed = false
+
+      for (const candidate of buildJanCodeCandidates(product.jan_code ?? '')) {
+        const existing = next[candidate]
+
+        if (!existing || existing.id !== product.id || existing.is_active !== product.is_active) {
+          next[candidate] = product
+          changed = true
+        }
+      }
+
+      return changed ? next : current
+    })
+  }
+
+  function buildTransferLookupKey(janCode: string, context: TransferDraftContext) {
+    return [
+      janCode,
+      String(context.from_store_id),
+      String(context.to_store_id ?? ''),
+      context.entry_type,
+      context.usage_category ?? '',
+      context.memo ?? '',
+    ].join(':')
+  }
+
+  function isSameUnmatchedItem(
+    item: UnmatchedTransferDraftItem,
+    janCode: string,
+    context: TransferDraftContext
+  ) {
+    return (
+      item.jan_code === janCode &&
+      item.from_store_id === context.from_store_id &&
+      item.to_store_id === context.to_store_id &&
+      item.entry_type === context.entry_type &&
+      item.usage_category === context.usage_category &&
+      item.memo === (context.memo ?? '')
+    )
+  }
+
+  async function findProductByJanCode(janCode: string) {
+    const cachedProduct = productsByJan.get(janCode) ?? null
+
+    if (cachedProduct) {
+      return {
+        errorMessage: '',
+        lookupFailed: false,
+        product: cachedProduct,
+      }
+    }
+
+    const result = await lookupTransferProductByJanAction(janCode)
+
+    if (result.status === 'error') {
+      return {
+        errorMessage: result.message,
+        lookupFailed: true,
+        product: null,
+      }
+    }
+
+    if (result.product) {
+      rememberLookupProduct(result.product)
+    }
+
+    return {
+      errorMessage: '',
+      lookupFailed: false,
+      product: result.product,
+    }
   }
 
   function getTransferContextError() {
@@ -278,9 +388,86 @@ export function TransferFormModal({
     }
   }
 
+  async function reconcileUnmatchedJanCode(janCode: string, context: TransferDraftContext) {
+    const lookupKey = buildTransferLookupKey(janCode, context)
+
+    if (pendingLookupKeysRef.current.has(lookupKey)) {
+      return
+    }
+
+    pendingLookupKeysRef.current.add(lookupKey)
+    setBackgroundLookupCount((current) => current + 1)
+
+    try {
+      const { errorMessage, lookupFailed, product } = await findProductByJanCode(janCode)
+
+      if (lookupFailed) {
+        setLookupMessage(errorMessage)
+        return
+      }
+
+      if (!product) {
+        if (unmatchedItemsRef.current.some((item) => isSameUnmatchedItem(item, janCode, context))) {
+          setLookupMessage(`JAN ${janCode} は商品マスタ未一致のため手入力待ちに残しています。`)
+        }
+        return
+      }
+
+      const matchedItem = unmatchedItemsRef.current.find((item) =>
+        isSameUnmatchedItem(item, janCode, context)
+      )
+
+      if (!matchedItem) {
+        return
+      }
+
+      const productName = product.product_name?.trim() || '商品名未設定'
+      const costPrice = Number(product.cost_price ?? 0)
+      const sellingPrice = Number(product.selling_price ?? 0)
+
+      setUnmatchedItems((current) => current.filter((item) => item.id !== matchedItem.id))
+      setItems((current) => [
+        ...current,
+        {
+          from_store_id: matchedItem.from_store_id,
+          to_store_id: matchedItem.to_store_id,
+          jan_code: matchedItem.jan_code,
+          product_name: productName,
+          quantity: matchedItem.quantity,
+          cost_price: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
+          selling_price: Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0,
+          entry_type: matchedItem.entry_type,
+          usage_category: matchedItem.usage_category,
+          memo: matchedItem.memo.trim() || null,
+        },
+      ])
+      setLookupMessage(`JAN ${janCode} を商品マスタと照合し、「${productName}」を登録リストへ移しました。`)
+    } finally {
+      pendingLookupKeysRef.current.delete(lookupKey)
+      setBackgroundLookupCount((current) => Math.max(0, current - 1))
+    }
+  }
+
+  function requestClose() {
+    if (!hasDraftChanges) {
+      onClose()
+      return
+    }
+
+    const confirmMessage =
+      lookupPending || backgroundLookupCount > 0 || resolvingUnmatchedId !== null
+        ? '処理中の入力があります。キャンセルしますか？'
+        : '入力途中の内容があります。キャンセルしますか？'
+
+    if (window.confirm(confirmMessage)) {
+      onClose()
+    }
+  }
+
   function handleJanCodeCommit(rawJanCode: string, source: JanCommitSource) {
     const janCode = normalizeJanCode(rawJanCode)
     const resetScanner = source === 'manual'
+    const shouldRefocusInput = source === 'manual'
 
     setSubmitWarning('')
 
@@ -288,7 +475,7 @@ export function TransferFormModal({
       setSelectedProduct(null)
       setManualMode(false)
       setLookupMessage('JANコードは8桁、12桁、13桁のいずれかで入力してください。')
-      focusJanInputSoon()
+      focusJanInputSoon(shouldRefocusInput)
       return 'JANコードは8桁、12桁、13桁のいずれかで入力してください。'
     }
 
@@ -296,7 +483,7 @@ export function TransferFormModal({
 
     if (contextError) {
       setLookupMessage(contextError)
-      focusJanInputSoon()
+      focusJanInputSoon(shouldRefocusInput)
       return contextError
     }
 
@@ -304,7 +491,7 @@ export function TransferFormModal({
 
     if (quantityError) {
       setLookupMessage(quantityError)
-      focusJanInputSoon()
+      focusJanInputSoon(shouldRefocusInput)
       return quantityError
     }
 
@@ -334,7 +521,7 @@ export function TransferFormModal({
           ? `${feedbackMessage} 商品マスタに一致しました。`
           : `${productName} を登録リストに追加しました。`
       )
-      focusJanInputSoon()
+      focusJanInputSoon(shouldRefocusInput)
       return `${feedbackMessage} 商品マスタに一致しました。`
     }
 
@@ -381,27 +568,37 @@ export function TransferFormModal({
     const feedbackMessage = buildScanFeedbackMessage(janCode, context.quantity)
     setLookupMessage(
       source === 'scanner'
-        ? `${feedbackMessage} 商品マスタ未一致のため手入力待ちへ追加しました。`
-        : `JAN ${janCode} は商品マスタ未一致です。手入力待ちに追加しました。`
+        ? `${feedbackMessage} 商品マスタを照合中です。見つからない場合は手入力待ちに残ります。`
+        : `JAN ${janCode} を手入力待ちへ追加しました。商品マスタを再照合しています。`
     )
-    focusJanInputSoon()
-    return `${feedbackMessage} 商品マスタ未一致のため手入力待ちへ追加しました。`
+    void reconcileUnmatchedJanCode(janCode, context)
+    focusJanInputSoon(shouldRefocusInput)
+    return `${feedbackMessage} 商品マスタを照合中です。見つからない場合は手入力待ちに残ります。`
   }
 
-  function handleSearchProduct() {
+  async function handleSearchProduct() {
     const janCode = readJanCodeFromForm()
 
     if (!isValidJanCode(janCode)) {
       setSelectedProduct(null)
       setManualMode(false)
       setLookupMessage('JAN コードは 8 桁・12 桁・13 桁のいずれかで入力してください。')
+      focusJanInputSoon(true)
       return
     }
 
-    const foundProduct = productsByJan.get(janCode) ?? null
+    const { errorMessage, lookupFailed, product } = await findProductByJanCode(janCode)
 
-    if (foundProduct) {
-      setSelectedProduct(foundProduct)
+    if (lookupFailed) {
+      setSelectedProduct(null)
+      setManualMode(false)
+      setLookupMessage(errorMessage)
+      focusJanInputSoon(true)
+      return
+    }
+
+    if (product) {
+      setSelectedProduct(product)
       setManualMode(false)
       setLookupMessage('商品マスタが見つかりました。数量とメモを確認して追加してください。')
       return
@@ -415,17 +612,19 @@ export function TransferFormModal({
     setLookupMessage('商品マスタに見つからなかったため、手入力で登録リストへ追加できます。')
   }
 
-  function runLookupAction(processingMessage: string, action: () => void) {
+  function runLookupAction(processingMessage: string, action: () => void | Promise<void>) {
     setLookupPending(true)
     setLookupMessage(processingMessage)
     setSubmitWarning('')
 
     window.setTimeout(() => {
-      try {
-        action()
-      } finally {
-        setLookupPending(false)
-      }
+      void (async () => {
+        try {
+          await action()
+        } finally {
+          setLookupPending(false)
+        }
+      })()
     }, 0)
   }
 
@@ -577,6 +776,12 @@ export function TransferFormModal({
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (backgroundLookupCount > 0) {
+      event.preventDefault()
+      setSubmitWarning('商品マスタを照合中です。処理完了後に登録してください。')
+      return
+    }
+
     if (unmatchedItems.length > 0) {
       event.preventDefault()
       setSubmitWarning('商品マスタ未一致の商品が残っています。手入力を完了して登録リストへ移してください。')
@@ -592,7 +797,7 @@ export function TransferFormModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl"
@@ -610,7 +815,7 @@ export function TransferFormModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
             aria-label="閉じる"
           >
@@ -618,7 +823,7 @@ export function TransferFormModal({
           </button>
         </div>
 
-        <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="space-y-6 px-6 py-6">
+        <form action={formAction} onSubmit={handleSubmit} className="space-y-6 px-6 py-6">
           <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -730,6 +935,7 @@ export function TransferFormModal({
                 continuousScan
                 helpText="JANを入力してEnter、またはカメラで読み取ると登録リストへ追加します。未一致の商品は手入力待ちに退避します。"
                 inputRef={janInputRef}
+                onValueChange={setJanInputValue}
                 onDetectedCode={(value, source) =>
                   handleJanCodeCommit(value, source === 'photo' ? 'manual' : 'scanner')
                 }
@@ -1132,7 +1338,7 @@ export function TransferFormModal({
           <div className="flex flex-col-reverse gap-3 border-t border-gray-200 pt-5 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
             >
               閉じる

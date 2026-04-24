@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath, refresh } from 'next/cache'
+import { searchProductByJan } from '@/lib/queries/transfers'
 import { createClient } from '@/lib/supabase/server'
 import {
   isValidTransferEntryType,
@@ -13,8 +14,15 @@ import {
   type TransferEntryType,
   type TransferInsert,
   type TransferMutationState,
+  type TransferProductOption,
   type TransferUsageCategory,
 } from '@/lib/transfers'
+
+type TransferProductLookupResult = {
+  product: TransferProductOption | null
+  status: 'success' | 'error'
+  message: string
+}
 
 function getTrimmedValue(formData: FormData, key: string) {
   const value = formData.get(key)
@@ -245,6 +253,41 @@ export async function createTransfersAction(
         error instanceof Error
           ? error.message
           : '店舗間移動・物品使用の登録中に予期しないエラーが発生しました。',
+    }
+  }
+}
+
+export async function lookupTransferProductByJanAction(
+  rawJanCode: string
+): Promise<TransferProductLookupResult> {
+  try {
+    const janCode = normalizeJanCode(rawJanCode)
+
+    if (!isValidJanCode(janCode)) {
+      return {
+        status: 'error',
+        message: 'JANコードは8桁、12桁、13桁のいずれかで入力してください。',
+        product: null,
+      }
+    }
+
+    await requireAuthenticatedClient()
+    const product = await searchProductByJan(janCode)
+
+    return {
+      status: 'success',
+      message: product ? '商品マスタが見つかりました。' : '商品マスタに一致しませんでした。',
+      product,
+    }
+  } catch (error) {
+    console.error('Unexpected error while looking up transfer product by JAN:', error)
+    return {
+      status: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'JANコード検索中に予期しないエラーが発生しました。',
+      product: null,
     }
   }
 }

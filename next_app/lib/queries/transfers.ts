@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { buildJanCodeCandidates } from '@/lib/transfers'
 import type {
   TransferHistoryFilter,
   TransferListRow,
@@ -42,6 +43,32 @@ async function fetchAllRows<T>(
   return rows
 }
 
+function pickPreferredTransferProduct(products: TransferProductOption[]) {
+  const candidates = products.filter(
+    (product) => Boolean(product.product_name) && Boolean(product.jan_code)
+  )
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  return [...candidates].sort((left, right) => {
+    if (left.is_active !== right.is_active) {
+      return left.is_active ? -1 : 1
+    }
+
+    const leftName = left.product_name ?? ''
+    const rightName = right.product_name ?? ''
+    const nameOrder = leftName.localeCompare(rightName, 'ja')
+
+    if (nameOrder !== 0) {
+      return nameOrder
+    }
+
+    return left.id - right.id
+  })[0]
+}
+
 export async function fetchStores(): Promise<TransferStoreOption[]> {
   const supabase = await createClient()
   const { data, error } = await supabase.from('stores').select('id, name').order('id')
@@ -75,18 +102,46 @@ export async function fetchTransferProducts(): Promise<TransferProductOption[]> 
 
 export async function searchProductByJan(janCode: string): Promise<TransferProductOption | null> {
   const supabase = await createClient()
+  const candidates = buildJanCodeCandidates(janCode)
+
+  if (candidates.length === 0) {
+    return null
+  }
+
   const { data, error } = await supabase
     .from('products')
     .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
-    .eq('jan_code', janCode)
-    .maybeSingle()
+    .in('jan_code', candidates)
 
   if (error) {
     console.error('Error searching transfer product by JAN:', error)
     return null
   }
 
-  return (data as TransferProductOption | null) ?? null
+  const exactMatch = pickPreferredTransferProduct((data ?? []) as TransferProductOption[])
+
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  const allProducts = await fetchAllRows<TransferProductOption>(
+    async (from, to) =>
+      await supabase
+        .from('products')
+        .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
+        .order('is_active', { ascending: false })
+        .order('product_name', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to),
+    'transfer products fallback lookup'
+  )
+
+  const candidateSet = new Set(candidates)
+  return pickPreferredTransferProduct(
+    allProducts.filter((product) =>
+      buildJanCodeCandidates(product.jan_code ?? '').some((candidate) => candidateSet.has(candidate))
+    )
+  )
 }
 
 export async function fetchTransferHistory(
