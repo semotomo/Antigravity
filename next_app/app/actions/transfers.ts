@@ -21,33 +21,9 @@ function getTrimmedValue(formData: FormData, key: string) {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function parseRequiredStoreId(formData: FormData, fieldErrors: TransferMutationState['fieldErrors']) {
-  const value = getTrimmedValue(formData, 'from_store_id')
-  const parsed = Number(value)
-
-  if (!value || !Number.isInteger(parsed) || parsed <= 0) {
-    fieldErrors.from_store_id = '店舗を選択してください。'
-    return null
-  }
-
-  return parsed
-}
-
-function parseOptionalStoreId(formData: FormData, fieldErrors: TransferMutationState['fieldErrors']) {
-  const value = getTrimmedValue(formData, 'to_store_id')
-
-  if (!value) {
-    return null
-  }
-
-  const parsed = Number(value)
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    fieldErrors.to_store_id = '移動先店舗を選択してください。'
-    return null
-  }
-
-  return parsed
+function parseItemStoreId(value: unknown) {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
 function parseDraftEntryType(
@@ -105,6 +81,8 @@ function parseTransferDraftItems(
     const items: TransferDraftItem[] = []
 
     for (const item of parsed) {
+      const fromStoreId = parseItemStoreId(item?.from_store_id)
+      const toStoreId = parseItemStoreId(item?.to_store_id)
       const janCode = normalizeJanCode(String(item?.jan_code ?? ''))
       const productName = String(item?.product_name ?? '').trim()
       const quantity = Number(item?.quantity)
@@ -146,11 +124,28 @@ function parseTransferDraftItems(
         return null
       }
 
+      if (fromStoreId === null) {
+        fieldErrors.from_store_id = '使用店舗 / 移動元店舗を選択してください。'
+        return null
+      }
+
+      if (entryType === 'transfer' && toStoreId === null) {
+        fieldErrors.to_store_id = '店舗間移動を含む場合は移動先店舗を選択してください。'
+        return null
+      }
+
+      if (entryType === 'transfer' && fromStoreId === toStoreId) {
+        fieldErrors.to_store_id = '移動元と移動先に同じ店舗は選べません。'
+        return null
+      }
+
       if (entryType === 'usage' && !usageCategory) {
         return null
       }
 
       items.push({
+        from_store_id: fromStoreId,
+        to_store_id: entryType === 'transfer' ? toStoreId : null,
         jan_code: janCode,
         product_name: productName,
         quantity,
@@ -194,25 +189,9 @@ export async function createTransfersAction(
 ): Promise<TransferMutationState> {
   try {
     const fieldErrors: TransferMutationState['fieldErrors'] = {}
-    const fromStoreId = parseRequiredStoreId(formData, fieldErrors)
-    const toStoreId = parseOptionalStoreId(formData, fieldErrors)
     const items = parseTransferDraftItems(formData, fieldErrors)
-    const hasTransferItems = items?.some((item) => item.entry_type === 'transfer') ?? false
 
-    if (hasTransferItems && toStoreId === null) {
-      fieldErrors.to_store_id = '店舗間移動を含む場合は移動先店舗を選択してください。'
-    }
-
-    if (hasTransferItems && fromStoreId !== null && toStoreId !== null && fromStoreId === toStoreId) {
-      fieldErrors.to_store_id = '移動元と移動先に同じ店舗は選べません。'
-    }
-
-    if (
-      Object.keys(fieldErrors).length > 0 ||
-      fromStoreId === null ||
-      (hasTransferItems && toStoreId === null) ||
-      !items
-    ) {
+    if (Object.keys(fieldErrors).length > 0 || !items) {
       return {
         status: 'error',
         message: '入力内容を確認してください。',
@@ -224,8 +203,8 @@ export async function createTransfersAction(
     const now = new Date().toISOString()
     const records: TransferInsert[] = items.map((item) => ({
       transfer_date: now,
-      from_store_id: fromStoreId,
-      to_store_id: item.entry_type === 'transfer' ? toStoreId : null,
+      from_store_id: item.from_store_id,
+      to_store_id: item.entry_type === 'transfer' ? item.to_store_id : null,
       jan_code: item.jan_code,
       product_name: item.product_name,
       quantity: item.quantity,

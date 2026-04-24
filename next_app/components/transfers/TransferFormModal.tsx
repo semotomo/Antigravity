@@ -34,8 +34,19 @@ type TransferFormModalProps = {
 
 type JanCommitSource = 'manual' | 'scanner'
 
+type TransferDraftContext = {
+  from_store_id: number
+  to_store_id: number | null
+  entry_type: TransferEntryType
+  usage_category: TransferUsageCategory | null
+  quantity: number
+  memo: string | null
+}
+
 type UnmatchedTransferDraftItem = {
   id: string
+  from_store_id: number
+  to_store_id: number | null
   jan_code: string
   product_name: string
   quantity: number
@@ -75,6 +86,8 @@ export function TransferFormModal({
   const [quantity, setQuantity] = useState(1)
   const [memo, setMemo] = useState('')
   const [lookupMessage, setLookupMessage] = useState('')
+  const [lookupPending, setLookupPending] = useState(false)
+  const [resolvingUnmatchedId, setResolvingUnmatchedId] = useState<string | null>(null)
   const [submitWarning, setSubmitWarning] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<TransferProductOption | null>(null)
   const [manualMode, setManualMode] = useState(false)
@@ -89,12 +102,21 @@ export function TransferFormModal({
   )
 
   const productsByJan = useMemo(
-    () =>
-      new Map(
-        products.flatMap((product) =>
-          buildJanCodeCandidates(product.jan_code ?? '').map((candidate) => [candidate, product] as const)
-        )
-      ),
+    () => {
+      const candidateMap = new Map<string, TransferProductOption>()
+
+      for (const product of products) {
+        for (const candidate of buildJanCodeCandidates(product.jan_code ?? '')) {
+          const existing = candidateMap.get(candidate)
+
+          if (!existing || (!existing.is_active && product.is_active)) {
+            candidateMap.set(candidate, product)
+          }
+        }
+      }
+
+      return candidateMap
+    },
     [products]
   )
 
@@ -113,7 +135,16 @@ export function TransferFormModal({
     return chooseDefaultTransferToStoreId(stores, selectedFromStoreId)
   }, [destinationStores, selectedFromStoreId, stores, toStoreId])
 
+  const storeNameById = useMemo(
+    () => new Map(stores.map((store) => [store.id, store.name] as const)),
+    [stores]
+  )
+
   const summary = useMemo(() => summarizeTransferDraftItems(items), [items])
+  const unmatchedQuantityTotal = useMemo(
+    () => unmatchedItems.reduce((sum, item) => sum + item.quantity, 0),
+    [unmatchedItems]
+  )
 
   useEffect(() => {
     if (state.status === 'success') {
@@ -178,21 +209,72 @@ export function TransferFormModal({
     return ''
   }
 
+  function getQuantityError() {
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      return '数量は1以上で入力してください。'
+    }
+
+    return ''
+  }
+
+  function buildTransferDraftContext(): TransferDraftContext {
+    return {
+      from_store_id: selectedFromStoreId as number,
+      to_store_id: entryType === 'transfer' ? (selectedToStoreId as number) : null,
+      entry_type: entryType,
+      usage_category: entryType === 'usage' ? usageCategory : null,
+      quantity,
+      memo: memo.trim() || null,
+    }
+  }
+
+  function getCurrentJanQuantity(janCode: string) {
+    return (
+      items.reduce((sum, item) => sum + (item.jan_code === janCode ? item.quantity : 0), 0) +
+      unmatchedItems.reduce((sum, item) => sum + (item.jan_code === janCode ? item.quantity : 0), 0)
+    )
+  }
+
+  function buildScanFeedbackMessage(janCode: string, quantityAdded: number) {
+    const nextJanQuantity = getCurrentJanQuantity(janCode) + quantityAdded
+    const nextTotalQuantity = summary.totalQuantity + unmatchedQuantityTotal + quantityAdded
+
+    return `JAN ${janCode} を読み取りました。このJAN累計 ${nextJanQuantity}個 / 総読取累計 ${nextTotalQuantity}個`
+  }
+
+  function formatItemStoreSummary(
+    fromStoreId: number,
+    toStoreId: number | null,
+    itemEntryType: TransferEntryType
+  ) {
+    const fromStoreName = storeNameById.get(fromStoreId) ?? '未設定'
+
+    if (itemEntryType === 'usage') {
+      return `使用店舗: ${fromStoreName}`
+    }
+
+    const toStoreName = toStoreId ? storeNameById.get(toStoreId) ?? '未設定' : '未設定'
+    return `移動: ${fromStoreName} → ${toStoreName}`
+  }
+
   function createTransferDraftItem(
+    context: TransferDraftContext,
     janCode: string,
     productName: string,
     costPrice: number,
     sellingPrice: number
   ): TransferDraftItem {
     return {
+      from_store_id: context.from_store_id,
+      to_store_id: context.to_store_id,
       jan_code: janCode,
       product_name: productName,
-      quantity,
+      quantity: context.quantity,
       cost_price: costPrice,
       selling_price: sellingPrice,
-      entry_type: entryType,
-      usage_category: entryType === 'usage' ? usageCategory : null,
-      memo: memo.trim() || null,
+      entry_type: context.entry_type,
+      usage_category: context.usage_category,
+      memo: context.memo,
     }
   }
 
@@ -207,7 +289,7 @@ export function TransferFormModal({
       setManualMode(false)
       setLookupMessage('JANコードは8桁、12桁、13桁のいずれかで入力してください。')
       focusJanInputSoon()
-      return
+      return 'JANコードは8桁、12桁、13桁のいずれかで入力してください。'
     }
 
     const contextError = getTransferContextError()
@@ -215,26 +297,31 @@ export function TransferFormModal({
     if (contextError) {
       setLookupMessage(contextError)
       focusJanInputSoon()
-      return
+      return contextError
     }
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      setLookupMessage('数量は1以上で入力してください。')
+    const quantityError = getQuantityError()
+
+    if (quantityError) {
+      setLookupMessage(quantityError)
       focusJanInputSoon()
-      return
+      return quantityError
     }
 
+    const context = buildTransferDraftContext()
     const foundProduct = productsByJan.get(janCode) ?? null
-    const itemUsageCategory = entryType === 'usage' ? usageCategory : null
+    const itemUsageCategory = context.usage_category
 
     if (foundProduct) {
       const productName = foundProduct.product_name?.trim() || '商品名未設定'
       const costPrice = Number(foundProduct.cost_price ?? 0)
       const sellingPrice = Number(foundProduct.selling_price ?? 0)
+      const feedbackMessage = buildScanFeedbackMessage(janCode, context.quantity)
 
       setItems((current) => [
         ...current,
         createTransferDraftItem(
+          context,
           janCode,
           productName,
           Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
@@ -242,18 +329,24 @@ export function TransferFormModal({
         ),
       ])
       clearProductEntryArea(resetScanner)
-      setLookupMessage(`${productName} を登録リストに追加しました。続けてJANを読み取れます。`)
+      setLookupMessage(
+        source === 'scanner'
+          ? `${feedbackMessage} 商品マスタに一致しました。`
+          : `${productName} を登録リストに追加しました。`
+      )
       focusJanInputSoon()
-      return
+      return `${feedbackMessage} 商品マスタに一致しました。`
     }
 
     setUnmatchedItems((current) => {
       const matchedIndex = current.findIndex(
         (item) =>
           item.jan_code === janCode &&
-          item.entry_type === entryType &&
+          item.from_store_id === context.from_store_id &&
+          item.to_store_id === context.to_store_id &&
+          item.entry_type === context.entry_type &&
           item.usage_category === itemUsageCategory &&
-          item.memo === memo.trim()
+          item.memo === (context.memo ?? '')
       )
 
       if (matchedIndex >= 0) {
@@ -261,7 +354,7 @@ export function TransferFormModal({
           index === matchedIndex
             ? {
                 ...item,
-                quantity: item.quantity + quantity,
+                quantity: item.quantity + context.quantity,
               }
             : item
         )
@@ -271,22 +364,28 @@ export function TransferFormModal({
         ...current,
         {
           id: `${janCode}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          from_store_id: context.from_store_id,
+          to_store_id: context.to_store_id,
           jan_code: janCode,
           product_name: '',
-          quantity,
+          quantity: context.quantity,
           cost_price: '0',
           selling_price: '0',
-          entry_type: entryType,
+          entry_type: context.entry_type,
           usage_category: itemUsageCategory,
-          memo: memo.trim(),
+          memo: context.memo ?? '',
         },
       ]
     })
     clearProductEntryArea(resetScanner)
+    const feedbackMessage = buildScanFeedbackMessage(janCode, context.quantity)
     setLookupMessage(
-      `JAN ${janCode} は商品マスタ未一致です。手入力待ちに追加しました。続けてJANを読み取れます。`
+      source === 'scanner'
+        ? `${feedbackMessage} 商品マスタ未一致のため手入力待ちへ追加しました。`
+        : `JAN ${janCode} は商品マスタ未一致です。手入力待ちに追加しました。`
     )
     focusJanInputSoon()
+    return `${feedbackMessage} 商品マスタ未一致のため手入力待ちへ追加しました。`
   }
 
   function handleSearchProduct() {
@@ -316,26 +415,30 @@ export function TransferFormModal({
     setLookupMessage('商品マスタに見つからなかったため、手入力で登録リストへ追加できます。')
   }
 
+  function runLookupAction(processingMessage: string, action: () => void) {
+    setLookupPending(true)
+    setLookupMessage(processingMessage)
+    setSubmitWarning('')
+
+    window.setTimeout(() => {
+      try {
+        action()
+      } finally {
+        setLookupPending(false)
+      }
+    }, 0)
+  }
+
+  function handleSearchProductAction() {
+    runLookupAction('JANコードを検索中です...', handleSearchProduct)
+  }
+
   function handleAddItem() {
     const janCode = readJanCodeFromForm()
 
-    if (!selectedFromStoreId) {
-      setLookupMessage('使用店舗または移動元店舗を先に選択してください。')
-      return
-    }
-
-    if (entryType === 'transfer' && !selectedToStoreId) {
-      setLookupMessage('店舗間移動を登録する場合は移動先店舗を選択してください。')
-      return
-    }
-
-    if (entryType === 'transfer' && selectedFromStoreId === selectedToStoreId) {
-      setLookupMessage('移動元と移動先に同じ店舗は選べません。')
-      return
-    }
-
-    if (entryType === 'usage' && !usageCategory) {
-      setLookupMessage('物品使用の区分を選択してください。')
+    const contextError = getTransferContextError()
+    if (contextError) {
+      setLookupMessage(contextError)
       return
     }
 
@@ -344,11 +447,13 @@ export function TransferFormModal({
       return
     }
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      setLookupMessage('数量は 1 以上で入力してください。')
+    const quantityError = getQuantityError()
+    if (quantityError) {
+      setLookupMessage(quantityError)
       return
     }
 
+    const context = buildTransferDraftContext()
     const productName = selectedProduct?.product_name?.trim() || manualProductName.trim()
     const costPrice = Number(selectedProduct?.cost_price ?? manualCostPrice)
     const sellingPrice = Number(selectedProduct?.selling_price ?? manualSellingPrice)
@@ -370,18 +475,14 @@ export function TransferFormModal({
 
     setItems((current) => [
       ...current,
-      {
-        jan_code: janCode,
-        product_name: productName,
-        quantity,
-        cost_price: costPrice,
-        selling_price: sellingPrice,
-        entry_type: entryType,
-        usage_category: entryType === 'usage' ? usageCategory : null,
-        memo: memo.trim() || null,
-      },
+      createTransferDraftItem(context, janCode, productName, costPrice, sellingPrice),
     ])
-    resetLookupArea()
+    clearProductEntryArea(true)
+    setLookupMessage(`${productName} を登録リストに追加しました。`)
+  }
+
+  function handleAddItemAction() {
+    runLookupAction('商品を登録リストへ追加中です...', handleAddItem)
   }
 
   function updateItemQuantity(index: number, nextQuantity: number) {
@@ -446,6 +547,8 @@ export function TransferFormModal({
     setItems((current) => [
       ...current,
       {
+        from_store_id: item.from_store_id,
+        to_store_id: item.to_store_id,
         jan_code: item.jan_code,
         product_name: productName,
         quantity: itemQuantity,
@@ -458,6 +561,19 @@ export function TransferFormModal({
     ])
     removeUnmatchedItem(item.id)
     setLookupMessage(`${productName} を登録リストに追加しました。`)
+  }
+
+  function handleResolveUnmatchedItem(item: UnmatchedTransferDraftItem) {
+    setResolvingUnmatchedId(item.id)
+    setSubmitWarning('')
+
+    window.setTimeout(() => {
+      try {
+        resolveUnmatchedItem(item)
+      } finally {
+        setResolvingUnmatchedId((current) => (current === item.id ? null : current))
+      }
+    }, 0)
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -623,11 +739,12 @@ export function TransferFormModal({
               <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={handleSearchProduct}
-                  className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                  onClick={handleSearchProductAction}
+                  disabled={lookupPending}
+                  className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Search className="h-4 w-4" />
-                  検索
+                  {lookupPending ? '処理中...' : '検索'}
                 </button>
               </div>
 
@@ -763,11 +880,12 @@ export function TransferFormModal({
               <div className="flex justify-end">
                 <button
                   type="button"
-                  onClick={handleAddItem}
-                  className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800"
+                  onClick={handleAddItemAction}
+                  disabled={lookupPending}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
                 >
                   <PackagePlus className="h-4 w-4" />
-                  登録リストに追加
+                  {lookupPending ? '処理中...' : '登録リストに追加'}
                 </button>
               </div>
             </div>
@@ -807,12 +925,6 @@ export function TransferFormModal({
               <span className="text-xs text-red-600">{state.fieldErrors.items}</span>
             ) : null}
 
-            {submitWarning ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-                {submitWarning}
-              </div>
-            ) : null}
-
             {unmatchedItems.length > 0 ? (
               <div className="space-y-3 rounded-3xl border border-amber-200 bg-amber-50 p-4">
                 <div>
@@ -826,6 +938,9 @@ export function TransferFormModal({
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-semibold text-gray-900">JAN: {item.jan_code}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {formatItemStoreSummary(item.from_store_id, item.to_store_id, item.entry_type)}
+                        </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
                             {formatTransferEntryTypeLabel(item.entry_type)}
@@ -902,10 +1017,11 @@ export function TransferFormModal({
                       <div className="flex items-end">
                         <button
                           type="button"
-                          onClick={() => resolveUnmatchedItem(item)}
-                          className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700"
+                          onClick={() => handleResolveUnmatchedItem(item)}
+                          disabled={resolvingUnmatchedId === item.id}
+                          className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
                         >
-                          登録リストへ移す
+                          {resolvingUnmatchedId === item.id ? '処理中...' : '登録リストへ移す'}
                         </button>
                       </div>
                     </div>
@@ -929,6 +1045,9 @@ export function TransferFormModal({
                       <div>
                         <p className="font-semibold text-gray-900">{item.product_name}</p>
                         <p className="mt-1 text-xs text-gray-500">JAN: {item.jan_code}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {formatItemStoreSummary(item.from_store_id, item.to_store_id, item.entry_type)}
+                        </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
                             {formatTransferEntryTypeLabel(item.entry_type)}
@@ -1001,6 +1120,12 @@ export function TransferFormModal({
               }`}
             >
               {state.message}
+            </div>
+          ) : null}
+
+          {submitWarning ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+              {submitWarning}
             </div>
           ) : null}
 

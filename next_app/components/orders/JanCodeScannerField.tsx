@@ -23,7 +23,7 @@ type JanCodeScannerFieldProps = {
   inputRef?: Ref<HTMLInputElement>
   label?: string
   name?: string
-  onDetectedCode?: (value: string, source: DetectedCodeSource) => void
+  onDetectedCode?: (value: string, source: DetectedCodeSource) => string | void
   onEnterKey?: (value: string) => void
   onValueChange?: (value: string) => void
   placeholder?: string
@@ -231,7 +231,7 @@ export function JanCodeScannerField({
 
     setValue(inputValue)
     onValueChange?.(inputValue)
-    onDetectedCode?.(nextValue, source)
+    return onDetectedCode?.(nextValue, source)
   })
 
   function updateValue(nextValue: string) {
@@ -242,7 +242,7 @@ export function JanCodeScannerField({
   function updatePhotoDetectedValue(nextValue: string) {
     setValue(nextValue)
     onValueChange?.(nextValue)
-    onDetectedCode?.(nextValue, 'photo')
+    return onDetectedCode?.(nextValue, 'photo')
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -342,8 +342,8 @@ export function JanCodeScannerField({
       }
 
       cleanupScannerResources()
-      updatePhotoDetectedValue(detectedCode)
-      setScannerMessage('写真から JAN / UPC コードを読み取りました。')
+      const detectedMessage = updatePhotoDetectedValue(detectedCode)
+      setScannerMessage(detectedMessage || '写真から JAN / UPC コードを読み取りました。')
       setScannerOpen(false)
     } catch {
       setScannerMessage(
@@ -395,15 +395,17 @@ export function JanCodeScannerField({
           }
 
           if (continuousScan) {
-            onDetectedValue(detectedCode, 'camera')
-            setScannerMessage('JANコードを読み取りました。続けて次の商品を映してください。')
+            const detectedMessage = onDetectedValue(detectedCode, 'camera')
+            setScannerMessage(
+              detectedMessage || 'JANコードを読み取りました。続けて次の商品を映してください。'
+            )
             scheduleScan()
             return
           }
 
           stopScanner()
-          onDetectedValue(detectedCode, 'camera')
-          setScannerMessage('JAN コードを読み取りました。')
+          const detectedMessage = onDetectedValue(detectedCode, 'camera')
+          setScannerMessage(detectedMessage || 'JAN コードを読み取りました。')
           setScannerOpen(false)
           return
         }
@@ -498,15 +500,17 @@ export function JanCodeScannerField({
                 }
 
                 if (continuousScan) {
-                  onDetectedValue(detectedCode, 'camera')
-                  setScannerMessage('JANコードを読み取りました。続けて次の商品を映してください。')
+                  const detectedMessage = onDetectedValue(detectedCode, 'camera')
+                  setScannerMessage(
+                    detectedMessage || 'JANコードを読み取りました。続けて次の商品を映してください。'
+                  )
                   return
                 }
 
                 activeControls.stop()
                 fallbackControlsRef.current = null
-                onDetectedValue(detectedCode, 'camera')
-                setScannerMessage('JAN コードを読み取りました。')
+                const detectedMessage = onDetectedValue(detectedCode, 'camera')
+                setScannerMessage(detectedMessage || 'JAN コードを読み取りました。')
                 setScannerOpen(false)
                 return
               }
