@@ -193,6 +193,16 @@ function subscribeToDeviceProfile() {
   return () => {}
 }
 
+function dismissSoftKeyboard() {
+  if (typeof document === 'undefined') {
+    return
+  }
+
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur()
+  }
+}
+
 export function JanCodeScannerField({
   continuousScan = false,
   defaultValue = '',
@@ -575,6 +585,7 @@ export function JanCodeScannerField({
             <button
               type="button"
               onClick={() => {
+                dismissSoftKeyboard()
                 setScannerMessage('')
                 setScannerOpen((current) => !current)
               }}
@@ -586,7 +597,10 @@ export function JanCodeScannerField({
           )}
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              dismissSoftKeyboard()
+              fileInputRef.current?.click()
+            }}
             className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
           >
             <ImagePlus className="h-4 w-4" />
