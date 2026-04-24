@@ -6,6 +6,42 @@ import type {
   TransferStoreOption,
 } from '@/lib/transfers'
 
+const TRANSFER_PRODUCT_BATCH_SIZE = 1000
+
+type BatchedQueryResult<T> = {
+  data: T[] | null
+  error: unknown | null
+}
+
+async function fetchAllRows<T>(
+  fetchBatch: (from: number, to: number) => Promise<BatchedQueryResult<T>>,
+  label: string
+) {
+  const rows: T[] = []
+  let from = 0
+
+  while (true) {
+    const to = from + TRANSFER_PRODUCT_BATCH_SIZE - 1
+    const { data, error } = await fetchBatch(from, to)
+
+    if (error) {
+      console.error(`Error fetching ${label}:`, error)
+      return []
+    }
+
+    const batch = data ?? []
+    rows.push(...batch)
+
+    if (batch.length < TRANSFER_PRODUCT_BATCH_SIZE) {
+      break
+    }
+
+    from += batch.length
+  }
+
+  return rows
+}
+
 export async function fetchStores(): Promise<TransferStoreOption[]> {
   const supabase = await createClient()
   const { data, error } = await supabase.from('stores').select('id, name').order('id')
@@ -18,21 +54,21 @@ export async function fetchStores(): Promise<TransferStoreOption[]> {
   return (data ?? []) as TransferStoreOption[]
 }
 
-export async function fetchTransferProducts(limit = 4000): Promise<TransferProductOption[]> {
+export async function fetchTransferProducts(): Promise<TransferProductOption[]> {
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('products')
-    .select('id, jan_code, product_name, cost_price, selling_price, category')
-    .eq('is_active', true)
-    .order('product_name', { ascending: true })
-    .limit(limit)
+  const products = await fetchAllRows<TransferProductOption>(
+    async (from, to) =>
+      await supabase
+        .from('products')
+        .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
+        .order('is_active', { ascending: false })
+        .order('product_name', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to),
+    'transfer products'
+  )
 
-  if (error) {
-    console.error('Error fetching transfer products:', error)
-    return []
-  }
-
-  return ((data ?? []) as TransferProductOption[]).filter(
+  return products.filter(
     (product) => Boolean(product.product_name) && Boolean(product.jan_code)
   )
 }
@@ -41,7 +77,7 @@ export async function searchProductByJan(janCode: string): Promise<TransferProdu
   const supabase = await createClient()
   const { data, error } = await supabase
     .from('products')
-    .select('id, jan_code, product_name, cost_price, selling_price, category')
+    .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
     .eq('jan_code', janCode)
     .maybeSingle()
 
