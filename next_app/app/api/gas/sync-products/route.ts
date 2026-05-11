@@ -52,9 +52,31 @@ export async function POST() {
     // GASからのJSON結果を解析
     const gasResult = (await response.json().catch(() => null)) as {
       success?: boolean
-      master?: { success?: boolean; csvRowCount?: number; syncResult?: { count?: number } }
+      master?: { success?: boolean; message?: string; csvRowCount?: number; syncResult?: { count?: number } }
       message?: string
     } | null
+
+    if (!gasResult) {
+      return NextResponse.json(
+        { message: 'GAS Web App が予期しない応答（HTML等）を返しました。GASのデプロイ設定（アクセスできるユーザー: 全員）を確認してください。' },
+        { status: 502 }
+      )
+    }
+
+    if (gasResult.success === false) {
+      return NextResponse.json(
+        { message: gasResult.message || 'GAS処理中に全体エラーが発生しました。' },
+        { status: 500 }
+      )
+    }
+
+    const masterResult = gasResult.master
+    if (masterResult && masterResult.success === false) {
+      return NextResponse.json(
+        { message: masterResult.message || '商品マスタの取得または同期に失敗しました。' },
+        { status: 500 }
+      )
+    }
 
     // 売上関連ページのキャッシュを再検証（商品マスタ更新で紐付けが変わる可能性）
     revalidatePath('/sales')
@@ -64,7 +86,6 @@ export async function POST() {
     revalidatePath('/products')
 
     // 詳細情報を含むレスポンス
-    const masterResult = gasResult?.master
     const syncCount = masterResult?.syncResult?.count ?? 0
     const csvCount = masterResult?.csvRowCount ?? 0
 

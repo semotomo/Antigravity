@@ -42,6 +42,25 @@ export async function POST() {
       )
     }
 
+    const gasResult = (await response.json().catch(() => null)) as {
+      success?: boolean
+      message?: string
+    } | null
+
+    if (!gasResult) {
+      return NextResponse.json(
+        { message: 'GAS Web App が予期しない応答（HTML等）を返しました。GASのデプロイ設定（アクセスできるユーザー: 全員）を確認してください。' },
+        { status: 502 }
+      )
+    }
+
+    if (gasResult.success === false) {
+      return NextResponse.json(
+        { message: gasResult.message || 'GAS処理中にエラーが発生しました。' },
+        { status: 500 }
+      )
+    }
+
     revalidatePath('/sales')
     revalidatePath('/sales/daily')
     revalidatePath('/sales/products')
