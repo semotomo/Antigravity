@@ -1380,3 +1380,68 @@ Flet 0.82.2 への移行作業の続きをお願いします。
 2. `sales_enriched_v` で filter / sort / 列表示を確認する
 3. 問題なければ `日次集計` と `商品別集計` を追加する
 4. 新しい未紐付けが出た時だけ `product_aliases` 運用へ戻る
+
+# Fletアプリ移行 引き継ぎログ 第27報（2026-04-02）
+
+## 今回の到達点
+
+- Next.js Phase 2 の最初の対象として、`/orders` の初版を実装した。
+- 一覧、ステータスタブ、新規登録、編集、ステータス前進、キャンセルまで Next.js 上で完結できる状態にした。
+- サイドナビ / ボトムナビにも `/orders` 導線を追加した。
+- `npm run lint` と `npm run build` が通る状態まで確認した。
+
+## 更新したファイル
+
+- `next_app/app/(dashboard)/orders/page.tsx`
+- `next_app/app/actions/orders.ts`
+- `next_app/components/orders/OrdersBoard.tsx`
+- `next_app/components/orders/OrderCard.tsx`
+- `next_app/components/orders/OrderFormModal.tsx`
+- `next_app/lib/orders.ts`
+- `next_app/lib/queries/orders.ts`
+- `next_app/lib/types/database.ts`
+- `next_app/components/layout/SideNav.tsx`
+- `next_app/components/layout/BottomNav.tsx`
+
+検証のために最小限修正:
+
+- `next_app/components/ui/DataTable.tsx`
+- `next_app/lib/supabase/server.ts`
+- `next_app/lib/supabase/client.ts`
+- `next_app/lib/supabase/middleware.ts`
+- `next_app/lib/queries/sales.ts`
+- `next_app/app/(dashboard)/sales/page.tsx`
+- `next_app/app/(dashboard)/sales/daily/page.tsx`
+- `next_app/app/(dashboard)/sales/products/page.tsx`
+- `docs/app_migration/next_ai_handoff_phase2.md`
+
+## 実装内容の要点
+
+- 読み取りは Server Component 側で実施
+- 更新は `app/actions/orders.ts` の Server Actions に集約
+- 各 action 内で Supabase Auth の `getUser()` を再確認
+- 更新後は `revalidatePath('/orders')` と `refresh()` を実行
+- UI はモバイルでも扱いやすいカードベース
+- 既存 Flet の 6 ステータス運用を維持
+
+## 確認できたこと
+
+- `npm run lint`
+  - 成功
+- `npm run build`
+  - 成功
+- build 結果に `/orders` が dynamic route として出力されることを確認
+
+## 今回の判断
+
+- `/orders/[id]` は今回は作らず、まず一覧運用を成立させる方を優先した
+- `customer_orders` / `stores` の型は手書きで補完した
+- ただし Supabase 型はまだ完全自動生成版ではないため、将来的には `lib/types/database.ts` を正式生成型へ寄せた方がよい
+- 次の実装優先は `Phase 2 Step 3` の `/products/unmatched` が妥当
+
+## 次にやること
+
+1. `/products/unmatched` の設計と実装
+2. `products` / `product_aliases` を使う Server Actions の設計
+3. 必要なら `lib/types/database.ts` を Supabase 生成型へ置き換える
+4. その後に `/products` と `/products/aliases` を進める

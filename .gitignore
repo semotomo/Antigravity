@@ -50,3 +50,8 @@ skills-lock.json
 CLAUDE.md
 Plans.md
 local_exports/
+
+# Next.js (next_app/)
+next_app/.next/
+next_app/node_modules/
+next_app/.env.local
