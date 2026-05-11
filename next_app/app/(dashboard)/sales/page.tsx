@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ArrowUpDown } from 'lucide-react'
 import { SalesImportButton } from '@/components/sales/SalesImportButton'
+import { ProductMasterSyncButton } from '@/components/sales/ProductMasterSyncButton'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { fetchSales, fetchSalesFilterOptions, type SaleRow } from '@/lib/queries/sales'
@@ -173,7 +174,10 @@ export default async function SalesPage({
         </div>
         <div className="flex flex-col items-start gap-3 lg:items-end">
           <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
-          <SalesImportButton />
+          <div className="flex items-center gap-2">
+            <ProductMasterSyncButton />
+            <SalesImportButton />
+          </div>
         </div>
       </div>
 

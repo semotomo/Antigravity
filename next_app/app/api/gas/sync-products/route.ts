@@ -1,0 +1,82 @@
+import { revalidatePath } from 'next/cache'
+import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+// 商品マスタ同期用APIルート
+// GAS Web App を mode=master で呼び出す
+export async function POST() {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
+
+    if (error || !user) {
+      return NextResponse.json(
+        { message: 'ログイン状態を確認できませんでした。再度ログインしてください。' },
+        { status: 401 }
+      )
+    }
+
+    const gasWebAppUrl = process.env.GAS_WEBAPP_URL
+
+    if (!gasWebAppUrl) {
+      return NextResponse.json(
+        { message: 'GAS_WEBAPP_URL が設定されていません。' },
+        { status: 500 }
+      )
+    }
+
+    // mode=master を付与して商品マスタ同期のみ実行
+    const url = new URL(gasWebAppUrl)
+    url.searchParams.set('mode', 'master')
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      cache: 'no-store',
+    })
+
+    if (!response.ok) {
+      const responseText = await response.text()
+      return NextResponse.json(
+        {
+          message:
+            responseText ||
+            'GAS Web App の呼び出しに失敗しました。時間を置いて再度お試しください。',
+        },
+        { status: 502 }
+      )
+    }
+
+    // GASからのJSON結果を解析
+    const gasResult = (await response.json().catch(() => null)) as {
+      success?: boolean
+      master?: { success?: boolean; csvRowCount?: number; syncResult?: { count?: number } }
+      message?: string
+    } | null
+
+    // 売上関連ページのキャッシュを再検証（商品マスタ更新で紐付けが変わる可能性）
+    revalidatePath('/sales')
+    revalidatePath('/sales/daily')
+    revalidatePath('/sales/products')
+    revalidatePath('/sales/abc')
+    revalidatePath('/products')
+
+    // 詳細情報を含むレスポンス
+    const masterResult = gasResult?.master
+    const syncCount = masterResult?.syncResult?.count ?? 0
+    const csvCount = masterResult?.csvRowCount ?? 0
+
+    return NextResponse.json({
+      message: `商品マスタの同期が完了しました。（CSV: ${csvCount}件 → Supabase: ${syncCount}件処理）`,
+      details: gasResult,
+    })
+  } catch (error) {
+    console.error('Unexpected error while syncing product master:', error)
+    return NextResponse.json(
+      { message: '商品マスタ同期の呼び出し中に予期しないエラーが発生しました。' },
+      { status: 500 }
+    )
+  }
+}

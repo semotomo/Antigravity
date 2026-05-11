@@ -1,9 +1,12 @@
-# 共通（シフト管理 + 移動管理）
-streamlit>=1.30.0
+# Flet 統合ダッシュボード本体
+flet==0.82.2
+httpx>=0.27.0
 pandas>=2.0.0
 numpy>=1.24.0
 jpholiday>=0.1.8
-
-# 移動管理アプリ用
-httpx>=0.25.0
 openpyxl>=3.1.0
+python-dotenv>=1.0.0
+toml>=0.10.2
+
+# 既存の Streamlit 版も同じリポジトリ内で利用するため残す
+streamlit>=1.30.0
