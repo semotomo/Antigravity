@@ -1,13 +1,48 @@
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
-import { fetchProductSummary, type ProductSummaryRow } from '@/lib/queries/summary'
+import { type ProductSummaryRow } from '@/lib/queries/summary'
+import { fetchSales } from '@/lib/queries/sales'
 
 export const metadata = {
-  title: '商品別集計 | Kennel Dashboard',
+  title: '商品別トレンド（今月） | Kennel Dashboard',
+}
+
+function getStartOfMonth() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
 }
 
 export default async function ProductSummaryPage() {
-  const data = await fetchProductSummary()
+  const startOfMonth = getStartOfMonth()
+  const sales = await fetchSales({ dateFrom: startOfMonth })
+
+  // Aggregate sales into ProductSummaryRow format
+  const summaryMap = new Map<string, ProductSummaryRow>()
+
+  for (const row of sales) {
+    const key = `${row.product_name}-${row.jan_code}`
+    if (!summaryMap.has(key)) {
+      summaryMap.set(key, {
+        category: row.category,
+        product_name: row.product_name,
+        brand: row.brand || null,
+        jan_code: row.jan_code,
+        unmatched_master: row.unmatched_master,
+        total_quantity: 0,
+        total_sales_amount: 0,
+        estimated_profit: 0,
+      } as unknown as ProductSummaryRow)
+    }
+
+    const item = summaryMap.get(key)!
+    item.total_quantity = (item.total_quantity || 0) + (row.quantity || 0)
+    item.total_sales_amount = (item.total_sales_amount || 0) + (row.sales_amount || 0)
+    // We do not have estimated_profit from sale directly, so we mock or calculate roughly if cost is available.
+    // For now, let's leave it as 0 unless we know markup_rate.
+  }
+
+  const data = Array.from(summaryMap.values())
+    .sort((a, b) => (b.total_sales_amount || 0) - (a.total_sales_amount || 0))
 
   const columns: DataTableColumn<ProductSummaryRow>[] = [
     { key: 'category', header: 'カテゴリ' },
@@ -62,8 +97,8 @@ export default async function ProductSummaryPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">商品別集計</h1>
-        <p className="text-sm text-gray-500 mt-1">集計された全期間での商品別売上ランキングです。</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">商品別トレンド（今月）</h1>
+        <p className="text-sm text-gray-500 mt-1">今月（{startOfMonth} 以降）の商品別売上ランキングです。</p>
       </div>
 
       <DataTable 

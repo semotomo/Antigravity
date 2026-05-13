@@ -539,3 +539,124 @@ export async function deleteAliasAction(formData: FormData) {
     console.error('Unexpected error while deleting alias:', error)
   }
 }
+
+export async function uploadProductMasterCsv(formData: FormData) {
+  try {
+    const csvContent = formData.get('csvContent')
+    const fileName = formData.get('fileName')
+
+    if (typeof csvContent !== 'string' || !csvContent) {
+      return { success: false, message: 'CSVデータが正しく読み込めませんでした。' }
+    }
+
+    const papaparse = await import('papaparse')
+    const parsed = papaparse.parse<string[]>(csvContent, {
+      skipEmptyLines: true,
+      header: false,
+    })
+
+    const rows = parsed.data
+    if (rows.length === 0) {
+      return { success: false, message: 'CSVにデータがありません。' }
+    }
+
+    const COL = {
+      JAN_CODE: 3,
+      PRODUCT_GROUP: 5,
+      PRODUCT_NAME: 6,
+      SELLING_PRICE: 8,
+      COST_PRICE: 11,
+    }
+
+    const records: ProductInsert[] = []
+    const seen = new Set<string>()
+    let skipped = 0
+
+    for (const row of rows) {
+      if (row.length <= COL.COST_PRICE) {
+        skipped++
+        continue
+      }
+
+      const janCode = (row[COL.JAN_CODE] || '').trim()
+      const productName = (row[COL.PRODUCT_NAME] || '').trim()
+
+      if (!janCode || !productName) {
+        skipped++
+        continue
+      }
+
+      if (seen.has(janCode)) {
+        skipped++
+        continue
+      }
+      seen.add(janCode)
+
+      const productGroup = (row[COL.PRODUCT_GROUP] || '').trim()
+      const priceStr = (row[COL.SELLING_PRICE] || '').replace(/[¥\\,\s]/g, '')
+      const costStr = (row[COL.COST_PRICE] || '').replace(/[¥\\,\s]/g, '')
+      const sellingPrice = parseInt(priceStr, 10) || 0
+      const costPrice = parseInt(costStr, 10) || 0
+      const category = productGroup || ''
+
+      let markupRate = 0
+      if (sellingPrice > 0) {
+        markupRate = Math.round(((sellingPrice - costPrice) / sellingPrice) * 10000) / 10000
+      }
+
+      records.push({
+        jan_code: janCode,
+        product_name: productName,
+        category: category,
+        product_group: productGroup || null,
+        brand: null,
+        cost_price: costPrice,
+        selling_price: sellingPrice,
+        markup_rate: markupRate,
+        is_active: true,
+      })
+    }
+
+    if (records.length === 0) {
+      return { success: true, message: '送信対象の商品データがありませんでした。' }
+    }
+
+    const supabase = await requireAuthenticatedClient()
+    
+    // Chunking to avoid large payload issues (1000 records per chunk is safe for Supabase)
+    const chunkSize = 1000
+    let totalUpserted = 0
+
+    for (let i = 0; i < records.length; i += chunkSize) {
+      const chunk = records.slice(i, i + chunkSize)
+      const { error } = await supabase
+        .from('products')
+        .upsert(chunk as never[], {
+          onConflict: 'jan_code',
+          ignoreDuplicates: false,
+        })
+
+      if (error) {
+        console.error('Supabase Upsert Error:', error)
+        return { success: false, message: 'データベースへの同期中にエラーが発生しました: ' + error.message }
+      }
+      totalUpserted += chunk.length
+    }
+
+    revalidatePath('/products')
+    revalidatePath('/sales')
+    revalidatePath('/sales/daily')
+    revalidatePath('/sales/products')
+
+    return {
+      success: true,
+      message: `${fileName} から ${totalUpserted}件の商品を同期しました。\n(スキップ: ${skipped}件)`,
+    }
+  } catch (error) {
+    console.error('Unexpected error in uploadProductMasterCsv:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : '予期せぬエラーが発生しました。',
+    }
+  }
+}

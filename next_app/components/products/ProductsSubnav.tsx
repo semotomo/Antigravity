@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, Upload } from 'lucide-react'
+import { CsvUploadModal } from './CsvUploadModal'
 
 const PRODUCT_NAV_ITEMS = [
   { href: '/products/transfers', label: '店舗間移動' },
@@ -24,6 +25,7 @@ function isActivePath(pathname: string, href: (typeof PRODUCT_NAV_ITEMS)[number]
 export function ProductsSubnav() {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [isUploadModalOpen, setUploadModalOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -108,9 +110,22 @@ export function ProductsSubnav() {
                 </Link>
               )
             })}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false)
+                setUploadModalOpen(true)
+              }}
+              className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-sky-50 hover:text-sky-700"
+            >
+              <Upload className="h-4 w-4" />
+              CSV手動アップロード
+            </button>
           </div>
         ) : null}
       </div>
+
+      <CsvUploadModal isOpen={isUploadModalOpen} onClose={() => setUploadModalOpen(false)} />
     </nav>
   )
 }
