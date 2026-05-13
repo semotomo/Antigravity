@@ -140,27 +140,27 @@ export function SalesHistoryModal() {
                   <table className="w-full text-left text-sm text-gray-600">
                     <thead className="bg-gray-50 text-gray-900 border-b border-gray-200">
                       <tr>
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">日時</th>
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">店舗</th>
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">作業内容</th>
                         <th className="px-4 py-3 font-semibold min-w-[200px]">商品名</th>
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">コード</th>
                         <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">個数</th>
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap">コード</th>
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap">日時</th>
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap">作業内容</th>
                         <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">原価</th>
                         <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">原価合計</th>
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap">店舗</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 bg-white">
                       {data.map((row, i) => (
                         <tr key={i} className="hover:bg-gray-50 transition">
-                          <td className="px-4 py-2 whitespace-nowrap text-xs">{row.taskDateTime}</td>
-                          <td className="px-4 py-2 whitespace-nowrap text-xs">{row.storeName}</td>
-                          <td className="px-4 py-2 whitespace-nowrap text-xs text-sky-700 font-medium">{row.taskContent}</td>
                           <td className="px-4 py-2 text-xs font-medium text-gray-900">{row.productName}</td>
-                          <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-400">{row.productCode}</td>
                           <td className="px-4 py-2 whitespace-nowrap text-right font-medium text-gray-900">{row.quantity}</td>
+                          <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-400">{row.productCode}</td>
+                          <td className="px-4 py-2 whitespace-nowrap text-xs">{row.taskDateTime}</td>
+                          <td className="px-4 py-2 whitespace-nowrap text-xs text-sky-700 font-medium">{row.taskContent}</td>
                           <td className="px-4 py-2 whitespace-nowrap text-right text-xs">¥{row.cost.toLocaleString()}</td>
                           <td className="px-4 py-2 whitespace-nowrap text-right text-xs font-medium">¥{row.totalCost.toLocaleString()}</td>
+                          <td className="px-4 py-2 whitespace-nowrap text-xs">{row.storeName}</td>
                         </tr>
                       ))}
                     </tbody>
