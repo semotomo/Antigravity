@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Kennel Dashboard",
   description: "店舗管理用ダッシュボード",
+  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     title: "Kennel Dash",
