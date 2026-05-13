@@ -3,8 +3,7 @@
 import { useState } from 'react'
 import { Calendar, Loader2, RefreshCcw, X, Download } from 'lucide-react'
 
-// GASのWebApp URL (環境変数から取得)
-const GAS_WEBAPP_URL = process.env.NEXT_PUBLIC_GAS_WEBAPP_URL || ''
+// Next.js API ルート経由でGASを呼び出すため、直接URLは不要
 
 type HistoryRow = {
   productCode: string
@@ -33,23 +32,16 @@ export function SalesHistoryModal() {
   const [endDate, setEndDate] = useState(getToday())
 
   const fetchHistory = async () => {
-    if (!GAS_WEBAPP_URL) {
-      setError('GAS_WEBAPP_URLが設定されていません。')
-      return
-    }
-
     setIsLoading(true)
     setError(null)
 
     try {
-      const url = new URL(GAS_WEBAPP_URL)
-      url.searchParams.append('mode', 'history')
+      const url = new URL('/api/gas/history', window.location.origin)
       url.searchParams.append('startDate', startDate)
       url.searchParams.append('endDate', endDate)
 
       const res = await fetch(url.toString(), {
         method: 'GET',
-        // GAS Web App is likely CORS enabled if published correctly, otherwise Next.js API route is needed
       })
 
       if (!res.ok) {
