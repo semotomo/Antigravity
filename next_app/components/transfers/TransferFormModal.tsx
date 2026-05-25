@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useFormStatus } from 'react-dom'
-import { Minus, PackagePlus, Plus, Search, Trash2, X } from 'lucide-react'
+import { Minus, PackagePlus, Plus, ScanLine, Search, Trash2, X } from 'lucide-react'
 import {
   createTransfersAction,
   lookupTransferProductByJanAction,
@@ -88,6 +88,7 @@ export function TransferFormModal({
   const [lookupOverrides, setLookupOverrides] = useState<Record<string, TransferProductOption>>({})
   const [items, setItems] = useState<TransferDraftItem[]>([])
   const [unmatchedItems, setUnmatchedItems] = useState<UnmatchedTransferDraftItem[]>([])
+  const [isScannerActive, setIsScannerActive] = useState(false)
   const [janInputValue, setJanInputValue] = useState('')
   const [quantity, setQuantity] = useState(1)
   const [memo, setMemo] = useState('')
@@ -160,6 +161,39 @@ export function TransferFormModal({
     () => unmatchedItems.reduce((sum, item) => sum + item.quantity, 0),
     [unmatchedItems]
   )
+
+  const scanList = useMemo(() => {
+    const list: Array<{
+      jan_code: string
+      product_name: string
+      quantity: number
+      isUnmatched: boolean
+    }> = []
+
+    items.forEach((item) => {
+      list.push({
+        jan_code: item.jan_code,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        isUnmatched: false,
+      })
+    })
+
+    unmatchedItems.forEach((item) => {
+      list.push({
+        jan_code: item.jan_code,
+        product_name: item.product_name || 'マスタ未一致 (手入力待ち)',
+        quantity: item.quantity,
+        isUnmatched: true,
+      })
+    })
+
+    return list
+  }, [items, unmatchedItems])
+
+  const totalScanQty = useMemo(() => {
+    return scanList.reduce((sum, item) => sum + item.quantity, 0)
+  }, [scanList])
 
   const hasDraftChanges =
     Boolean(normalizeJanCode(janInputValue)) ||
@@ -426,21 +460,44 @@ export function TransferFormModal({
       const sellingPrice = Number(product.selling_price ?? 0)
 
       setUnmatchedItems((current) => current.filter((item) => item.id !== matchedItem.id))
-      setItems((current) => [
-        ...current,
-        {
-          from_store_id: matchedItem.from_store_id,
-          to_store_id: matchedItem.to_store_id,
-          jan_code: matchedItem.jan_code,
-          product_name: productName,
-          quantity: matchedItem.quantity,
-          cost_price: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
-          selling_price: Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0,
-          entry_type: matchedItem.entry_type,
-          usage_category: matchedItem.usage_category,
-          memo: matchedItem.memo.trim() || null,
-        },
-      ])
+      setItems((current) => {
+        const existingIndex = current.findIndex(
+          (item) =>
+            item.jan_code === matchedItem.jan_code &&
+            item.from_store_id === matchedItem.from_store_id &&
+            item.to_store_id === matchedItem.to_store_id &&
+            item.entry_type === matchedItem.entry_type &&
+            item.usage_category === matchedItem.usage_category &&
+            (item.memo ?? '') === matchedItem.memo.trim()
+        )
+
+        if (existingIndex >= 0) {
+          return current.map((item, index) =>
+            index === existingIndex
+              ? {
+                  ...item,
+                  quantity: item.quantity + matchedItem.quantity,
+                }
+              : item
+          )
+        }
+
+        return [
+          ...current,
+          {
+            from_store_id: matchedItem.from_store_id,
+            to_store_id: matchedItem.to_store_id,
+            jan_code: matchedItem.jan_code,
+            product_name: productName,
+            quantity: matchedItem.quantity,
+            cost_price: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
+            selling_price: Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0,
+            entry_type: matchedItem.entry_type,
+            usage_category: matchedItem.usage_category,
+            memo: matchedItem.memo.trim() || null,
+          },
+        ]
+      })
       setLookupMessage(`JAN ${janCode} を商品マスタと照合し、「${productName}」を登録リストへ移しました。`)
     } finally {
       pendingLookupKeysRef.current.delete(lookupKey)
@@ -505,16 +562,39 @@ export function TransferFormModal({
       const sellingPrice = Number(foundProduct.selling_price ?? 0)
       const feedbackMessage = buildScanFeedbackMessage(janCode, context.quantity)
 
-      setItems((current) => [
-        ...current,
-        createTransferDraftItem(
-          context,
-          janCode,
-          productName,
-          Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
-          Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0
-        ),
-      ])
+      setItems((current) => {
+        const existingIndex = current.findIndex(
+          (item) =>
+            item.jan_code === janCode &&
+            item.from_store_id === context.from_store_id &&
+            item.to_store_id === context.to_store_id &&
+            item.entry_type === context.entry_type &&
+            item.usage_category === itemUsageCategory &&
+            (item.memo ?? '') === (context.memo ?? '')
+        )
+
+        if (existingIndex >= 0) {
+          return current.map((item, index) =>
+            index === existingIndex
+              ? {
+                  ...item,
+                  quantity: item.quantity + context.quantity,
+                }
+              : item
+          )
+        }
+
+        return [
+          ...current,
+          createTransferDraftItem(
+            context,
+            janCode,
+            productName,
+            Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
+            Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0
+          ),
+        ]
+      })
       clearProductEntryArea(resetScanner)
       setLookupMessage(
         source === 'scanner'
@@ -743,21 +823,44 @@ export function TransferFormModal({
       return
     }
 
-    setItems((current) => [
-      ...current,
-      {
-        from_store_id: item.from_store_id,
-        to_store_id: item.to_store_id,
-        jan_code: item.jan_code,
-        product_name: productName,
-        quantity: itemQuantity,
-        cost_price: costPrice,
-        selling_price: sellingPrice,
-        entry_type: item.entry_type,
-        usage_category: item.usage_category,
-        memo: item.memo.trim() || null,
-      },
-    ])
+    setItems((current) => {
+      const existingIndex = current.findIndex(
+        (existing) =>
+          existing.jan_code === item.jan_code &&
+          existing.from_store_id === item.from_store_id &&
+          existing.to_store_id === item.to_store_id &&
+          existing.entry_type === item.entry_type &&
+          existing.usage_category === item.usage_category &&
+          (existing.memo ?? '') === item.memo.trim()
+      )
+
+      if (existingIndex >= 0) {
+        return current.map((existing, index) =>
+          index === existingIndex
+            ? {
+                ...existing,
+                quantity: existing.quantity + itemQuantity,
+              }
+            : existing
+        )
+      }
+
+      return [
+        ...current,
+        {
+          from_store_id: item.from_store_id,
+          to_store_id: item.to_store_id,
+          jan_code: item.jan_code,
+          product_name: productName,
+          quantity: itemQuantity,
+          cost_price: costPrice,
+          selling_price: sellingPrice,
+          entry_type: item.entry_type,
+          usage_category: item.usage_category,
+          memo: item.memo.trim() || null,
+        },
+      ]
+    })
     removeUnmatchedItem(item.id)
     setLookupMessage(`${productName} を登録リストに追加しました。`)
   }
@@ -800,33 +903,61 @@ export function TransferFormModal({
       onClick={requestClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl"
+        className={
+          isScannerActive
+            ? "max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300"
+            : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl transition-colors duration-300"
+        }
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Product Transfers
-            </p>
-            <h2 className="mt-2 text-2xl font-bold text-gray-900">新規登録</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              店舗間移動と物品使用を、JAN コードからまとめて登録できます。
-            </p>
-          </div>
+        <div className={
+          isScannerActive 
+            ? "flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-900" 
+            : "flex items-start justify-between border-b border-gray-200 px-6 py-5"
+        }>
+          {isScannerActive ? (
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">
+                Scanner Station
+              </p>
+              <h2 className="mt-1 text-xl font-bold text-white">バーコード連続読み取り中</h2>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
+                Product Transfers
+              </p>
+              <h2 className="mt-2 text-2xl font-bold text-gray-900">新規登録</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                店舗間移動と物品使用を、JAN コードからまとめて登録できます。
+              </p>
+            </div>
+          )}
           <button
             type="button"
-            onClick={requestClose}
-            className="rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
+            onClick={isScannerActive ? () => setScannerNonce((c) => c + 1) : requestClose}
+            className={
+              isScannerActive
+                ? "inline-flex items-center gap-2 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-5 py-3 transition hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20"
+                : "rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
+            }
             aria-label="閉じる"
           >
-            <X className="h-5 w-5" />
+            {isScannerActive ? (
+              <>
+                <X className="h-5 w-5 stroke-[2.5px]" />
+                読み取りを終了する (完了)
+              </>
+            ) : (
+              <X className="h-5 w-5" />
+            )}
           </button>
         </div>
 
         <form action={formAction} onSubmit={handleSubmit} className="space-y-6 px-6 py-6">
           <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className={isScannerActive ? "hidden" : "grid gap-4 md:grid-cols-2 xl:grid-cols-4"}>
             <label className="space-y-2">
               <span className="text-sm font-medium text-gray-700">使用店舗 / 移動元店舗</span>
               <select
@@ -914,8 +1045,12 @@ export function TransferFormModal({
             </label>
           </div>
 
-          <div className="rounded-3xl border border-gray-200 bg-gray-50 p-5">
-            <div className="flex items-center justify-between gap-3">
+          <div className={
+            isScannerActive
+              ? "grid grid-cols-1 lg:grid-cols-2 gap-6 bg-slate-950 text-white rounded-3xl p-5 border border-slate-800"
+              : "rounded-3xl border border-gray-200 bg-gray-50 p-5"
+          }>
+            <div className={isScannerActive ? "hidden" : "flex items-center justify-between gap-3"}>
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">商品を追加</h3>
                 <p className="text-sm text-gray-500">JAN コードから検索して登録リストに積み上げます。</p>
@@ -933,6 +1068,8 @@ export function TransferFormModal({
               <JanCodeScannerField
                 key={scannerNonce}
                 continuousScan
+                showInput={!isScannerActive}
+                onScannerOpenChange={setIsScannerActive}
                 helpText="JANを入力してEnter、またはカメラで読み取ると登録リストへ追加します。未一致の商品は手入力待ちに退避します。"
                 inputRef={janInputRef}
                 onValueChange={setJanInputValue}
@@ -942,135 +1079,72 @@ export function TransferFormModal({
                 onEnterKey={(value) => handleJanCodeCommit(value, 'manual')}
               />
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSearchProductAction}
-                  disabled={lookupPending}
-                  className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Search className="h-4 w-4" />
-                  {lookupPending ? '処理中...' : '検索'}
-                </button>
-              </div>
-
-              {lookupMessage ? (
-                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                  {lookupMessage}
+              <div className={isScannerActive ? "hidden" : "space-y-4"}>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSearchProductAction}
+                    disabled={lookupPending}
+                    className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Search className="h-4 w-4" />
+                    {lookupPending ? '処理中...' : '検索'}
+                  </button>
                 </div>
-              ) : null}
 
-              {selectedProduct ? (
-                <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <p className="font-semibold text-gray-900">
-                    {selectedProduct.product_name ?? '商品名未設定'}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    JAN: {selectedProduct.jan_code || '-'} / カテゴリ: {selectedProduct.category || '-'}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                      {formatTransferEntryTypeLabel(entryType)}
-                    </span>
-                    {entryType === 'usage' ? (
-                      <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
-                        {formatTransferUsageCategoryLabel(usageCategory)}
-                      </span>
-                    ) : null}
+                {lookupMessage ? (
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                    {lookupMessage}
                   </div>
-                  <div className="mt-3 grid gap-4 md:grid-cols-3">
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
-                        原価
-                      </p>
-                      <p className="mt-2 text-lg font-bold text-gray-900">
-                        {formatYen(selectedProduct.cost_price)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
-                        売価
-                      </p>
-                      <p className="mt-2 text-lg font-bold text-gray-900">
-                        {formatYen(selectedProduct.selling_price)}
-                      </p>
-                    </div>
-                    <label className="space-y-2">
-                      <span className="text-sm font-medium text-gray-700">数量</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={quantity}
-                        onChange={(event) => setQuantity(Number(event.target.value) || 1)}
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                      />
-                    </label>
-                  </div>
-                  <label className="mt-4 block space-y-2">
-                    <span className="text-sm font-medium text-gray-700">メモ</span>
-                    <input
-                      value={memo}
-                      onChange={(event) => setMemo(event.target.value)}
-                      placeholder="任意"
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                    />
-                  </label>
-                </div>
-              ) : null}
+                ) : null}
 
-              {manualMode ? (
-                <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4">
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
-                      {formatTransferEntryTypeLabel(entryType)}
-                    </span>
-                    {entryType === 'usage' ? (
-                      <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
-                        {formatTransferUsageCategoryLabel(usageCategory)}
+                {selectedProduct ? (
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <p className="font-semibold text-gray-900">
+                      {selectedProduct.product_name ?? '商品名未設定'}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      JAN: {selectedProduct.jan_code || '-'} / カテゴリ: {selectedProduct.category || '-'}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
+                        {formatTransferEntryTypeLabel(entryType)}
                       </span>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <label className="space-y-2 md:col-span-2">
-                      <span className="text-sm font-medium text-gray-700">商品名</span>
-                      <input
-                        value={manualProductName}
-                        onChange={(event) => setManualProductName(event.target.value)}
-                        placeholder="未登録商品の名前"
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                      />
-                    </label>
-                    <label className="space-y-2">
-                      <span className="text-sm font-medium text-gray-700">原価</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={manualCostPrice}
-                        onChange={(event) => setManualCostPrice(event.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                      />
-                    </label>
-                    <label className="space-y-2">
-                      <span className="text-sm font-medium text-gray-700">売価</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={manualSellingPrice}
-                        onChange={(event) => setManualSellingPrice(event.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                      />
-                    </label>
-                    <label className="space-y-2">
-                      <span className="text-sm font-medium text-gray-700">数量</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={quantity}
-                        onChange={(event) => setQuantity(Number(event.target.value) || 1)}
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-                      />
-                    </label>
-                    <label className="space-y-2">
+                      {entryType === 'usage' ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                          {formatTransferUsageCategoryLabel(usageCategory)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-3 grid gap-4 md:grid-cols-3">
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                          原価
+                        </p>
+                        <p className="mt-2 text-lg font-bold text-gray-900">
+                          {formatYen(selectedProduct.cost_price)}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+                          売価
+                        </p>
+                        <p className="mt-2 text-lg font-bold text-gray-900">
+                          {formatYen(selectedProduct.selling_price)}
+                        </p>
+                      </div>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">数量</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={quantity}
+                          onChange={(event) => setQuantity(Number(event.target.value) || 1)}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                    </div>
+                    <label className="mt-4 block space-y-2">
                       <span className="text-sm font-medium text-gray-700">メモ</span>
                       <input
                         value={memo}
@@ -1080,24 +1154,140 @@ export function TransferFormModal({
                       />
                     </label>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleAddItemAction}
-                  disabled={lookupPending}
-                  className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
-                >
-                  <PackagePlus className="h-4 w-4" />
-                  {lookupPending ? '処理中...' : '登録リストに追加'}
-                </button>
+                {manualMode ? (
+                  <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4">
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
+                        {formatTransferEntryTypeLabel(entryType)}
+                      </span>
+                      {entryType === 'usage' ? (
+                        <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-medium text-amber-900">
+                          {formatTransferUsageCategoryLabel(usageCategory)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-2 md:col-span-2">
+                        <span className="text-sm font-medium text-gray-700">商品名</span>
+                        <input
+                          value={manualProductName}
+                          onChange={(event) => setManualProductName(event.target.value)}
+                          placeholder="未登録商品の名前"
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">原価</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={manualCostPrice}
+                          onChange={(event) => setManualCostPrice(event.target.value)}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">売価</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={manualSellingPrice}
+                          onChange={(event) => setManualSellingPrice(event.target.value)}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">数量</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={quantity}
+                          onChange={(event) => setQuantity(Number(event.target.value) || 1)}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-gray-700">メモ</span>
+                        <input
+                          value={memo}
+                          onChange={(event) => setMemo(event.target.value)}
+                          placeholder="任意"
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleAddItemAction}
+                    disabled={lookupPending}
+                    className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+                  >
+                    <PackagePlus className="h-4 w-4" />
+                    {lookupPending ? '処理中...' : '登録リストに追加'}
+                  </button>
+                </div>
               </div>
+
+              {/* 右側カラム：スキャンステーション用の積み上げリスト */}
+              {isScannerActive && (
+                <div className="flex flex-col overflow-hidden bg-slate-900/60 rounded-2xl border border-slate-800 p-5 h-[380px]">
+                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                    <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                      今回スキャンした商品
+                    </h4>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-300">
+                        種類: {scanList.length}
+                      </span>
+                      <span className="text-xs bg-emerald-950 px-2.5 py-1 rounded-full text-emerald-400 font-bold">
+                        総数: {totalScanQty}個
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                    {scanList.map((item, idx) => (
+                      <div
+                        key={`${item.jan_code}-${idx}`}
+                        className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition"
+                      >
+                        <div className="min-w-0 flex-1 pr-3">
+                          <p className="font-bold text-white truncate text-xs">
+                            {item.product_name || '商品名照合中...'}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">JAN: {item.jan_code}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {item.isUnmatched && (
+                            <span className="text-[8px] font-bold bg-amber-950/80 text-amber-400 border border-amber-900 px-1.5 py-0.5 rounded-full">
+                              未一致
+                            </span>
+                          )}
+                          <span className="text-sm font-extrabold bg-slate-800 text-emerald-400 min-w-8 h-8 flex items-center justify-center rounded-lg px-1.5">
+                            {item.quantity}個
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {scanList.length === 0 && (
+                      <div className="flex flex-col items-center justify-center h-full text-slate-600 py-12">
+                        <ScanLine className="h-8 w-8 mb-1 stroke-[1.5] text-slate-700 animate-pulse" />
+                        <p className="text-xs">バーコードをカメラに映してください</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className={isScannerActive ? "hidden" : "space-y-4"}>
             <div className="flex flex-col gap-3 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">今回の登録リスト</h3>
@@ -1335,7 +1525,7 @@ export function TransferFormModal({
             </div>
           ) : null}
 
-          <div className="flex flex-col-reverse gap-3 border-t border-gray-200 pt-5 sm:flex-row sm:items-center sm:justify-end">
+          <div className={isScannerActive ? "hidden" : "flex flex-col-reverse gap-3 border-t border-gray-200 pt-5 sm:flex-row sm:items-center sm:justify-end"}>
             <button
               type="button"
               onClick={requestClose}

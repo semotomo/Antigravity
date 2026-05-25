@@ -209,6 +209,43 @@ export async function createTransfersAction(
 
     const supabase = await requireAuthenticatedClient()
     const now = new Date().toISOString()
+
+    // 登録対象の全 JAN のうち、products テーブルに存在しないものを自動仮登録する
+    const uniqueJanCodes = Array.from(new Set(items.map((item) => item.jan_code)))
+    const { data: existingProducts, error: checkError } = await supabase
+      .from('products')
+      .select('jan_code')
+      .in('jan_code', uniqueJanCodes)
+
+    if (!checkError) {
+      const existingJans = new Set(((existingProducts as any[]) ?? []).map((p) => p.jan_code))
+      const missingProducts = items
+        .filter((item) => !existingJans.has(item.jan_code))
+        // 重複 JAN の排除
+        .filter((item, index, self) => self.findIndex((t) => t.jan_code === item.jan_code) === index)
+        .map((item) => ({
+          jan_code: item.jan_code,
+          product_name: item.product_name || `[仮] 未登録商品 (${item.jan_code})`,
+          cost_price: item.cost_price || 0,
+          selling_price: item.selling_price || 0,
+          category: '[仮] 未登録',
+          product_group: '[仮] 未登録',
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        }))
+
+      if (missingProducts.length > 0) {
+        const { error: insertProductError } = await supabase
+          .from('products')
+          .insert(missingProducts as never[])
+
+        if (insertProductError) {
+          console.error('Error auto-creating temporary products:', insertProductError)
+        }
+      }
+    }
+
     const records: TransferInsert[] = items.map((item) => ({
       transfer_date: now,
       from_store_id: item.from_store_id,

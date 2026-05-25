@@ -185,5 +185,47 @@ export async function fetchTransferHistory(
     return []
   }
 
-  return (data ?? []) as TransferListRow[]
+  const transfers = (data ?? []) as TransferListRow[]
+
+  if (transfers.length > 0) {
+    const janCodes = Array.from(new Set(transfers.map((t) => t.jan_code).filter(Boolean)))
+
+    if (janCodes.length > 0) {
+      const { data: products, error: productsError } = await supabase
+        .from('products')
+        .select('jan_code, product_name, cost_price, selling_price')
+        .in('jan_code', janCodes)
+
+      if (!productsError && products && products.length > 0) {
+        const productList = products as any[]
+        const productMap = new Map<string, { product_name: string; cost_price: number; selling_price: number }>()
+        productList.forEach((p) => {
+          if (p.jan_code && p.product_name) {
+            productMap.set(p.jan_code, {
+              product_name: p.product_name,
+              cost_price: Number(p.cost_price ?? 0),
+              selling_price: Number(p.selling_price ?? 0),
+            })
+          }
+        })
+
+        return transfers.map((t) => {
+          const match = t.jan_code ? productMap.get(t.jan_code) : null
+          if (match) {
+            const cost = match.cost_price ?? t.cost_price
+            return {
+              ...t,
+              product_name: match.product_name || t.product_name,
+              cost_price: cost,
+              total_cost: cost * t.quantity,
+              selling_price: match.selling_price ?? t.selling_price,
+            }
+          }
+          return t
+        })
+      }
+    }
+  }
+
+  return transfers
 }

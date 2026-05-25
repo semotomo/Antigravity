@@ -29,6 +29,7 @@ type JanCodeScannerFieldProps = {
   placeholder?: string
   showInput?: boolean
   wrapperClassName?: string
+  onScannerOpenChange?: (open: boolean) => void
 }
 
 type DetectedCodeSource = 'camera' | 'photo'
@@ -51,6 +52,27 @@ type BarcodeFormatLike = string | BarcodeFormat | null | undefined
 declare global {
   interface Window {
     BarcodeDetector?: BarcodeDetectorConstructor
+  }
+}
+
+function playBeep() {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const oscillator = audioCtx.createOscillator()
+    const gainNode = audioCtx.createGain()
+
+    oscillator.connect(gainNode)
+    gainNode.connect(audioCtx.destination)
+
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime) // 1000Hz (ピッという高い心地よい電子音)
+    gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime) // 小さめの心地よい音量
+
+    oscillator.start()
+    gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.08)
+    oscillator.stop(audioCtx.currentTime + 0.08)
+  } catch (error) {
+    console.warn('Failed to play scan sound:', error)
   }
 }
 
@@ -217,6 +239,7 @@ export function JanCodeScannerField({
   placeholder = '例: 4901234567894',
   showInput = true,
   wrapperClassName = 'space-y-2 md:col-span-2',
+  onScannerOpenChange,
 }: JanCodeScannerFieldProps) {
   const inputId = useId()
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -229,12 +252,34 @@ export function JanCodeScannerField({
   const [value, setValue] = useState(defaultValue)
   const [scannerOpen, setScannerOpen] = useState(false)
   const [scannerMessage, setScannerMessage] = useState('')
+  const [isCoolingDown, setIsCoolingDown] = useState(false)
+  const [showFlash, setShowFlash] = useState(false)
+  const coolingDownRef = useRef(false)
+
+  // coolingDownRefを常にisCoolingDownの最新値と同期
+  useEffect(() => {
+    coolingDownRef.current = isCoolingDown
+  }, [isCoolingDown])
+
+  // scannerOpenの変更を親コンポーネントに通知
+  useEffect(() => {
+    onScannerOpenChange?.(scannerOpen)
+  }, [scannerOpen, onScannerOpenChange])
+
   const shouldUsePhotoScannerOnly = useSyncExternalStore(
     subscribeToDeviceProfile,
     isAppleMobileDevice,
     () => false
   )
   const unavailableScannerMessage = scannerOpen ? getUnavailableScannerMessage() : ''
+
+  const triggerScanFeedback = () => {
+    playBeep()
+    setShowFlash(true)
+    setTimeout(() => setShowFlash(false), 150)
+    setIsCoolingDown(true)
+    setTimeout(() => setIsCoolingDown(false), 1500)
+  }
 
   const onDetectedValue = useEffectEvent((nextValue: string, source: DetectedCodeSource) => {
     const inputValue = continuousScan && source === 'camera' ? '' : nextValue
@@ -392,6 +437,11 @@ export function JanCodeScannerField({
         return
       }
 
+      if (coolingDownRef.current) {
+        scheduleScan()
+        return
+      }
+
       try {
         const barcodes = await detectorRef.current.detect(videoRef.current)
         const detectedCode = barcodes
@@ -403,6 +453,8 @@ export function JanCodeScannerField({
             scheduleScan()
             return
           }
+
+          triggerScanFeedback()
 
           if (continuousScan) {
             const detectedMessage = onDetectedValue(detectedCode, 'camera')
@@ -498,6 +550,10 @@ export function JanCodeScannerField({
               return
             }
 
+            if (coolingDownRef.current) {
+              return
+            }
+
             if (result) {
               const detectedCode = normalizeDetectedJanCode(
                 result.getText(),
@@ -508,6 +564,8 @@ export function JanCodeScannerField({
                 if (shouldSkipContinuousDuplicate(detectedCode)) {
                   return
                 }
+
+                triggerScanFeedback()
 
                 if (continuousScan) {
                   const detectedMessage = onDetectedValue(detectedCode, 'camera')
@@ -633,18 +691,59 @@ export function JanCodeScannerField({
 
       {scannerOpen ? (
         <div className="space-y-3 rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4">
-          <div className="overflow-hidden rounded-2xl bg-gray-950">
+          <div className="relative overflow-hidden rounded-2xl bg-gray-950">
             <video
               ref={videoRef}
               className="aspect-video w-full object-cover"
               muted
               playsInline
             />
+            {/* 緑のレーザー照準ライン */}
+            <div className="absolute inset-x-0 top-1/2 h-0.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-laser pointer-events-none" />
+            
+            {/* フラッシュエフェクト */}
+            {showFlash && (
+              <div className="absolute inset-0 bg-white/90 z-30 pointer-events-none animate-flash" />
+            )}
+
+            {/* クールダウン表示 */}
+            {isCoolingDown && (
+              <div className="absolute inset-x-0 bottom-0 bg-gray-950/80 px-4 py-3 text-center text-sm font-semibold text-emerald-400 backdrop-blur-sm z-20">
+                <p className="animate-pulse">次のスキャンまで一時停止中 (1.5秒)</p>
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-950/50">
+                  <div className="h-full bg-emerald-400 animate-cooldown-bar" />
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex items-start gap-2 text-sm text-gray-600">
             <ScanLine className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
             <p>{scannerMessage || unavailableScannerMessage || 'バーコードをカメラに映してください。'}</p>
           </div>
+          <style>{`
+            @keyframes laser-scan {
+              0% { transform: translateY(-150%); }
+              50% { transform: translateY(150%); }
+              100% { transform: translateY(-150%); }
+            }
+            .animate-laser {
+              animation: laser-scan 3s infinite linear;
+            }
+            @keyframes flash-effect {
+              0% { opacity: 1; }
+              100% { opacity: 0; }
+            }
+            .animate-flash {
+              animation: flash-effect 0.15s ease-out forwards;
+            }
+            @keyframes cooldown-bar-width {
+              from { width: 100%; }
+              to { width: 0%; }
+            }
+            .animate-cooldown-bar {
+              animation: cooldown-bar-width 1.5s linear forwards;
+            }
+          `}</style>
         </div>
       ) : (
         <p className="text-xs text-gray-500">
