@@ -49,10 +49,10 @@ export function SalesHistoryModal() {
       }
 
       const json = await res.json()
-      if (json.success && json.history && json.history.success) {
-        setData(json.history.data)
+      if (json.success && Array.isArray(json.data)) {
+        setData(json.data)
       } else {
-        throw new Error(json.message || json.history?.message || 'データ取得に失敗しました。')
+        throw new Error(json.message || 'データ取得に失敗しました。')
       }
     } catch (err) {
       console.error(err)
