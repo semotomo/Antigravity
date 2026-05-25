@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Package, Phone, ScanLine, Store, UserRound } from 'lucide-react'
-import { cancelOrderAction } from '@/app/actions/orders'
+import { CancelOrderButton } from '@/components/orders/CancelOrderButton'
 import { DeleteOrderButton } from '@/components/orders/DeleteOrderButton'
 import { OrderDetailView } from '@/components/orders/OrderDetailView'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -71,15 +71,7 @@ export default async function OrderDetailPage({
             </div>
           </div>
           {canCancel ? (
-            <form action={cancelOrderAction} className="mt-6">
-              <input type="hidden" name="id" value={order.id} />
-              <button
-                type="submit"
-                className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100"
-              >
-                キャンセルにする
-              </button>
-            </form>
+            <CancelOrderButton orderId={order.id} />
           ) : null}
 
           {order.status === 'completed' || order.status === 'cancelled' ? (
