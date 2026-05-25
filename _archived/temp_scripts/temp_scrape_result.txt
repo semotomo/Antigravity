@@ -1,0 +1,125 @@
+
+========== 犬の販売 (ID:5976) ==========
+タイトル (title): 126073 MIX（マルチーズ×ビションフリーゼ）
+公開ステータス (status): 公開
+作成日 (created_on_date): 
+カテゴリIDs (category_ids): 432
+
+[ フィールド一覧 ]
+Name: custom_prefs         | Type: input    checkbox | Value: title | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: text | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: category | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: feedback | Checked: True
+Name: convert_breaks       | Type: select            | Value: リッチテキスト
+Name: checkboxon07_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon11_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea01           | Type: textarea          | Value: MIX（マルチーズ×ビションフリーゼ）
+Name: checkboxon20_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon04_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon09_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon10_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text01               | Type: input    text     | Value: お問い合わせ番号  126073
+Name: checkboxon17_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon06_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon14_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text04               | Type: input    text     | Value: サンキューパック
+Name: textarea03           | Type: textarea          | Value: 2026年1月25日
+Name: textarea06           | Type: textarea          | Value: 39,000円（税込）
+<b>【パック内容】</b>
+マイクロチップ装着料
+生命保証（販売日より90日間の期間中に病気により
+死亡した場合、代犬を保証いたします。）
+NoseID（迷子対策アプリ＋LINEのお世話相談サービス）
+簡易健康診断　
+駆虫プログラム
+トリミング500円OFFクーポン×2
+ケンネルグループクーポン×2
+ドッグフード500円OFFクーポン×3
+シャンプーコース1回分無料
+Name: checkboxon16_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: genderselect         | Type: input    radio    | Value: 女の子 | Checked: True
+Name: checkboxon08_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea09           | Type: textarea          | Value: <span style="font-weight: bold; font-size: x-large;color: red;line-height: 100%">198,000円</span>
+<span style="font-size: small;"> (税込217,800円)</span
+Name: text07               | Type: input    text     | Value: MIX（マルチーズ×ビションフリーゼ）
+Name: checkboxon18_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon03_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea05           | Type: textarea          | Value: 1回接種済
+Name: checkboxon02_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon13_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon15_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea04           | Type: textarea          | Value: ホワイト
+Name: checkboxon12_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text02               | Type: input    text     | Value: 毛種・毛色
+Name: checkboxon01_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea02           | Type: textarea          | Value: 福岡県
+Name: checkboxon05_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text03               | Type: input    text     | Value: ワクチン接種
+Name: checkboxon19_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: preview_alt_tmpl     | Type: select            | Value: ブログ記事 (default)
+Name: authored_on_date     | Type: input    text     | Value: 2026-03-27
+Name: authored_on_time     | Type: input    text     | Value: 10:57:59
+Name: basename             | Type: input    text     | Value: 126073_mix
+Name: allow_comments       | Type: input    checkbox | Value: 1 | Checked: True
+
+========== 猫の販売 (ID:5964) ==========
+タイトル (title): 126066 アメリカンショートヘア
+公開ステータス (status): 公開
+作成日 (created_on_date): 
+カテゴリIDs (category_ids): 428
+
+[ フィールド一覧 ]
+Name: custom_prefs         | Type: input    checkbox | Value: title | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: text | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: category | Checked: True
+Name: custom_prefs         | Type: input    checkbox | Value: feedback | Checked: True
+Name: convert_breaks       | Type: select            | Value: リッチテキスト
+Name: checkboxon07_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon11_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea01           | Type: textarea          | Value: アメリカンショートヘア
+Name: checkboxon20_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon04_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon09_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon10_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text01               | Type: input    text     | Value: お問い合わせ番号  126066
+Name: checkboxon17_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon06_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon14_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text04               | Type: input    text     | Value: サンキューパック
+Name: textarea03           | Type: textarea          | Value: 2026年1月14日
+Name: textarea06           | Type: textarea          | Value: 39,000円（税込）
+<b>【パック内容】</b>
+マイクロチップ装着料
+生命保証（販売日より90日間の期間中に病気により
+死亡した場合、代猫を保証いたします。）
+FIP（猫伝染性腹膜炎）
+保証（生後1年までにFIPと診断され死亡した場合の保証）
+簡易健康診断　
+駆虫プログラム
+爪切りクーポン券×3
+ケンネルグループクーポン×5
+Name: checkboxon16_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: genderselect         | Type: input    radio    | Value: 女の子 | Checked: True
+Name: checkboxon08_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea09           | Type: textarea          | Value: <span style="font-weight: bold; font-size: x-large;color: red;line-height: 100%">198,000円</span>
+<span style="font-size: small;"> (税込217,800円)</span>
+Name: text07               | Type: input    text     | Value: アメリカンショートヘア
+Name: checkboxon18_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon03_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea05           | Type: textarea          | Value: 1回接種済み
+Name: checkboxon02_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon13_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: checkboxon15_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea04           | Type: textarea          | Value: ブラウンパッチドタビー
+Name: checkboxon12_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text02               | Type: input    text     | Value: 毛種・毛色
+Name: checkboxon01_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: textarea02           | Type: textarea          | Value: 佐賀
+Name: checkboxon05_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: text03               | Type: input    text     | Value: ワクチン接種
+Name: checkboxon19_acf     | Type: input    checkbox | Value: 1 | Checked: True
+Name: preview_alt_tmpl     | Type: select            | Value: ブログ記事 (default)
+Name: authored_on_date     | Type: input    text     | Value: 2026-03-14
+Name: authored_on_time     | Type: input    text     | Value: 14:43:48
+Name: basename             | Type: input    text     | Value: 126066
+Name: allow_comments       | Type: input    checkbox | Value: 1 | Checked: True

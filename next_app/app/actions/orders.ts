@@ -1,6 +1,8 @@
 'use server'
 
 import { revalidatePath, refresh } from 'next/cache'
+import { redirect } from 'next/navigation'
+
 import {
   getTodayDateInputValue,
   initialOrderMutationState,
@@ -425,3 +427,55 @@ export async function cancelOrderAction(formData: FormData) {
     console.error('Unexpected error while cancelling order:', error)
   }
 }
+
+export async function deleteOrderAction(formData: FormData) {
+  let shouldRedirect = false
+  try {
+    const supabase = await requireAuthenticatedClient()
+    const orderId = getTrimmedValue(formData, 'id')
+
+    if (!orderId) {
+      throw new Error('不正な客注削除リクエストです。')
+    }
+
+    // 対象の注文ステータスを確認してバリデーション
+    const { data: orderData, error: fetchError } = await supabase
+      .from('customer_orders')
+      .select('status')
+      .eq('id', orderId)
+      .single()
+
+    if (fetchError || !orderData) {
+      throw new Error('対象の客注が見つかりませんでした。')
+    }
+
+    const order = orderData as unknown as { status: string }
+
+    if (order.status !== 'completed' && order.status !== 'cancelled') {
+      throw new Error('完了またはキャンセル済みの客注のみ削除できます。')
+    }
+
+    // 削除実行
+    const { error: deleteError } = await supabase
+      .from('customer_orders')
+      .delete()
+      .eq('id', orderId)
+
+    if (deleteError) {
+      console.error('Error deleting order:', deleteError)
+      throw new Error('客注の削除に失敗しました。')
+    }
+
+    revalidateOrderPages(orderId)
+    refresh()
+    shouldRedirect = true
+  } catch (error) {
+    console.error('Unexpected error while deleting order:', error)
+    throw error
+  }
+
+  if (shouldRedirect) {
+    redirect('/orders')
+  }
+}
+

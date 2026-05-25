@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python: class Tabs</title>
+</head><body>
+<p>
+<table class="section">
+<tr class="decor title-decor heading-text">
+<td class="section-title" colspan=3>&nbsp;<br><a name="Tabs">class <strong>Tabs</strong></a>(<a href="flet.controls.layout_control.html#LayoutControl">flet.controls.layout_control.LayoutControl</a>, <a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a>)</td></tr>
+    
+<tr><td class="decor title-decor" rowspan=2><span class="code">&nbsp;&nbsp;&nbsp;</span></td>
+<td class="decor title-decor" colspan=2><span class="code">Tabs(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;content:&nbsp;Control,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;length:&nbsp;int,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;selected_index:&nbsp;int&nbsp;=&nbsp;0,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animation_duration:&nbsp;DurationValue&nbsp;=&nbsp;&amp;lt;factory&amp;gt;,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;on_change:&nbsp;Optional[ControlEventHandler['Tabs']]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;*,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data:&nbsp;Any&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;key:&nbsp;Optional[KeyValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;ref:&nbsp;InitVar[Optional[Ref['BaseControl']]]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;expand:&nbsp;Optional[Union[bool,&nbsp;int]]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;expand_loose:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;col:&nbsp;ResponsiveNumber&nbsp;=&nbsp;12,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;opacity:&nbsp;Number&nbsp;=&nbsp;1.0,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;tooltip:&nbsp;Optional[TooltipValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;badge:&nbsp;Optional[BadgeValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;visible:&nbsp;bool&nbsp;=&nbsp;True,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;disabled:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;rtl:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;adaptive:&nbsp;Optional[bool]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;width:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;height:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;left:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;top:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;right:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;bottom:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;align:&nbsp;Optional[Alignment]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;margin:&nbsp;Optional[MarginValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;rotate:&nbsp;Optional[RotateValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;scale:&nbsp;Optional[ScaleValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;offset:&nbsp;Optional[OffsetValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;flip:&nbsp;Optional[Flip]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;transform:&nbsp;Optional[Transform]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;aspect_ratio:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_opacity:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_size:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_position:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_align:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_margin:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_rotation:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_scale:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animate_offset:&nbsp;Optional[AnimationValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;size_change_interval:&nbsp;int&nbsp;=&nbsp;10,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;on_size_change:&nbsp;Optional[EventHandler[LayoutSizeChangeEvent['LayoutControl']]]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;on_animation_end:&nbsp;Optional[ControlEventHandler['LayoutControl']]&nbsp;=&nbsp;None<br>
+)&nbsp;-&amp;gt;&nbsp;None<br>
+&nbsp;<br>
+Used&nbsp;for&nbsp;navigating&nbsp;frequently&nbsp;accessed,&nbsp;distinct&nbsp;content&nbsp;categories.&nbsp;Tabs&nbsp;allow&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for&nbsp;navigation&nbsp;between&nbsp;two&nbsp;or&nbsp;more&nbsp;content&nbsp;views&nbsp;and&nbsp;relies&nbsp;on&nbsp;text&nbsp;headers&nbsp;to&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;articulate&nbsp;the&nbsp;different&nbsp;sections&nbsp;of&nbsp;content.<br>&nbsp;</span></td></tr>
+<tr><td>&nbsp;</td>
+<td class="singlecolumn"><dl><dt>Method resolution order:</dt>
+<dd><a href="flet.controls.material.tabs.html#Tabs">Tabs</a></dd>
+<dd><a href="flet.controls.layout_control.html#LayoutControl">flet.controls.layout_control.LayoutControl</a></dd>
+<dd><a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a></dd>
+<dd><a href="flet.controls.control.html#Control">flet.controls.control.Control</a></dd>
+<dd><a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a></dd>
+<dd><a href="builtins.html#object">builtins.object</a></dd>
+</dl>
+<hr>
+Methods defined here:<br>
+<dl><dt><a name="Tabs-__eq__"><strong>__eq__</strong></a>(self, other)</dt><dd><span class="code">Return&nbsp;self==value.</span></dd></dl>
+
+<dl><dt><a name="Tabs-__init__"><strong>__init__</strong></a>(
+    self,
+    content: Control,
+    length: int,
+    selected_index: int = 0,
+    animation_duration: DurationValue = &lt;factory&gt;,
+    on_change: Optional[ControlEventHandler['Tabs']] = None,
+    *,
+    data: Any = None,
+    key: Optional[KeyValue] = None,
+    ref: InitVar[Optional[Ref['BaseControl']]] = None,
+    expand: Optional[Union[bool, int]] = None,
+    expand_loose: bool = False,
+    col: ResponsiveNumber = 12,
+    opacity: Number = 1.0,
+    tooltip: Optional[TooltipValue] = None,
+    badge: Optional[BadgeValue] = None,
+    visible: bool = True,
+    disabled: bool = False,
+    rtl: bool = False,
+    adaptive: Optional[bool] = None,
+    width: Optional[Number] = None,
+    height: Optional[Number] = None,
+    left: Optional[Number] = None,
+    top: Optional[Number] = None,
+    right: Optional[Number] = None,
+    bottom: Optional[Number] = None,
+    align: Optional[Alignment] = None,
+    margin: Optional[MarginValue] = None,
+    rotate: Optional[RotateValue] = None,
+    scale: Optional[ScaleValue] = None,
+    offset: Optional[OffsetValue] = None,
+    flip: Optional[Flip] = None,
+    transform: Optional[Transform] = None,
+    aspect_ratio: Optional[Number] = None,
+    animate_opacity: Optional[AnimationValue] = None,
+    animate_size: Optional[AnimationValue] = None,
+    animate_position: Optional[AnimationValue] = None,
+    animate_align: Optional[AnimationValue] = None,
+    animate_margin: Optional[AnimationValue] = None,
+    animate_rotation: Optional[AnimationValue] = None,
+    animate_scale: Optional[AnimationValue] = None,
+    animate_offset: Optional[AnimationValue] = None,
+    size_change_interval: int = 10,
+    on_size_change: Optional[EventHandler[LayoutSizeChangeEvent['LayoutControl']]] = None,
+    on_animation_end: Optional[ControlEventHandler['LayoutControl']] = None
+) -&gt; None</dt><dd><span class="code">Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</span></dd></dl>
+
+<dl><dt><a name="Tabs-__post_init__"><strong>__post_init__</strong></a> = new_post_init(self: T, *args)<span class="grey"><span class="heading-text"> from flet.controls.base_control._apply_control.<locals></span></span></dt><dd><span class="code">Set&nbsp;the&nbsp;type&nbsp;and&nbsp;isolation&nbsp;only&nbsp;if&nbsp;explicitly&nbsp;provided.</span></dd></dl>
+
+<dl><dt><a name="Tabs-__replace__"><strong>__replace__</strong></a> = _replace(self, /, **changes)<span class="grey"><span class="heading-text"> from <a href="dataclasses.html">dataclasses</a></span></span></dt></dl>
+
+<dl><dt><a name="Tabs-__repr__"><strong>__repr__</strong></a>(self)</dt><dd><span class="code">Return&nbsp;repr(self).</span></dd></dl>
+
+<dl><dt><a name="Tabs-before_update"><strong>before_update</strong></a>(self)</dt><dd><span class="code">This&nbsp;method&nbsp;is&nbsp;called&nbsp;every&nbsp;time&nbsp;when&nbsp;this&nbsp;control&nbsp;is&nbsp;being&nbsp;updated.<br>
+&nbsp;<br>
+Note:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Make&nbsp;sure&nbsp;not&nbsp;to&nbsp;call/request&nbsp;an&nbsp;`<a href="#Tabs-update">update</a>()`&nbsp;here.</span></dd></dl>
+
+<dl><dt>async <a name="Tabs-move_to"><strong>move_to</strong></a>(
+    self,
+    index: int,
+    animation_curve: AnimationCurve = &lt;AnimationCurve.EASE_IN: 'easeIn'&gt;,
+    animation_duration: Optional[DurationValue] = None
+)</dt><dd><span class="code">Selects&nbsp;the&nbsp;tab&nbsp;at&nbsp;the&nbsp;given&nbsp;`index`.<br>
+&nbsp;<br>
+Additionally,&nbsp;it&nbsp;triggers&nbsp;[`on_change`][(c).]&nbsp;event&nbsp;and&nbsp;updates<br>
+[`selected_index`][(c).].<br>
+&nbsp;<br>
+Note:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;If&nbsp;`index`&nbsp;is&nbsp;negative,&nbsp;it&nbsp;is&nbsp;interpreted&nbsp;as&nbsp;a&nbsp;Python-style&nbsp;negative&nbsp;index<br>
+&nbsp;&nbsp;&nbsp;&nbsp;(e.g.,&nbsp;-1&nbsp;refers&nbsp;to&nbsp;the&nbsp;last&nbsp;tab).&nbsp;If&nbsp;the&nbsp;resolved&nbsp;index&nbsp;is&nbsp;already&nbsp;the<br>
+&nbsp;&nbsp;&nbsp;&nbsp;currently&nbsp;selected&nbsp;tab,&nbsp;the&nbsp;method&nbsp;returns&nbsp;immediately&nbsp;and&nbsp;does&nbsp;nothing.<br>
+&nbsp;<br>
+Args:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;index:&nbsp;The&nbsp;index&nbsp;of&nbsp;the&nbsp;tab&nbsp;to&nbsp;select.&nbsp;Must&nbsp;be&nbsp;between&nbsp;in&nbsp;range<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`[-length,&nbsp;length&nbsp;-&nbsp;1]`.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animation_curve:&nbsp;The&nbsp;curve&nbsp;to&nbsp;apply&nbsp;to&nbsp;the&nbsp;animation.<br>
+&nbsp;&nbsp;&nbsp;&nbsp;animation_duration:&nbsp;The&nbsp;duration&nbsp;of&nbsp;the&nbsp;animation.&nbsp;If&nbsp;`None`&nbsp;(the&nbsp;default),<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[`Tabs.animation_duration`][flet.]&nbsp;will&nbsp;be&nbsp;used.<br>
+&nbsp;<br>
+Raises:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;IndexError:&nbsp;If&nbsp;the&nbsp;`index`&nbsp;is&nbsp;outside&nbsp;the&nbsp;range&nbsp;`[-length,&nbsp;length&nbsp;-&nbsp;1]`.</span></dd></dl>
+
+<hr>
+Data and other attributes defined here:<br>
+<dl><dt><strong>__dataclass_fields__</strong> = {'_c': Field(name='_c',type=&lt;class 'str'&gt;,default=&lt;data...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), '_i': Field(name='_i',type=&lt;class 'int'&gt;,default=&lt;data...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), '_internals': Field(name='_internals',type=&lt;class 'dict'&gt;,defa...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'adaptive': Field(name='adaptive',type=bool | None,default=N...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'align': Field(name='align',type=flet.controls.alignment....oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'animate_align': Field(name='animate_align',type=bool | int | fle...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'animate_margin': Field(name='animate_margin',type=bool | int | fl...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'animate_offset': Field(name='animate_offset',type=bool | int | fl...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'animate_opacity': Field(name='animate_opacity',type=bool | int | f...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'animate_position': Field(name='animate_position',type=bool | int | ...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), ...}</dl>
+
+<dl><dt><strong>__dataclass_params__</strong> = _DataclassParams(init=True,repr=True,eq=True,ord...rue,kw_only=False,slots=False,weakref_slot=False)</dl>
+
+<dl><dt><strong>__hash__</strong> = None</dl>
+
+<dl><dt><strong>__match_args__</strong> = ('content', 'length', 'selected_index', 'animation_duration', 'on_change')</dl>
+
+<dl><dt><strong>on_change</strong> = None</dl>
+
+<dl><dt><strong>selected_index</strong> = 0</dl>
+
+<hr>
+Data and other attributes inherited from <a href="flet.controls.layout_control.html#LayoutControl">flet.controls.layout_control.LayoutControl</a>:<br>
+<dl><dt><strong>align</strong> = None</dl>
+
+<dl><dt><strong>animate_align</strong> = None</dl>
+
+<dl><dt><strong>animate_margin</strong> = None</dl>
+
+<dl><dt><strong>animate_offset</strong> = None</dl>
+
+<dl><dt><strong>animate_opacity</strong> = None</dl>
+
+<dl><dt><strong>animate_position</strong> = None</dl>
+
+<dl><dt><strong>animate_rotation</strong> = None</dl>
+
+<dl><dt><strong>animate_scale</strong> = None</dl>
+
+<dl><dt><strong>animate_size</strong> = None</dl>
+
+<dl><dt><strong>aspect_ratio</strong> = None</dl>
+
+<dl><dt><strong>bottom</strong> = None</dl>
+
+<dl><dt><strong>flip</strong> = None</dl>
+
+<dl><dt><strong>height</strong> = None</dl>
+
+<dl><dt><strong>left</strong> = None</dl>
+
+<dl><dt><strong>margin</strong> = None</dl>
+
+<dl><dt><strong>offset</strong> = None</dl>
+
+<dl><dt><strong>on_animation_end</strong> = None</dl>
+
+<dl><dt><strong>on_size_change</strong> = None</dl>
+
+<dl><dt><strong>right</strong> = None</dl>
+
+<dl><dt><strong>rotate</strong> = None</dl>
+
+<dl><dt><strong>scale</strong> = None</dl>
+
+<dl><dt><strong>size_change_interval</strong> = 10</dl>
+
+<dl><dt><strong>top</strong> = None</dl>
+
+<dl><dt><strong>transform</strong> = None</dl>
+
+<dl><dt><strong>width</strong> = None</dl>
+
+<hr>
+Data and other attributes inherited from <a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a>:<br>
+<dl><dt><strong>adaptive</strong> = None</dl>
+
+<hr>
+Data and other attributes inherited from <a href="flet.controls.control.html#Control">flet.controls.control.Control</a>:<br>
+<dl><dt><strong>badge</strong> = None</dl>
+
+<dl><dt><strong>col</strong> = 12</dl>
+
+<dl><dt><strong>disabled</strong> = False</dl>
+
+<dl><dt><strong>expand</strong> = None</dl>
+
+<dl><dt><strong>expand_loose</strong> = False</dl>
+
+<dl><dt><strong>opacity</strong> = 1.0</dl>
+
+<dl><dt><strong>rtl</strong> = False</dl>
+
+<dl><dt><strong>tooltip</strong> = None</dl>
+
+<dl><dt><strong>visible</strong> = True</dl>
+
+<hr>
+Methods inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><a name="Tabs-__str__"><strong>__str__</strong></a>(self)</dt><dd><span class="code">Return&nbsp;a&nbsp;debug-friendly&nbsp;control&nbsp;identifier&nbsp;string.</span></dd></dl>
+
+<dl><dt><a name="Tabs-before_event"><strong>before_event</strong></a>(self, e: ControlEvent)</dt><dd><span class="code">Intercept&nbsp;an&nbsp;event&nbsp;before&nbsp;its&nbsp;handler&nbsp;is&nbsp;executed.<br>
+&nbsp;<br>
+Return&nbsp;`False`&nbsp;to&nbsp;cancel&nbsp;dispatch.&nbsp;Return&nbsp;`True`&nbsp;or&nbsp;`None`&nbsp;to&nbsp;continue<br>
+normal&nbsp;event&nbsp;processing.</span></dd></dl>
+
+<dl><dt><a name="Tabs-build"><strong>build</strong></a>(self)</dt><dd><span class="code">Called&nbsp;once&nbsp;during&nbsp;control&nbsp;initialization&nbsp;to&nbsp;define&nbsp;its&nbsp;child&nbsp;controls.<br>
+`page`&nbsp;property&nbsp;is&nbsp;available/usable&nbsp;in&nbsp;this&nbsp;method.</span></dd></dl>
+
+<dl><dt><a name="Tabs-did_mount"><strong>did_mount</strong></a>(self)</dt><dd><span class="code">Called&nbsp;after&nbsp;the&nbsp;control&nbsp;is&nbsp;mounted&nbsp;into&nbsp;the&nbsp;page&nbsp;tree.<br>
+&nbsp;<br>
+Override&nbsp;to&nbsp;start&nbsp;resources&nbsp;that&nbsp;require&nbsp;an&nbsp;attached&nbsp;page,&nbsp;for&nbsp;example<br>
+subscriptions,&nbsp;timers,&nbsp;or&nbsp;service&nbsp;listeners.</span></dd></dl>
+
+<dl><dt><a name="Tabs-init"><strong>init</strong></a>(self)</dt><dd><span class="code">Called&nbsp;after&nbsp;control&nbsp;instance&nbsp;initialization&nbsp;and&nbsp;before&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;the&nbsp;first&nbsp;build&nbsp;/&nbsp;update&nbsp;cycle.<br>
+&nbsp;<br>
+Override&nbsp;this&nbsp;hook&nbsp;to&nbsp;perform&nbsp;lightweight&nbsp;setup&nbsp;that&nbsp;depends&nbsp;on&nbsp;initialized<br>
+fields.&nbsp;Do&nbsp;not&nbsp;call&nbsp;`<a href="#Tabs-update">update</a>()`&nbsp;here.</span></dd></dl>
+
+<dl><dt><a name="Tabs-is_isolated"><strong>is_isolated</strong></a>(self)</dt><dd><span class="code">Return&nbsp;whether&nbsp;this&nbsp;control&nbsp;is&nbsp;marked&nbsp;as&nbsp;isolated.<br>
+&nbsp;<br>
+Isolated&nbsp;controls&nbsp;are&nbsp;excluded&nbsp;from&nbsp;parent-driven&nbsp;update&nbsp;traversal&nbsp;and<br>
+are&nbsp;expected&nbsp;to&nbsp;manage&nbsp;their&nbsp;own&nbsp;update&nbsp;boundaries.</span></dd></dl>
+
+<dl><dt><a name="Tabs-update"><strong>update</strong></a>(self) -&gt; None</dt><dd><span class="code">Request&nbsp;a&nbsp;UI&nbsp;update&nbsp;for&nbsp;this&nbsp;control.<br>
+&nbsp;<br>
+Call&nbsp;after&nbsp;changing&nbsp;control&nbsp;state&nbsp;or&nbsp;properties.&nbsp;The&nbsp;control&nbsp;must&nbsp;be<br>
+attached&nbsp;to&nbsp;a&nbsp;page&nbsp;and&nbsp;not&nbsp;marked&nbsp;as&nbsp;frozen.</span></dd></dl>
+
+<dl><dt><a name="Tabs-will_unmount"><strong>will_unmount</strong></a>(self)</dt><dd><span class="code">Called&nbsp;before&nbsp;the&nbsp;control&nbsp;is&nbsp;removed&nbsp;from&nbsp;the&nbsp;page&nbsp;tree.<br>
+&nbsp;<br>
+Override&nbsp;to&nbsp;dispose&nbsp;resources&nbsp;created&nbsp;in&nbsp;`<a href="#Tabs-did_mount">did_mount</a>()`,&nbsp;such&nbsp;as<br>
+subscriptions,&nbsp;timers,&nbsp;or&nbsp;external&nbsp;handles.</span></dd></dl>
+
+<hr>
+Readonly properties inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>page</strong></dt>
+<dd><span class="code">The&nbsp;page&nbsp;to&nbsp;which&nbsp;this&nbsp;control&nbsp;belongs&nbsp;to.</span></dd>
+</dl>
+<dl><dt><strong>parent</strong></dt>
+<dd><span class="code">The&nbsp;direct&nbsp;ancestor(parent)&nbsp;of&nbsp;this&nbsp;control.<br>
+&nbsp;<br>
+It&nbsp;defaults&nbsp;to&nbsp;`None`&nbsp;and&nbsp;will&nbsp;only&nbsp;have&nbsp;a&nbsp;value&nbsp;when&nbsp;this&nbsp;control&nbsp;is&nbsp;mounted<br>
+(added&nbsp;to&nbsp;the&nbsp;page&nbsp;tree).<br>
+&nbsp;<br>
+The&nbsp;`Page`&nbsp;control&nbsp;(which&nbsp;is&nbsp;the&nbsp;root&nbsp;of&nbsp;the&nbsp;tree)&nbsp;is&nbsp;an&nbsp;exception&nbsp;-&nbsp;it&nbsp;always<br>
+has&nbsp;`parent=None`.</span></dd>
+</dl>
+<hr>
+Data descriptors inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><span class="code">dictionary&nbsp;for&nbsp;instance&nbsp;variables</span></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><span class="code">list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object</span></dd>
+</dl>
+<hr>
+Data and other attributes inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>data</strong> = None</dl>
+
+<dl><dt><strong>key</strong> = None</dl>
+
+<dl><dt><strong>ref</strong> = None</dl>
+
+</td></tr></table>
+</body></html>

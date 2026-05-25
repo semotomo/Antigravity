@@ -1,0 +1,7 @@
+- `[ ]` `lib/types/database.ts` の型定義補完（`sales_enriched_v`, `product_aliases` 用）
+- `[ ]` `lib/queries/products.ts` を作成し、`fetchUnmatchedProducts()`, `fetchActiveProducts()` を実装
+- `[ ]` `app/(dashboard)/products/unmatched/page.tsx` の左ペインUIを実装
+- `[ ]` `app/actions/products.ts` のアクションスケルトンを追加
+- `[ ]` 右ペイン用 UI コンポーネントおよびフォームの実装と Server Actions の繋ぎ込み
+- `[ ]` エラーハンドリング（Supabase 操作エラー等）の組み込み
+- `[ ]` リンク・ナビゲーションの更新 (`SideNav.tsx`, `BottomNav.tsx`)

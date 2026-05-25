@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python: class Tab</title>
+</head><body>
+<p>
+<table class="section">
+<tr class="decor title-decor heading-text">
+<td class="section-title" colspan=3>&nbsp;<br><a name="Tab">class <strong>Tab</strong></a>(<a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a>)</td></tr>
+    
+<tr><td class="decor title-decor" rowspan=2><span class="code">&nbsp;&nbsp;&nbsp;</span></td>
+<td class="decor title-decor" colspan=2><span class="code">Tab(<br>
+&nbsp;&nbsp;&nbsp;&nbsp;label:&nbsp;Optional[StrOrControl]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;icon:&nbsp;Optional[IconDataOrControl]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;height:&nbsp;Optional[Number]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;icon_margin:&nbsp;Optional[MarginValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;*,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;data:&nbsp;Any&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;key:&nbsp;Optional[KeyValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;ref:&nbsp;InitVar[Optional[Ref['BaseControl']]]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;expand:&nbsp;Optional[Union[bool,&nbsp;int]]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;expand_loose:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;col:&nbsp;ResponsiveNumber&nbsp;=&nbsp;12,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;opacity:&nbsp;Number&nbsp;=&nbsp;1.0,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;tooltip:&nbsp;Optional[TooltipValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;badge:&nbsp;Optional[BadgeValue]&nbsp;=&nbsp;None,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;visible:&nbsp;bool&nbsp;=&nbsp;True,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;disabled:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;rtl:&nbsp;bool&nbsp;=&nbsp;False,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;adaptive:&nbsp;Optional[bool]&nbsp;=&nbsp;None<br>
+)&nbsp;-&amp;gt;&nbsp;None<br>
+&nbsp;<br>
+A&nbsp;Material&nbsp;Design&nbsp;[`TabBar`][flet.]&nbsp;tab.<br>&nbsp;</span></td></tr>
+<tr><td>&nbsp;</td>
+<td class="singlecolumn"><dl><dt>Method resolution order:</dt>
+<dd><a href="flet.controls.material.tabs.html#Tab">Tab</a></dd>
+<dd><a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a></dd>
+<dd><a href="flet.controls.control.html#Control">flet.controls.control.Control</a></dd>
+<dd><a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a></dd>
+<dd><a href="builtins.html#object">builtins.object</a></dd>
+</dl>
+<hr>
+Methods defined here:<br>
+<dl><dt><a name="Tab-__eq__"><strong>__eq__</strong></a>(self, other)</dt><dd><span class="code">Return&nbsp;self==value.</span></dd></dl>
+
+<dl><dt><a name="Tab-__init__"><strong>__init__</strong></a>(
+    self,
+    label: Optional[StrOrControl] = None,
+    icon: Optional[IconDataOrControl] = None,
+    height: Optional[Number] = None,
+    icon_margin: Optional[MarginValue] = None,
+    *,
+    data: Any = None,
+    key: Optional[KeyValue] = None,
+    ref: InitVar[Optional[Ref['BaseControl']]] = None,
+    expand: Optional[Union[bool, int]] = None,
+    expand_loose: bool = False,
+    col: ResponsiveNumber = 12,
+    opacity: Number = 1.0,
+    tooltip: Optional[TooltipValue] = None,
+    badge: Optional[BadgeValue] = None,
+    visible: bool = True,
+    disabled: bool = False,
+    rtl: bool = False,
+    adaptive: Optional[bool] = None
+) -&gt; None</dt><dd><span class="code">Initialize&nbsp;self.&nbsp;&nbsp;See&nbsp;help(type(self))&nbsp;for&nbsp;accurate&nbsp;signature.</span></dd></dl>
+
+<dl><dt><a name="Tab-__post_init__"><strong>__post_init__</strong></a> = new_post_init(self: T, *args)<span class="grey"><span class="heading-text"> from flet.controls.base_control._apply_control.<locals></span></span></dt><dd><span class="code">Set&nbsp;the&nbsp;type&nbsp;and&nbsp;isolation&nbsp;only&nbsp;if&nbsp;explicitly&nbsp;provided.</span></dd></dl>
+
+<dl><dt><a name="Tab-__replace__"><strong>__replace__</strong></a> = _replace(self, /, **changes)<span class="grey"><span class="heading-text"> from <a href="dataclasses.html">dataclasses</a></span></span></dt></dl>
+
+<dl><dt><a name="Tab-__repr__"><strong>__repr__</strong></a>(self)</dt><dd><span class="code">Return&nbsp;repr(self).</span></dd></dl>
+
+<dl><dt><a name="Tab-before_update"><strong>before_update</strong></a>(self)</dt><dd><span class="code">This&nbsp;method&nbsp;is&nbsp;called&nbsp;every&nbsp;time&nbsp;when&nbsp;this&nbsp;control&nbsp;is&nbsp;being&nbsp;updated.<br>
+&nbsp;<br>
+Note:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Make&nbsp;sure&nbsp;not&nbsp;to&nbsp;call/request&nbsp;an&nbsp;`<a href="#Tab-update">update</a>()`&nbsp;here.</span></dd></dl>
+
+<hr>
+Data and other attributes defined here:<br>
+<dl><dt><strong>__dataclass_fields__</strong> = {'_c': Field(name='_c',type=&lt;class 'str'&gt;,default=&lt;data...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), '_i': Field(name='_i',type=&lt;class 'int'&gt;,default=&lt;data...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), '_internals': Field(name='_internals',type=&lt;class 'dict'&gt;,defa...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'adaptive': Field(name='adaptive',type=bool | None,default=N...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'badge': Field(name='badge',type=str | flet.controls.mate...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'col': Field(name='col',type=dict[str | flet.controls.t...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'data': Field(name='data',type=typing.Any,default=None,d... True}),kw_only=True,doc=None,_field_type=_FIELD), 'disabled': Field(name='disabled',type=&lt;class 'bool'&gt;,defaul...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'expand': Field(name='expand',type=bool | int | None,defau...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), 'expand_loose': Field(name='expand_loose',type=&lt;class 'bool'&gt;,de...oxy({}),kw_only=True,doc=None,_field_type=_FIELD), ...}</dl>
+
+<dl><dt><strong>__dataclass_params__</strong> = _DataclassParams(init=True,repr=True,eq=True,ord...rue,kw_only=False,slots=False,weakref_slot=False)</dl>
+
+<dl><dt><strong>__hash__</strong> = None</dl>
+
+<dl><dt><strong>__match_args__</strong> = ('label', 'icon', 'height', 'icon_margin')</dl>
+
+<dl><dt><strong>height</strong> = None</dl>
+
+<dl><dt><strong>icon</strong> = None</dl>
+
+<dl><dt><strong>icon_margin</strong> = None</dl>
+
+<dl><dt><strong>label</strong> = None</dl>
+
+<hr>
+Data and other attributes inherited from <a href="flet.controls.adaptive_control.html#AdaptiveControl">flet.controls.adaptive_control.AdaptiveControl</a>:<br>
+<dl><dt><strong>adaptive</strong> = None</dl>
+
+<hr>
+Data and other attributes inherited from <a href="flet.controls.control.html#Control">flet.controls.control.Control</a>:<br>
+<dl><dt><strong>badge</strong> = None</dl>
+
+<dl><dt><strong>col</strong> = 12</dl>
+
+<dl><dt><strong>disabled</strong> = False</dl>
+
+<dl><dt><strong>expand</strong> = None</dl>
+
+<dl><dt><strong>expand_loose</strong> = False</dl>
+
+<dl><dt><strong>opacity</strong> = 1.0</dl>
+
+<dl><dt><strong>rtl</strong> = False</dl>
+
+<dl><dt><strong>tooltip</strong> = None</dl>
+
+<dl><dt><strong>visible</strong> = True</dl>
+
+<hr>
+Methods inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><a name="Tab-__str__"><strong>__str__</strong></a>(self)</dt><dd><span class="code">Return&nbsp;a&nbsp;debug-friendly&nbsp;control&nbsp;identifier&nbsp;string.</span></dd></dl>
+
+<dl><dt><a name="Tab-before_event"><strong>before_event</strong></a>(self, e: ControlEvent)</dt><dd><span class="code">Intercept&nbsp;an&nbsp;event&nbsp;before&nbsp;its&nbsp;handler&nbsp;is&nbsp;executed.<br>
+&nbsp;<br>
+Return&nbsp;`False`&nbsp;to&nbsp;cancel&nbsp;dispatch.&nbsp;Return&nbsp;`True`&nbsp;or&nbsp;`None`&nbsp;to&nbsp;continue<br>
+normal&nbsp;event&nbsp;processing.</span></dd></dl>
+
+<dl><dt><a name="Tab-build"><strong>build</strong></a>(self)</dt><dd><span class="code">Called&nbsp;once&nbsp;during&nbsp;control&nbsp;initialization&nbsp;to&nbsp;define&nbsp;its&nbsp;child&nbsp;controls.<br>
+`page`&nbsp;property&nbsp;is&nbsp;available/usable&nbsp;in&nbsp;this&nbsp;method.</span></dd></dl>
+
+<dl><dt><a name="Tab-did_mount"><strong>did_mount</strong></a>(self)</dt><dd><span class="code">Called&nbsp;after&nbsp;the&nbsp;control&nbsp;is&nbsp;mounted&nbsp;into&nbsp;the&nbsp;page&nbsp;tree.<br>
+&nbsp;<br>
+Override&nbsp;to&nbsp;start&nbsp;resources&nbsp;that&nbsp;require&nbsp;an&nbsp;attached&nbsp;page,&nbsp;for&nbsp;example<br>
+subscriptions,&nbsp;timers,&nbsp;or&nbsp;service&nbsp;listeners.</span></dd></dl>
+
+<dl><dt><a name="Tab-init"><strong>init</strong></a>(self)</dt><dd><span class="code">Called&nbsp;after&nbsp;control&nbsp;instance&nbsp;initialization&nbsp;and&nbsp;before&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;the&nbsp;first&nbsp;build&nbsp;/&nbsp;update&nbsp;cycle.<br>
+&nbsp;<br>
+Override&nbsp;this&nbsp;hook&nbsp;to&nbsp;perform&nbsp;lightweight&nbsp;setup&nbsp;that&nbsp;depends&nbsp;on&nbsp;initialized<br>
+fields.&nbsp;Do&nbsp;not&nbsp;call&nbsp;`<a href="#Tab-update">update</a>()`&nbsp;here.</span></dd></dl>
+
+<dl><dt><a name="Tab-is_isolated"><strong>is_isolated</strong></a>(self)</dt><dd><span class="code">Return&nbsp;whether&nbsp;this&nbsp;control&nbsp;is&nbsp;marked&nbsp;as&nbsp;isolated.<br>
+&nbsp;<br>
+Isolated&nbsp;controls&nbsp;are&nbsp;excluded&nbsp;from&nbsp;parent-driven&nbsp;update&nbsp;traversal&nbsp;and<br>
+are&nbsp;expected&nbsp;to&nbsp;manage&nbsp;their&nbsp;own&nbsp;update&nbsp;boundaries.</span></dd></dl>
+
+<dl><dt><a name="Tab-update"><strong>update</strong></a>(self) -&gt; None</dt><dd><span class="code">Request&nbsp;a&nbsp;UI&nbsp;update&nbsp;for&nbsp;this&nbsp;control.<br>
+&nbsp;<br>
+Call&nbsp;after&nbsp;changing&nbsp;control&nbsp;state&nbsp;or&nbsp;properties.&nbsp;The&nbsp;control&nbsp;must&nbsp;be<br>
+attached&nbsp;to&nbsp;a&nbsp;page&nbsp;and&nbsp;not&nbsp;marked&nbsp;as&nbsp;frozen.</span></dd></dl>
+
+<dl><dt><a name="Tab-will_unmount"><strong>will_unmount</strong></a>(self)</dt><dd><span class="code">Called&nbsp;before&nbsp;the&nbsp;control&nbsp;is&nbsp;removed&nbsp;from&nbsp;the&nbsp;page&nbsp;tree.<br>
+&nbsp;<br>
+Override&nbsp;to&nbsp;dispose&nbsp;resources&nbsp;created&nbsp;in&nbsp;`<a href="#Tab-did_mount">did_mount</a>()`,&nbsp;such&nbsp;as<br>
+subscriptions,&nbsp;timers,&nbsp;or&nbsp;external&nbsp;handles.</span></dd></dl>
+
+<hr>
+Readonly properties inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>page</strong></dt>
+<dd><span class="code">The&nbsp;page&nbsp;to&nbsp;which&nbsp;this&nbsp;control&nbsp;belongs&nbsp;to.</span></dd>
+</dl>
+<dl><dt><strong>parent</strong></dt>
+<dd><span class="code">The&nbsp;direct&nbsp;ancestor(parent)&nbsp;of&nbsp;this&nbsp;control.<br>
+&nbsp;<br>
+It&nbsp;defaults&nbsp;to&nbsp;`None`&nbsp;and&nbsp;will&nbsp;only&nbsp;have&nbsp;a&nbsp;value&nbsp;when&nbsp;this&nbsp;control&nbsp;is&nbsp;mounted<br>
+(added&nbsp;to&nbsp;the&nbsp;page&nbsp;tree).<br>
+&nbsp;<br>
+The&nbsp;`Page`&nbsp;control&nbsp;(which&nbsp;is&nbsp;the&nbsp;root&nbsp;of&nbsp;the&nbsp;tree)&nbsp;is&nbsp;an&nbsp;exception&nbsp;-&nbsp;it&nbsp;always<br>
+has&nbsp;`parent=None`.</span></dd>
+</dl>
+<hr>
+Data descriptors inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>__dict__</strong></dt>
+<dd><span class="code">dictionary&nbsp;for&nbsp;instance&nbsp;variables</span></dd>
+</dl>
+<dl><dt><strong>__weakref__</strong></dt>
+<dd><span class="code">list&nbsp;of&nbsp;weak&nbsp;references&nbsp;to&nbsp;the&nbsp;object</span></dd>
+</dl>
+<hr>
+Data and other attributes inherited from <a href="flet.controls.base_control.html#BaseControl">flet.controls.base_control.BaseControl</a>:<br>
+<dl><dt><strong>data</strong> = None</dl>
+
+<dl><dt><strong>key</strong> = None</dl>
+
+<dl><dt><strong>ref</strong> = None</dl>
+
+</td></tr></table>
+</body></html>
