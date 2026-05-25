@@ -1,7 +1,7 @@
 'use client'
 
-import { useDeferredValue, useMemo, useState } from 'react'
-import { Search, SquarePen } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Search, SquarePen, Loader2 } from 'lucide-react'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { ProductFormModal } from '@/components/products/ProductFormModal'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
@@ -23,41 +23,41 @@ type DialogState = {
   nonce: number
 } | null
 
-function buildSearchText(product: ProductListRow) {
-  return [
-    product.product_name ?? '',
-    product.jan_code ?? '',
-    product.category ?? '',
-    product.product_group ?? '',
-    product.brand ?? '',
-  ]
-    .join(' ')
-    .toLowerCase()
-}
-
-export function ProductsBoard({ products }: ProductsBoardProps) {
+export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps) {
   const [query, setQuery] = useState('')
-  const deferredQuery = useDeferredValue(query)
+  const [results, setResults] = useState<ProductListRow[]>([])
+  const [loading, setLoading] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(null)
 
-  const filteredProducts = useMemo(() => {
-    const normalized = deferredQuery.trim().toLowerCase()
-
-    if (!normalized) {
-      return products
+  // 300ms のデバウンス付きでサーバーサイド検索APIを呼び出す
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!trimmed) {
+      setResults([])
+      setLoading(false)
+      return
     }
 
-    return products.filter((product) => buildSearchText(product).includes(normalized))
-  }, [deferredQuery, products])
+    setLoading(true)
 
-  const counts = useMemo(
-    () => ({
-      total: products.length,
-      active: products.filter((product) => product.is_active).length,
-      inactive: products.filter((product) => !product.is_active).length,
-    }),
-    [products]
-  )
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/products/search?q=${encodeURIComponent(trimmed)}`)
+        if (res.ok) {
+          const result = await res.json()
+          if (result.success && Array.isArray(result.data)) {
+            setResults(result.data)
+          }
+        }
+      } catch (e) {
+        console.error('商品検索エラー:', e)
+      } finally {
+        setLoading(false)
+      }
+    }, 300) // 300ms デバウンス
+
+    return () => clearTimeout(timer)
+  }, [query])
 
   const columns: DataTableColumn<ProductListRow>[] = [
     {
@@ -144,40 +144,16 @@ export function ProductsBoard({ products }: ProductsBoardProps) {
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">商品マスタ</h1>
                 <p className="mt-2 max-w-2xl text-sm text-sky-50/90">
-                  売上分析やエイリアス解決で使う商品マスタを一覧で確認し、価格やステータスを編集します。
+                  売上分析やエイリアス解決で使う商品マスタをデータベースから高速検索し、編集します。
                 </p>
               </div>
               <div className="rounded-3xl bg-white/10 px-4 py-3 backdrop-blur-sm">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-100">
-                  表示件数
+                  ヒット件数
                 </p>
-                <p className="mt-2 text-2xl font-bold">{filteredProducts.length}</p>
-                <p className="text-xs text-sky-50/90">検索条件に一致した商品</p>
+                <p className="mt-2 text-2xl font-bold">{results.length}</p>
+                <p className="text-xs text-sky-50/90">現在表示中の商品数</p>
               </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 px-6 py-5 md:grid-cols-3">
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-                総商品数
-              </p>
-              <p className="mt-3 text-3xl font-bold text-gray-900">{counts.total}</p>
-              <p className="mt-1 text-sm text-gray-500">停止中の商品も含みます</p>
-            </div>
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-                有効
-              </p>
-              <p className="mt-3 text-3xl font-bold text-gray-900">{counts.active}</p>
-              <p className="mt-1 text-sm text-gray-500">通常運用中の商品</p>
-            </div>
-            <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-                停止中
-              </p>
-              <p className="mt-3 text-3xl font-bold text-gray-900">{counts.inactive}</p>
-              <p className="mt-1 text-sm text-gray-500">販売停止や整理対象の商品</p>
             </div>
           </div>
         </section>
@@ -192,9 +168,12 @@ export function ProductsBoard({ products }: ProductsBoardProps) {
                   <input
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="商品名 / JAN / カテゴリ / ブランド"
-                    className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-3 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                    placeholder="商品名 / JAN / カテゴリ / ブランド を入力して検索"
+                    className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-10 text-sm text-gray-900 outline-none transition focus:border-gray-900"
                   />
+                  {loading ? (
+                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-sky-600" />
+                  ) : null}
                 </div>
               </label>
               <JanCodeScannerField
@@ -207,12 +186,24 @@ export function ProductsBoard({ products }: ProductsBoardProps) {
             </div>
           </div>
 
-          <DataTable
-            data={filteredProducts}
-            columns={columns}
-            keyExtractor={(product) => String(product.id)}
-            emptyMessage="条件に一致する商品が見つかりませんでした。"
-          />
+          {query.trim() === '' ? (
+            <div className="rounded-3xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-sky-50 text-sky-600">
+                <Search className="h-6 w-6" />
+              </div>
+              <h2 className="mt-4 text-lg font-bold text-gray-900">商品を検索してください</h2>
+              <p className="mt-2 text-sm text-gray-500 max-w-md mx-auto">
+                上部の検索窓に「商品名」「JANコード」「カテゴリ」などを入力すると、データベースから高速に検索して結果を表示します。
+              </p>
+            </div>
+          ) : (
+            <DataTable
+              data={results}
+              columns={columns}
+              keyExtractor={(product) => String(product.id)}
+              emptyMessage={loading ? '検索中...' : '条件に一致する商品が見つかりませんでした。'}
+            />
+          )}
         </section>
       </div>
 
