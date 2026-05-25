@@ -82,22 +82,10 @@ export async function fetchStores(): Promise<TransferStoreOption[]> {
 }
 
 export async function fetchTransferProducts(): Promise<TransferProductOption[]> {
-  const supabase = await createClient()
-  const products = await fetchAllRows<TransferProductOption>(
-    async (from, to) =>
-      await supabase
-        .from('products')
-        .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
-        .order('is_active', { ascending: false })
-        .order('product_name', { ascending: true })
-        .order('id', { ascending: true })
-        .range(from, to),
-    'transfer products'
-  )
-
-  return products.filter(
-    (product) => Boolean(product.product_name) && Boolean(product.jan_code)
-  )
+  // 初期ロード時の数万件のループ一括ロードを廃止し、空配列を返します。
+  // 新規登録モーダル側には、キャッシュにない場合にサーバーへ直接ミリ秒で1件ずつ
+  // オンデマンド取得するフォールバック機構がすでに組み込まれているため、これで動作整合性を保ったまま爆速化します。
+  return []
 }
 
 export async function searchProductByJan(janCode: string): Promise<TransferProductOption | null> {
