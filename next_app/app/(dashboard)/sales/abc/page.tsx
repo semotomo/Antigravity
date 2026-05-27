@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { AbcAnalysisCharts } from '@/components/sales/AbcAnalysisCharts'
 import { fetchAbcAnalysis, type AbcAnalysisRow } from '@/lib/queries/abc'
 import { fetchSalesFilterOptions } from '@/lib/queries/sales'
 
@@ -322,6 +323,8 @@ export default async function SalesAbcPage({
           </p>
         </div>
       </div>
+
+      <AbcAnalysisCharts data={rows} />
 
       <DataTable
         data={rows}
