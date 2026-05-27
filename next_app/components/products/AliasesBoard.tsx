@@ -70,9 +70,6 @@ function AliasTargetModal({
       >
         <div className="flex items-start justify-between border-b border-gray-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-              Product Aliases
-            </p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">紐付け先を変更</h2>
             <p className="mt-1 text-sm text-gray-500">
               POS 名「{alias.alias_name}」を別の商品マスタへ付け替えます。
@@ -252,10 +249,7 @@ export function AliasesBoard({ aliases, products }: AliasesBoardProps) {
 
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm">
           <div className="bg-gradient-to-r from-gray-900 via-slate-800 to-amber-600 px-6 py-7 text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-100">
-              Product Aliases
-            </p>
-            <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">エイリアス管理</h1>
                 <p className="mt-2 max-w-2xl text-sm text-amber-50/90">

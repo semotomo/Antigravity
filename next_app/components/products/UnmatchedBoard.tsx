@@ -61,10 +61,7 @@ export function UnmatchedBoard({
 
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm">
           <div className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-lime-500 px-6 py-8 text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.26em] text-emerald-100">
-              Product Matching
-            </p>
-            <h1 className="mt-3 text-3xl font-bold tracking-tight">未一致商品の解消</h1>
+            <h1 className="text-3xl font-bold tracking-tight">未一致商品の解消</h1>
             <p className="mt-2 max-w-2xl text-sm text-emerald-50/90">
               いま未一致の商品はありません。売上データと商品マスタの紐付けは整っています。
             </p>
@@ -88,9 +85,6 @@ export function UnmatchedBoard({
 
       <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm">
         <div className="bg-gradient-to-r from-gray-900 via-slate-800 to-amber-500 px-6 py-7 text-white">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-100">
-            Phase 2
-          </p>
           <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-3xl font-bold tracking-tight">未一致商品の解消</h1>

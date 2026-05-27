@@ -137,10 +137,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
 
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm">
           <div className="bg-gradient-to-r from-gray-900 via-slate-800 to-sky-700 px-6 py-7 text-white">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-200">
-              Product Master
-            </p>
-            <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">商品マスタ</h1>
                 <p className="mt-2 max-w-2xl text-sm text-sky-50/90">

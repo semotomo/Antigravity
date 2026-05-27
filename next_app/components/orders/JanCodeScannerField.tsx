@@ -638,33 +638,35 @@ export function JanCodeScannerField({
         ) : (
           <span className="text-sm font-medium text-gray-700">{label}</span>
         )}
-        <div className="flex flex-wrap gap-2">
-          {shouldUsePhotoScannerOnly ? null : (
+        {showInput && (
+          <div className="flex flex-wrap gap-2">
+            {shouldUsePhotoScannerOnly ? null : (
+              <button
+                type="button"
+                onClick={() => {
+                  dismissSoftKeyboard()
+                  setScannerMessage('')
+                  setScannerOpen((current) => !current)
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              >
+                {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+                {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
                 dismissSoftKeyboard()
-                setScannerMessage('')
-                setScannerOpen((current) => !current)
+                fileInputRef.current?.click()
               }}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
             >
-              {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
-              {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+              <ImagePlus className="h-4 w-4" />
+              {shouldUsePhotoScannerOnly ? '写真で撮影して読取' : '写真から読取'}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              dismissSoftKeyboard()
-              fileInputRef.current?.click()
-            }}
-            className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
-          >
-            <ImagePlus className="h-4 w-4" />
-            {shouldUsePhotoScannerOnly ? '写真で撮影して読取' : '写真から読取'}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       {showInput ? (

@@ -927,16 +927,10 @@ export function TransferFormModal({
         }>
           {isScannerActive ? (
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">
-                Scanner Station
-              </p>
               <h2 className="mt-1 text-xl font-bold text-white">バーコード連続読み取り中</h2>
             </div>
           ) : (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">
-                Product Transfers
-              </p>
               <h2 className="mt-2 text-2xl font-bold text-gray-900">新規登録</h2>
               <p className="mt-1 text-sm text-gray-500">
                 店舗間移動と物品使用を、JAN コードからまとめて登録できます。
@@ -948,14 +942,14 @@ export function TransferFormModal({
             onClick={isScannerActive ? () => setScannerNonce((c) => c + 1) : requestClose}
             className={
               isScannerActive
-                ? "inline-flex items-center gap-2 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-5 py-3 transition hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20"
+                ? "inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 text-xs transition hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20"
                 : "rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
             }
             aria-label="閉じる"
           >
             {isScannerActive ? (
               <>
-                <X className="h-5 w-5 stroke-[2.5px]" />
+                <X className="h-4 w-4 stroke-[2.5px]" />
                 読み取りを終了する (完了)
               </>
             ) : (
@@ -1256,7 +1250,7 @@ export function TransferFormModal({
 
               {/* 右側カラム：スキャンステーション用の積み上げリスト */}
               {isScannerActive && (
-                <div className="flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4 h-full">
+                <div className="flex-1 lg:flex-none flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4 h-full">
                   <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800 shrink-0">
                     <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                       今回スキャンした商品
