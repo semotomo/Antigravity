@@ -111,6 +111,16 @@ export function ProductFormModal({ open, product, onClose }: ProductFormModalPro
             </label>
 
             <label className="space-y-2">
+              <span className="text-sm font-medium text-gray-700">仕入れ先</span>
+              <input
+                name="supplier_name"
+                defaultValue={product.supplier_name ?? ''}
+                placeholder="仕入れ先名を入力"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+              />
+            </label>
+
+            <label className="space-y-2">
               <span className="text-sm font-medium text-gray-700">商品グループ</span>
               <input
                 name="product_group"

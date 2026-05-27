@@ -80,6 +80,15 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       ),
     },
     {
+      key: 'supplier_name',
+      header: '仕入れ先',
+      render: (product) => (
+        <span className="text-sm font-medium text-gray-700">
+          {product.supplier_name || '-'}
+        </span>
+      ),
+    },
+    {
       key: 'pricing',
       header: '価格',
       render: (product) => (
@@ -157,30 +166,28 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
 
         <section className="space-y-4">
           <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-              <label className="block space-y-2">
-                <span className="text-sm font-medium text-gray-700">商品を検索</span>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="商品名 / JAN / カテゴリ / ブランド を入力して検索"
-                    className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-10 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+            <label className="block space-y-2">
+              <span className="text-sm font-medium text-gray-700">商品を検索</span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="商品名 / JAN / カテゴリ / ブランド を入力して検索"
+                  className="w-full rounded-2xl border border-gray-300 py-2.5 pl-10 pr-36 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  {loading && (
+                    <Loader2 className="h-4 w-4 animate-spin text-sky-600 animate-pulse" />
+                  )}
+                  <JanCodeScannerField
+                    showInput={false}
+                    wrapperClassName="shrink-0"
+                    onValueChange={(value) => setQuery(value)}
                   />
-                  {loading ? (
-                    <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-sky-600" />
-                  ) : null}
                 </div>
-              </label>
-              <JanCodeScannerField
-                label="JANコード検索"
-                showInput={false}
-                wrapperClassName="space-y-2"
-                helpText="読み取ったJAN / UPCコードで商品を絞り込みます。"
-                onValueChange={(value) => setQuery(value)}
-              />
-            </div>
+              </div>
+            </label>
           </div>
 
           {query.trim() === '' ? (

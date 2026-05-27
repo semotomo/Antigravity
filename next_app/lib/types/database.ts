@@ -116,6 +116,7 @@ export interface Database {
           markup_rate: number | null
           product_group: string | null
           brand: string | null
+          supplier_name: string | null
           is_active: boolean
           updated_at: string
         }
@@ -129,6 +130,7 @@ export interface Database {
           markup_rate?: number | null
           product_group?: string | null
           brand?: string | null
+          supplier_name?: string | null
           is_active?: boolean
           updated_at?: string
         }
@@ -142,6 +144,7 @@ export interface Database {
           markup_rate?: number | null
           product_group?: string | null
           brand?: string | null
+          supplier_name?: string | null
           is_active?: boolean
           updated_at?: string
         }

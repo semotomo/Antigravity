@@ -36,6 +36,7 @@ export type ProductActionField =
   | 'category'
   | 'product_group'
   | 'brand'
+  | 'supplier_name'
   | 'cost_price'
   | 'selling_price'
   | 'is_active'

@@ -2,10 +2,11 @@
 
 import { useState, useRef, useTransition } from 'react'
 import { UploadCloud, X, Loader2 } from 'lucide-react'
-import { uploadProductMasterCsv } from '@/app/actions/products'
+import { uploadProductMasterCsv, uploadSupplierCsv } from '@/app/actions/products'
 
 export function CsvUploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [isPending, startTransition] = useTransition()
+  const [activeTab, setActiveTab] = useState<'master' | 'supplier'>('master')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -29,7 +30,11 @@ export function CsvUploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
       formData.append('fileName', file.name)
 
       startTransition(async () => {
-        const result = await uploadProductMasterCsv(formData)
+        const result =
+          activeTab === 'master'
+            ? await uploadProductMasterCsv(formData)
+            : await uploadSupplierCsv(formData)
+
         if (result.success) {
           setSuccess(result.message)
           if (fileInputRef.current) fileInputRef.current.value = ''
@@ -41,6 +46,14 @@ export function CsvUploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
       console.error(err)
       setError('ファイルの読み込みに失敗しました。')
     }
+  }
+
+  const handleTabChange = (tab: 'master' | 'supplier') => {
+    if (isPending) return
+    setActiveTab(tab)
+    setError(null)
+    setSuccess(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   return (
@@ -57,11 +70,44 @@ export function CsvUploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: 
           </button>
         </div>
 
+        {/* タブUI */}
+        <div className="mt-4 flex border-b border-gray-100">
+          <button
+            type="button"
+            onClick={() => handleTabChange('master')}
+            className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition ${
+              activeTab === 'master'
+                ? 'border-sky-500 text-sky-600'
+                : 'border-transparent text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            商品マスタCSV
+          </button>
+          <button
+            type="button"
+            onClick={() => handleTabChange('supplier')}
+            className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition ${
+              activeTab === 'supplier'
+                ? 'border-sky-500 text-sky-600'
+                : 'border-transparent text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            仕入れ先CSV
+          </button>
+        </div>
+
         <div className="mt-6 space-y-6">
-          <p className="text-sm text-gray-600">
-            POSポータルからダウンロードした「全店舗用の商品マスタCSV」を選択してください。<br/>
-            ファイルは自動的にUTF-8に変換され、データベースと同期（UPSERT）されます。
-          </p>
+          {activeTab === 'master' ? (
+            <p className="text-sm text-gray-600">
+              POSポータルからダウンロードした「全店舗用の商品マスタCSV」を選択してください。<br/>
+              ファイルは自動的にUTF-8に変換され、データベースと同期（UPSERT）されます。
+            </p>
+          ) : (
+            <p className="text-sm text-gray-600">
+              POSポータルの『在庫管理商品一覧出力』からダウンロードした「仕入れ先CSV」を選択してください。<br/>
+              A列のJANコードをキーにして、D列の仕入れ先情報を商品マスタに同期します。
+            </p>
+          )}
 
           <label
             className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 transition ${

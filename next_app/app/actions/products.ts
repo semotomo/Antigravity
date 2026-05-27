@@ -179,6 +179,7 @@ function buildProductPayload(
   const category = normalizeOptionalText(formData.get('category'))
   const productGroup = normalizeOptionalText(formData.get('product_group'))
   const brand = normalizeOptionalText(formData.get('brand'))
+  const supplierName = normalizeOptionalText(formData.get('supplier_name'))
   const costPrice = parseOptionalNonNegativeInteger(formData, 'cost_price', fieldErrors)
   const sellingPrice = parseOptionalNonNegativeInteger(formData, 'selling_price', fieldErrors)
 
@@ -204,6 +205,7 @@ function buildProductPayload(
     category,
     product_group: productGroup,
     brand,
+    supplier_name: supplierName,
     cost_price: costPrice,
     selling_price: sellingPrice,
     markup_rate: calculateMarkupRate(costPrice ?? 0, sellingPrice ?? 0),
@@ -660,3 +662,102 @@ export async function uploadProductMasterCsv(formData: FormData) {
     }
   }
 }
+
+export async function uploadSupplierCsv(formData: FormData) {
+  try {
+    const csvContent = formData.get('csvContent')
+    const fileName = formData.get('fileName')
+
+    if (typeof csvContent !== 'string' || !csvContent) {
+      return { success: false, message: 'CSVデータが正しく読み込めませんでした。' }
+    }
+
+    const papaparse = await import('papaparse')
+    const parsed = papaparse.parse<string[]>(csvContent, {
+      skipEmptyLines: true,
+      header: false,
+    })
+
+    const rows = parsed.data
+    if (rows.length === 0) {
+      return { success: false, message: 'CSVにデータがありません。' }
+    }
+
+    const records: Array<{ jan_code: string; supplier_name: string | null }> = []
+    const seen = new Set<string>()
+    let skipped = 0
+
+    // A列がJANコード、D列が仕入れ先
+    const COL = {
+      JAN_CODE: 0,
+      SUPPLIER_NAME: 3,
+    }
+
+    for (const row of rows) {
+      if (row.length <= COL.SUPPLIER_NAME) {
+        skipped++
+        continue
+      }
+
+      const janCode = (row[COL.JAN_CODE] || '').trim()
+      const supplierName = (row[COL.SUPPLIER_NAME] || '').trim()
+
+      // A列が有効なJANコードの場合のみインポート対象とする（ヘッダー行などを自動除外）
+      if (!janCode || !JAN_CODE_PATTERN.test(janCode)) {
+        skipped++
+        continue
+      }
+
+      if (seen.has(janCode)) {
+        skipped++
+        continue
+      }
+      seen.add(janCode)
+
+      records.push({
+        jan_code: janCode,
+        supplier_name: supplierName || null,
+      })
+    }
+
+    if (records.length === 0) {
+      return { success: true, message: '送信対象の仕入れ先データ（有効なJANコード）がありませんでした。' }
+    }
+
+    const supabase = await requireAuthenticatedClient()
+    
+    // Chunking to avoid large payload issues (1000 records per chunk)
+    const chunkSize = 1000
+    let totalUpserted = 0
+
+    for (let i = 0; i < records.length; i += chunkSize) {
+      const chunk = records.slice(i, i + chunkSize)
+      const { error } = await supabase
+        .from('products')
+        .upsert(chunk as never[], {
+          onConflict: 'jan_code',
+          ignoreDuplicates: false, // 既存商品は仕入れ先情報を上書きする
+        })
+
+      if (error) {
+        console.error('Supabase Upsert Error in uploadSupplierCsv:', error)
+        return { success: false, message: 'データベースへの同期中にエラーが発生しました: ' + error.message }
+      }
+      totalUpserted += chunk.length
+    }
+
+    revalidatePath('/products')
+
+    return {
+      success: true,
+      message: `${fileName} から ${totalUpserted}件の商品の仕入れ先情報を同期しました。\n(スキップ・対象外: ${skipped}件)`,
+    }
+  } catch (error) {
+    console.error('Unexpected error in uploadSupplierCsv:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : '予期せぬエラーが発生しました。',
+    }
+  }
+}
+
