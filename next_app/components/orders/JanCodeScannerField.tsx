@@ -694,7 +694,7 @@ export function JanCodeScannerField({
           <div className="relative overflow-hidden rounded-2xl bg-gray-950">
             <video
               ref={videoRef}
-              className="aspect-video w-full object-cover"
+              className="aspect-video w-full object-cover max-h-[140px] md:max-h-[240px]"
               muted
               playsInline
             />

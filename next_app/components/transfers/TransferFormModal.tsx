@@ -220,6 +220,16 @@ export function TransferFormModal({
     }
   }, [onClose, state.status])
 
+  useEffect(() => {
+    if (open) {
+      const originalStyle = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      return () => {
+        document.body.style.overflow = originalStyle
+      }
+    }
+  }, [open])
+
   if (!open) {
     return null
   }
@@ -905,14 +915,14 @@ export function TransferFormModal({
       <div
         className={
           isScannerActive
-            ? "max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300"
+            ? "h-[90vh] md:h-auto max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300 flex flex-col"
             : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl transition-colors duration-300"
         }
         onClick={(event) => event.stopPropagation()}
       >
         <div className={
           isScannerActive 
-            ? "flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-900" 
+            ? "flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-900 shrink-0" 
             : "flex items-start justify-between border-b border-gray-200 px-6 py-5"
         }>
           {isScannerActive ? (
@@ -954,10 +964,22 @@ export function TransferFormModal({
           </button>
         </div>
 
-        <form action={formAction} onSubmit={handleSubmit} className="space-y-6 px-6 py-6">
+        <form
+          action={formAction}
+          onSubmit={handleSubmit}
+          className={
+            isScannerActive
+              ? "flex-1 min-h-0 flex flex-col p-4 md:p-6 space-y-4 overflow-hidden"
+              : "space-y-6 px-6 py-6"
+          }
+        >
           <input type="hidden" name="items_json" value={JSON.stringify(items)} />
 
-          <div className={isScannerActive ? "hidden" : "grid gap-4 md:grid-cols-2 xl:grid-cols-4"}>
+          <div className={
+            isScannerActive
+              ? "hidden"
+              : `grid gap-4 md:grid-cols-2 ${entryType === 'usage' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`
+          }>
             <label className="space-y-2">
               <span className="text-sm font-medium text-gray-700">使用店舗 / 移動元店舗</span>
               <select
@@ -1020,40 +1042,38 @@ export function TransferFormModal({
               ) : null}
             </label>
 
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-gray-700">物品使用の区分</span>
-              <select
-                value={usageCategory}
-                onChange={(event) => setUsageCategory(event.target.value as TransferUsageCategory)}
-                disabled={entryType !== 'usage'}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition disabled:bg-gray-100 disabled:text-gray-400 focus:border-gray-900"
-              >
-                {TRANSFER_USAGE_CATEGORY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-gray-500">
-                {entryType === 'usage'
-                  ? '物品使用として登録する場合のみ保存されます。'
-                  : '店舗間移動では使用しません。'}
-              </span>
-              {state.fieldErrors.usage_category ? (
-                <span className="text-xs text-red-600">{state.fieldErrors.usage_category}</span>
-              ) : null}
-            </label>
+            {entryType === 'usage' && (
+              <label className="space-y-2">
+                <span className="text-sm font-medium text-gray-700">物品使用の区分</span>
+                <select
+                  value={usageCategory}
+                  onChange={(event) => setUsageCategory(event.target.value as TransferUsageCategory)}
+                  className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition disabled:bg-gray-100 disabled:text-gray-400 focus:border-gray-900"
+                >
+                  {TRANSFER_USAGE_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-500">
+                  物品使用として登録する場合のみ保存されます。
+                </span>
+                {state.fieldErrors.usage_category ? (
+                  <span className="text-xs text-red-600">{state.fieldErrors.usage_category}</span>
+                ) : null}
+              </label>
+            )}
           </div>
 
           <div className={
             isScannerActive
-              ? "grid grid-cols-1 lg:grid-cols-2 gap-6 bg-slate-950 text-white rounded-3xl p-5 border border-slate-800"
+              ? "flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-2 gap-4 bg-slate-950 text-white rounded-2xl p-4 border border-slate-800"
               : "rounded-3xl border border-gray-200 bg-gray-50 p-5"
           }>
             <div className={isScannerActive ? "hidden" : "flex items-center justify-between gap-3"}>
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">商品を追加</h3>
-                <p className="text-sm text-gray-500">JAN コードから検索して登録リストに積み上げます。</p>
               </div>
               <button
                 type="button"
@@ -1064,7 +1084,7 @@ export function TransferFormModal({
               </button>
             </div>
 
-            <div className="mt-5 space-y-4">
+            <div className={isScannerActive ? "flex flex-col min-h-0 shrink-0 lg:shrink" : "mt-5 space-y-4"}>
               <JanCodeScannerField
                 key={scannerNonce}
                 continuousScan
@@ -1236,22 +1256,22 @@ export function TransferFormModal({
 
               {/* 右側カラム：スキャンステーション用の積み上げリスト */}
               {isScannerActive && (
-                <div className="flex flex-col overflow-hidden bg-slate-900/60 rounded-2xl border border-slate-800 p-5 h-[380px]">
-                  <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-                    <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                <div className="flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4 h-full">
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800 shrink-0">
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                       今回スキャンした商品
                     </h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-300">
+                      <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded-full text-slate-300">
                         種類: {scanList.length}
                       </span>
-                      <span className="text-xs bg-emerald-950 px-2.5 py-1 rounded-full text-emerald-400 font-bold">
+                      <span className="text-[10px] bg-emerald-950 px-2 py-0.5 rounded-full text-emerald-400 font-bold">
                         総数: {totalScanQty}個
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
                     {scanList.map((item, idx) => (
                       <div
                         key={`${item.jan_code}-${idx}`}
