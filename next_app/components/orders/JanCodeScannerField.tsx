@@ -28,6 +28,7 @@ type JanCodeScannerFieldProps = {
   onValueChange?: (value: string) => void
   placeholder?: string
   showInput?: boolean
+  buttonOnly?: boolean
   wrapperClassName?: string
   onScannerOpenChange?: (open: boolean) => void
 }
@@ -238,6 +239,7 @@ export function JanCodeScannerField({
   onValueChange,
   placeholder = '例: 4901234567894',
   showInput = true,
+  buttonOnly = false,
   wrapperClassName = 'space-y-2 md:col-span-2',
   onScannerOpenChange,
 }: JanCodeScannerFieldProps) {
@@ -627,6 +629,103 @@ export function JanCodeScannerField({
         : 'スマホのカメラ読取は HTTPS または localhost で利用できます。'}
     </>
   )
+
+  if (buttonOnly) {
+    return (
+      <div className={wrapperClassName}>
+        <div className="flex items-center gap-1.5">
+          {shouldUsePhotoScannerOnly ? (
+            <button
+              type="button"
+              onClick={() => {
+                dismissSoftKeyboard()
+                fileInputRef.current?.click()
+              }}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+              title="写真からJAN読取"
+            >
+              <ImagePlus className="h-5 w-5" />
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  dismissSoftKeyboard()
+                  setScannerMessage('')
+                  setScannerOpen((current) => !current)
+                }}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${
+                  scannerOpen
+                    ? 'border-red-200 bg-red-50 text-red-600 hover:bg-red-100'
+                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+                title={scannerOpen ? 'カメラを閉じる' : 'カメラでJAN読取'}
+              >
+                {scannerOpen ? <X className="h-5 w-5" /> : <Camera className="h-5 w-5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  dismissSoftKeyboard()
+                  fileInputRef.current?.click()
+                }}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-sky-200 bg-sky-50 text-sky-700 transition hover:bg-sky-100"
+                title="写真からJAN読取"
+              >
+                <ImagePlus className="h-5 w-5" />
+              </button>
+            </>
+          )}
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handlePhotoSelection}
+          className="hidden"
+        />
+
+        {scannerOpen && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 md:w-80 space-y-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
+            <div className="relative overflow-hidden rounded-xl bg-gray-950">
+              <video
+                ref={videoRef}
+                className="aspect-video w-full object-cover max-h-[140px]"
+                muted
+                playsInline
+              />
+              <div className="absolute inset-x-0 top-1/2 h-0.5 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-laser pointer-events-none" />
+              {showFlash && (
+                <div className="absolute inset-0 bg-white/90 z-30 pointer-events-none animate-flash" />
+              )}
+              {isCoolingDown && (
+                <div className="absolute inset-x-0 bottom-0 bg-gray-950/80 px-4 py-2.5 text-center text-xs font-semibold text-emerald-400 backdrop-blur-sm z-20">
+                  <p className="animate-pulse">次のスキャンまで一時停止中 (1.5秒)</p>
+                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-emerald-950/50">
+                    <div className="h-full bg-emerald-400 animate-cooldown-bar" />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex items-start gap-1.5 text-xs text-gray-600">
+              <ScanLine className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" />
+              <p>{scannerMessage || unavailableScannerMessage || 'バーコードをカメラに映してください。'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setScannerOpen(false)}
+              className="w-full rounded-xl bg-gray-100 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-200 transition"
+            >
+              スキャナーを閉じる
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={wrapperClassName}>

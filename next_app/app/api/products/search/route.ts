@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const keywords = q.split(/\s+/).filter(Boolean)
     let queryBuilder = supabase
       .from('products')
-      .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at')
+      .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name')
 
     // 各キーワードに対して、商品名・JAN・ブランド・カテゴリのいずれかに部分一致するAND条件をチェーンする
     keywords.forEach((kw) => {

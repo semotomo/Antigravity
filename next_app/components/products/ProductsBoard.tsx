@@ -181,7 +181,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
                     <Loader2 className="h-4 w-4 animate-spin text-sky-600 animate-pulse" />
                   )}
                   <JanCodeScannerField
-                    showInput={false}
+                    buttonOnly={true}
                     wrapperClassName="shrink-0"
                     onValueChange={(value) => setQuery(value)}
                   />
