@@ -79,6 +79,11 @@ export async function fetchAbcAnalysis(
 
   if (excludeCategory === 'サービス') {
     sourceRows = await applyServiceCategoryFilter(sourceRows, 'exclude')
+    // さらに「未分類」（null, 空文字, または '未分類'）も除外
+    sourceRows = sourceRows.filter((row) => {
+      const cat = row.category?.trim() ?? ''
+      return cat.length > 0 && cat !== '未分類'
+    })
   }
 
   const grouped = new Map<string, AbcAnalysisRow>()

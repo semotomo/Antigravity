@@ -51,24 +51,58 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
     .sort((a, b) => b.total_sales_amount - a.total_sales_amount)
     .slice(0, 15)
 
-  // 2. ランク別売上シェアの算出
-  const rankSummary = {
-    A: { name: 'Aランク', value: 0, color: COLORS.A },
-    B: { name: 'Bランク', value: 0, color: COLORS.B },
-    C: { name: 'Cランク', value: 0, color: COLORS.C },
-  }
-
+  // 2. カテゴリ別売上シェアの算出
+  const categorySalesMap = new Map<string, number>()
   let totalSales = 0
   let totalProfit = 0
+
   data.forEach((row) => {
     totalSales += row.total_sales_amount
     totalProfit += row.estimated_profit
-    if (row.rank === 'A' || row.rank === 'B' || row.rank === 'C') {
-      rankSummary[row.rank].value += row.total_sales_amount
-    }
+    const cat = row.category || '未分類'
+    categorySalesMap.set(cat, (categorySalesMap.get(cat) ?? 0) + row.total_sales_amount)
   })
 
-  const pieData = Object.values(rankSummary).filter((item) => item.value > 0)
+  // 配列化して売上高順にソート
+  const sortedCategories = Array.from(categorySalesMap.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+
+  // 主要カテゴリ上位5件を抽出し、残りは「その他」にまとめる
+  const maxCategories = 5
+  let pieData: Array<{ name: string; value: number; color: string }> = []
+  
+  const categoryColors = [
+    '#10B981', // Emerald
+    '#0284C7', // Sky / Blue
+    '#EC4899', // Pink
+    '#F59E0B', // Amber
+    '#8B5CF6', // Purple
+    '#9CA3AF', // Gray (その他)
+  ]
+
+  if (sortedCategories.length <= maxCategories) {
+    pieData = sortedCategories.map((item, idx) => ({
+      name: item.name,
+      value: item.value,
+      color: categoryColors[idx % categoryColors.length],
+    }))
+  } else {
+    const topCategories = sortedCategories.slice(0, maxCategories - 1)
+    const othersValue = sortedCategories.slice(maxCategories - 1).reduce((sum, item) => sum + item.value, 0)
+    
+    pieData = topCategories.map((item, idx) => ({
+      name: item.name,
+      value: item.value,
+      color: categoryColors[idx % categoryColors.length],
+    }))
+    
+    pieData.push({
+      name: 'その他',
+      value: othersValue,
+      color: categoryColors[maxCategories - 1],
+    })
+  }
 
   // カスタムツールチップ (BarChart用)
   const CustomBarTooltip = ({ active, payload }: any) => {
@@ -180,12 +214,12 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
         </div>
       </div>
 
-      {/* 2. ランク別売上シェア ドーナツチャート */}
+      {/* 2. カテゴリ別売上シェア ドーナツチャート */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col justify-between">
         <div className="mb-4">
-          <h3 className="text-base font-bold text-gray-900">ランク別売上シェア</h3>
+          <h3 className="text-base font-bold text-gray-900">カテゴリ別売上シェア</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            A・B・C各ランクの総売上高に対する貢献度比率です。
+            各商品カテゴリの総売上高に対する貢献度比率です（売上上位順）。
           </p>
         </div>
 
@@ -236,9 +270,9 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
 
         {/* 補足解説カード */}
         <div className="mt-6 rounded-2xl bg-gray-50 p-4 border border-gray-100">
-          <h4 className="text-xs font-bold text-gray-800">💡 ABC分析の豆知識</h4>
+          <h4 className="text-xs font-bold text-gray-800">💡 カテゴリ別売上シェアについて</h4>
           <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500">
-            売上の大部分（約70〜80%）は、上位の一部商品（Aランク、約20%）によって生み出されます。Aランク商品の欠品は売上損失に直結するため、最優先で在庫を確保しましょう。
+            どのカテゴリ群が店舗の主力事業になっているかを可視化しています。売上シェアの高い主要カテゴリの在庫切れや品揃えに注意し、店舗全体の売上基盤を維持しましょう。
           </p>
         </div>
       </div>
