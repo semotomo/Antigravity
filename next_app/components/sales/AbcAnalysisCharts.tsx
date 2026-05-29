@@ -140,7 +140,7 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
             選択した期間・店舗において売上が最も高かった上位15商品の売上規模とランク別分布です。
           </p>
         </div>
-        <div className="h-[460px] w-full flex-1">
+        <div className="relative w-full h-[400px]">
           {top15.length === 0 ? (
             <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
               データがありません
@@ -189,7 +189,7 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
           </p>
         </div>
 
-        <div className="relative h-[280px] w-full flex-1 flex items-center justify-center">
+        <div className="relative w-full h-[260px] flex items-center justify-center">
           {pieData.length === 0 ? (
             <div className="text-sm text-gray-400">データがありません</div>
           ) : (
