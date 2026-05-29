@@ -6,6 +6,7 @@ import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { ProductFormModal } from '@/components/products/ProductFormModal'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
+import { BarcodeToggle } from '@/components/ui/BarcodeToggle'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
   formatProductDateTime,
@@ -63,7 +64,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
     {
       key: 'jan_code',
       header: 'JAN',
-      render: (product) => product.jan_code || '-',
+      render: (product) => <BarcodeToggle janCode={product.jan_code} />,
     },
     {
       key: 'product_name',

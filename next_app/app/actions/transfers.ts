@@ -352,3 +352,111 @@ export async function deleteTransferAction(formData: FormData) {
     console.error('Unexpected error while deleting transfer:', error)
   }
 }
+
+export async function updateTransferAction(
+  _prevState: TransferMutationState,
+  formData: FormData
+): Promise<TransferMutationState> {
+  try {
+    const fieldErrors: TransferMutationState['fieldErrors'] = {}
+    const transferIdValue = getTrimmedValue(formData, 'id')
+    const transferId = Number(transferIdValue)
+
+    if (!transferIdValue || !Number.isInteger(transferId) || transferId <= 0) {
+      return {
+        status: 'error',
+        message: '更新対象を特定できませんでした。',
+        fieldErrors,
+      }
+    }
+
+    const fromStoreId = parseItemStoreId(formData.get('from_store_id'))
+    const toStoreId = parseItemStoreId(formData.get('to_store_id'))
+    const quantity = Number(formData.get('quantity'))
+    const costPrice = Number(formData.get('cost_price'))
+    const sellingPrice = Number(formData.get('selling_price'))
+    const entryType = parseDraftEntryType(formData.get('entry_type'), fieldErrors)
+    const usageCategory = parseDraftUsageCategory(
+      formData.get('usage_category'),
+      fieldErrors,
+      entryType === 'usage'
+    )
+    const memo = normalizeOptionalText(getTrimmedValue(formData, 'memo'))
+
+    if (fromStoreId === null) {
+      fieldErrors.from_store_id = '使用店舗 / 移動元店舗を選択してください。'
+    }
+
+    if (entryType === 'transfer' && toStoreId === null) {
+      fieldErrors.to_store_id = '店舗間移動を含む場合は移動先店舗を選択してください。'
+    }
+
+    if (entryType === 'transfer' && fromStoreId === toStoreId) {
+      fieldErrors.to_store_id = '移動元と移動先に同じ店舗は選べません。'
+    }
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      fieldErrors.quantity = '数量は 1 以上の整数で入力してください。'
+    }
+
+    if (!Number.isFinite(costPrice) || costPrice < 0) {
+      fieldErrors.cost_price = '原価は 0 以上で入力してください。'
+    }
+
+    if (!Number.isFinite(sellingPrice) || sellingPrice < 0) {
+      fieldErrors.selling_price = '売価は 0 以上で入力してください。'
+    }
+
+    if (Object.keys(fieldErrors).length > 0 || !entryType) {
+      return {
+        status: 'error',
+        message: '入力内容を確認してください。',
+        fieldErrors,
+      }
+    }
+
+    const supabase = await requireAuthenticatedClient()
+    const { error } = await supabase
+      .from('transfers')
+      .update({
+        from_store_id: fromStoreId,
+        to_store_id: entryType === 'transfer' ? toStoreId : null,
+        quantity,
+        cost_price: costPrice,
+        total_cost: costPrice * quantity,
+        selling_price: sellingPrice,
+        entry_type: entryType,
+        usage_category: entryType === 'usage' ? usageCategory : null,
+        memo,
+      } as never)
+      .eq('id', transferId)
+
+    if (error) {
+      console.error('Error updating transfer:', error)
+      return {
+        status: 'error',
+        message: '店舗間移動・物品使用の更新に失敗しました。',
+        fieldErrors: {},
+      }
+    }
+
+    revalidateTransferPages()
+    refresh()
+
+    return {
+      status: 'success',
+      message: '移動履歴を更新しました。',
+      fieldErrors: {},
+    }
+  } catch (error) {
+    console.error('Unexpected error while updating transfer:', error)
+    return {
+      ...initialTransferMutationState,
+      status: 'error',
+      message:
+        error instanceof Error
+          ? error.message
+          : '店舗間移動・物品使用の更新中に予期しないエラーが発生しました。',
+    }
+  }
+}

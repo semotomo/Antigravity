@@ -1,10 +1,10 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ArrowRightLeft, PlusCircle, Trash2 } from 'lucide-react'
-import { deleteTransferAction } from '@/app/actions/transfers'
+import { ArrowRightLeft, PlusCircle, SquarePen } from 'lucide-react'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { TransferFormModal } from '@/components/transfers/TransferFormModal'
+import { TransferEditModal } from '@/components/transfers/TransferEditModal'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { formatYen } from '@/lib/products'
@@ -12,7 +12,6 @@ import {
   formatTransferEntryTypeLabel,
   formatTransferDateKey,
   formatTransferDateTime,
-  formatTransferUsageCategoryLabel,
   type TransferListRow,
   type TransferProductOption,
   type TransferStoreOption,
@@ -73,6 +72,7 @@ function getCurrentMonthKey(today: string) {
 }
 
 export function TransfersBoard({ transfers, stores, products, filters }: TransfersBoardProps) {
+  const [editTarget, setEditTarget] = useState<TransferListRow | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
   const summary = useMemo(() => {
@@ -96,20 +96,10 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
       render: (transfer) => formatTransferDateTime(transfer.transfer_date),
     },
     {
-      key: 'entry_type',
-      header: '区分',
-      align: 'center',
-      render: (transfer) => (
-        <StatusBadge variant={transfer.entry_type === 'usage' ? 'warning' : 'info'}>
-          {formatTransferEntryTypeLabel(transfer.entry_type)}
-        </StatusBadge>
-      ),
-    },
-    {
       key: 'stores',
       header: '店舗',
       render: (transfer) => (
-        <div className="min-w-[180px]">
+        <div className="min-w-[100px]">
           <p className="font-semibold text-gray-900">{transfer.from_store?.name ?? '-'}</p>
           <p className="mt-1 text-xs text-gray-500">
             {transfer.entry_type === 'usage'
@@ -123,16 +113,11 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
       key: 'product_name',
       header: '商品',
       render: (transfer) => (
-        <div className="min-w-[220px]">
+        <div className="min-w-[200px]">
           <p className="font-semibold text-gray-900">{transfer.product_name}</p>
           <p className="mt-1 text-xs text-gray-500">JAN: {transfer.jan_code}</p>
         </div>
       ),
-    },
-    {
-      key: 'usage_category',
-      header: '物品使用区分',
-      render: (transfer) => formatTransferUsageCategoryLabel(transfer.usage_category),
     },
     {
       key: 'quantity',
@@ -153,30 +138,28 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
       render: (transfer) => formatYen(transfer.total_cost),
     },
     {
-      key: 'memo',
-      header: 'メモ',
-      render: (transfer) => transfer.memo || '-',
-    },
-    {
       key: 'actions',
       header: '操作',
       align: 'center',
       render: (transfer) => (
-        <form action={deleteTransferAction}>
-          <input type="hidden" name="id" value={transfer.id} />
-          <button
-            type="submit"
-            onClick={(event) => {
-              if (!window.confirm(`「${transfer.product_name}」の移動履歴を削除しますか？`)) {
-                event.preventDefault()
-              }
-            }}
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100"
-          >
-            <Trash2 className="h-4 w-4" />
-            削除
-          </button>
-        </form>
+        <button
+          type="button"
+          onClick={() => setEditTarget(transfer)}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+        >
+          <SquarePen className="h-4 w-4" />
+          編集
+        </button>
+      ),
+    },
+    {
+      key: 'entry_type',
+      header: '区分',
+      align: 'center',
+      render: (transfer) => (
+        <StatusBadge variant={transfer.entry_type === 'usage' ? 'warning' : 'info'}>
+          {formatTransferEntryTypeLabel(transfer.entry_type)}
+        </StatusBadge>
       ),
     },
   ]
@@ -333,6 +316,15 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
           stores={stores}
           products={products}
           onClose={() => setModalOpen(false)}
+        />
+      ) : null}
+
+      {editTarget ? (
+        <TransferEditModal
+          open={!!editTarget}
+          transfer={editTarget}
+          stores={stores}
+          onClose={() => setEditTarget(null)}
         />
       ) : null}
     </>
