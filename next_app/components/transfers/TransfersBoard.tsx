@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ArrowRightLeft, PlusCircle, SquarePen } from 'lucide-react'
+import { PlusCircle, Printer, SquarePen } from 'lucide-react'
+import { printTransferReport } from '@/lib/transferPrint'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { TransferFormModal } from '@/components/transfers/TransferFormModal'
 import { TransferEditModal } from '@/components/transfers/TransferEditModal'
@@ -179,14 +180,24 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
                   コードの読取にも対応しています。
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setModalOpen(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
-              >
-                <PlusCircle className="h-4 w-4" />
-                新規登録
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => printTransferReport(transfers)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+                >
+                  <Printer className="h-4 w-4" />
+                  月次レポート印刷
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(true)}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  新規登録
+                </button>
+              </div>
             </div>
           </div>
 
@@ -292,14 +303,6 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
             </form>
           </div>
 
-          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
-            <div className="flex items-start gap-3">
-              <ArrowRightLeft className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>
-                登録した店舗間移動と物品使用はすぐに確定扱いになります。誤登録時は履歴の削除から取り消してください。
-              </p>
-            </div>
-          </div>
 
           <DataTable
             data={transfers}
