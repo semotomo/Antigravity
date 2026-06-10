@@ -168,14 +168,17 @@ export function TransferFormModal({
       product_name: string
       quantity: number
       isUnmatched: boolean
+      originalIndex?: number
+      id?: string
     }> = []
 
-    items.forEach((item) => {
+    items.forEach((item, index) => {
       list.push({
         jan_code: item.jan_code,
         product_name: item.product_name,
         quantity: item.quantity,
         isUnmatched: false,
+        originalIndex: index,
       })
     })
 
@@ -185,6 +188,7 @@ export function TransferFormModal({
         product_name: item.product_name || 'マスタ未一致 (手入力待ち)',
         quantity: item.quantity,
         isUnmatched: true,
+        id: item.id,
       })
     })
 
@@ -915,7 +919,7 @@ export function TransferFormModal({
       <div
         className={
           isScannerActive
-            ? "h-[90vh] md:h-auto max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300 flex flex-col"
+            ? "h-[90vh] max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300 flex flex-col"
             : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl transition-colors duration-300"
         }
         onClick={(event) => event.stopPropagation()}
@@ -1250,7 +1254,7 @@ export function TransferFormModal({
 
               {/* 右側カラム：スキャンステーション用の積み上げリスト */}
               {isScannerActive && (
-                <div className="flex-1 lg:flex-none flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4 h-full">
+                <div className="h-[250px] md:h-[350px] lg:h-full flex-1 lg:flex-none flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4">
                   <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800 shrink-0">
                     <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                       今回スキャンした商品
@@ -1283,9 +1287,24 @@ export function TransferFormModal({
                               未一致
                             </span>
                           )}
-                          <span className="text-sm font-extrabold bg-slate-800 text-emerald-400 min-w-8 h-8 flex items-center justify-center rounded-lg px-1.5">
-                            {item.quantity}個
-                          </span>
+                          <select
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value)
+                              if (item.isUnmatched) {
+                                updateUnmatchedItem(item.id!, { quantity: val })
+                              } else {
+                                updateItemQuantity(item.originalIndex!, val)
+                              }
+                            }}
+                            className="bg-slate-800 text-emerald-400 font-extrabold text-xs rounded-lg px-2 py-1.5 border border-slate-700 outline-none cursor-pointer text-center min-w-14 hover:bg-slate-700 transition"
+                          >
+                            {Array.from({ length: 100 }, (_, i) => i + 1).map((n) => (
+                              <option key={n} value={n} className="bg-slate-900 text-white">
+                                {n}個
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     ))}

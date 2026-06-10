@@ -183,14 +183,6 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => printTransferReport(transfers)}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
-                >
-                  <Printer className="h-4 w-4" />
-                  月次レポート印刷
-                </button>
-                <button
-                  type="button"
                   onClick={() => setModalOpen(true)}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm font-semibold text-white backdrop-blur-sm transition hover:bg-white/20"
                 >
@@ -299,6 +291,14 @@ export function TransfersBoard({ transfers, stores, products, filters }: Transfe
                 >
                   クリア
                 </a>
+                <button
+                  type="button"
+                  onClick={() => printTransferReport(transfers)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+                >
+                  <Printer className="h-4 w-4" />
+                  月次レポート印刷
+                </button>
               </div>
             </form>
           </div>
