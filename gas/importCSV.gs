@@ -1270,7 +1270,7 @@ function upsertProductMasterToSupabase_(records) {
     return;
   }
 
-  var url = supabaseUrl + '/rest/v1/products';
+  var url = supabaseUrl + '/rest/v1/products?on_conflict=jan_code';
 
   // updated_at を現在時刻に設定
   var now = new Date().toISOString();
