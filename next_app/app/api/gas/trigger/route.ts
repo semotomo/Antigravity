@@ -2,7 +2,7 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const supabase = await createClient()
     const {
@@ -26,7 +26,24 @@ export async function POST() {
       )
     }
 
-    const response = await fetch(gasWebAppUrl, {
+    // リクエストボディから年月を取得
+    let year: number | undefined
+    let month: number | undefined
+    try {
+      const body = await request.json()
+      if (body.year) year = Number(body.year)
+      if (body.month) month = Number(body.month)
+    } catch {
+      // ボディがない、またはJSONパースエラーの場合は無視
+    }
+
+    // クエリパラメータの構築
+    const url = new URL(gasWebAppUrl)
+    url.searchParams.set('mode', 'sales')
+    if (year !== undefined) url.searchParams.set('year', String(year))
+    if (month !== undefined) url.searchParams.set('month', String(month))
+
+    const response = await fetch(url.toString(), {
       method: 'GET',
       cache: 'no-store',
     })
