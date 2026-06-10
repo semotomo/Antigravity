@@ -138,7 +138,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
   monthPayload[prefix + 'kijyunDate'] = kijyunDate;
   monthPayload[prefix + 'schTenpoGroup'] = posConfig.tenpoGroupId;
   monthPayload[prefix + 'selectTenpoGroupName'] = posConfig.tenpoGroupName;
-  monthPayload[prefix + 'monthlySelected'] = 'false';
+  monthPayload[prefix + 'monthlySelected'] = 'true';
   monthPayload[prefix + 'listSelected'] = 'false';
   
   var monthResponse = fetchWithCookies_(exportPageUrl, 'post', monthPayload, cookies);
