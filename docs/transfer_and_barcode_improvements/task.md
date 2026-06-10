@@ -14,7 +14,7 @@
 - [x] 3. 商品マスタ (`ProductsBoard.tsx`) への適用
   - [x] 3-1. `ProductsBoard.tsx` に `BarcodeToggle` をインポート
   - [x] 3-2. テーブル of 「JAN」列の描画処理（`columns`）を `BarcodeToggle` に差し替え
-- [ ] 4. 動作検証とデプロイ
-  - [ ] 4-1. `npm run build` によるビルドチェックの実施
-  - [ ] 4-2. 修正内容の確認書 (`walkthrough.md`) の作成
-  - [ ] 4-3. Gitコミット＆リモートプッシュ
+- [x] 4. 動作検証とデプロイ
+  - [x] 4-1. `npm run build` によるビルドチェックの実施
+  - [x] 4-2. 修正内容の確認書 (`walkthrough.md`) の作成
+  - [x] 4-3. Gitコミット＆リモートプッシュ

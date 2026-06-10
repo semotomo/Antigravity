@@ -1086,7 +1086,7 @@ function sendProductSalesDataToSupabase_(records) {
 
   var tableName = 'product_sales_data';
   // エンドポイントURL構築（バルクインサートまたはUPSERT用）
-  var url = supabaseUrl + '/rest/v1/' + tableName;
+  var url = supabaseUrl + '/rest/v1/' + tableName + '?on_conflict=transaction_date,store_name,product_name';
 
   var options = {
     method: 'post',

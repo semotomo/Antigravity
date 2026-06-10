@@ -275,7 +275,7 @@ function sendProductSalesDataToSupabase_(payload) {
   // SUPABASE_URL と SUPABASE_KEY が定義されている前提
   if (typeof SUPABASE_URL === 'undefined' || !SUPABASE_URL) return;
 
-  var url = SUPABASE_URL + '/rest/v1/product_sales_data';
+  var url = SUPABASE_URL + '/rest/v1/product_sales_data?on_conflict=transaction_date,store_name,product_name';
   
   var options = {
     method: 'post',
