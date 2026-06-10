@@ -101,9 +101,8 @@ function downloadProductSalesMenu() {
 function downloadProductSalesFromPOS_(posConfig, year, month) {
   Logger.log('商品別売上のダウンロードを開始します...');
   
-  // 今日の日付文字列
-  var today = new Date();
-  var kijyunDate = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+  // 指定された年月の1日を基準日として設定（POSのカレンダー切替に必要）
+  var kijyunDate = year + '/' + (month < 10 ? '0' : '') + month + '/01';
 
   // STEP 1: ログイン（autoDownload.gs 既存のログイン処理と同様）
   var loginUrl = posConfig.baseUrl + POS_PATHS.LOGIN;
