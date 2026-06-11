@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client';
 import { Database } from '@/lib/types/database';
 import { syncPetsData } from '@/lib/actions/petsSync';
 import { Search, RefreshCw, Dog, Cat, Info } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { PetDetailModal } from './PetDetailModal';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'];
@@ -61,14 +60,14 @@ export function PetsBoard() {
           <Dog className="w-6 h-6 mr-2 text-indigo-600" />
           生体情報（犬猫）
         </h1>
-        <Button 
+        <button 
           onClick={handleSync} 
           disabled={syncing}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
           {syncing ? '同期中...' : '最新情報を同期'}
-        </Button>
+        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">

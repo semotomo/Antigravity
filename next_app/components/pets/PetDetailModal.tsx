@@ -1,6 +1,5 @@
 import { Database } from '@/lib/types/database';
 import { X, Dog, Cat, Info, MapPin, DollarSign, Activity } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'];
 
@@ -124,9 +123,12 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
         
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 bg-white flex justify-end">
-          <Button onClick={onClose} variant="outline">
+          <button 
+            onClick={onClose} 
+            className="px-4 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          >
             閉じる
-          </Button>
+          </button>
         </div>
       </div>
     </div>
