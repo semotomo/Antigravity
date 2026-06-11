@@ -127,9 +127,9 @@ export async function syncPetsData() {
         const pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
         
         // 画像は 일단 null (後日画像URLが取れる箇所を特定したら追加)
-        const imageUrl = null;
+        const imageUrl: string | null = null;
 
-        await supabase.from('cms_pets').upsert({
+        const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
           entry_id: entryId,
           blog_id: blog.id,
           status,
@@ -147,7 +147,9 @@ export async function syncPetsData() {
           pack_content: packContent,
           image_url: imageUrl,
           updated_at: new Date().toISOString()
-        }, { onConflict: 'entry_id, blog_id' });
+        };
+
+        await supabase.from('cms_pets').upsert(petData, { onConflict: 'entry_id, blog_id' });
         
         processedCount++;
       }
