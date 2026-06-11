@@ -12,6 +12,7 @@ import {
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Dog,
   type LucideIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -38,6 +39,7 @@ const navItems: NavItem[] = [
   { name: '日次集計', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
   { name: '商品別集計', href: '/sales/products', icon: Package, match: 'exact' },
   { name: 'ABC分析', href: '/sales/abc', icon: BarChart3, match: 'exact' },
+  { name: '生体管理', href: '/pets', icon: Dog, match: 'exact' },
 ]
 
 function isActivePath(pathname: string, item: NavItem) {

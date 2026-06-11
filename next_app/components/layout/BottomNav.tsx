@@ -7,6 +7,7 @@ import {
   ClipboardList,
   ListOrdered,
   Package,
+  Dog,
   type LucideIcon,
 } from 'lucide-react'
 import { SalesMoreMenu } from '@/components/layout/SalesMoreMenu'
@@ -25,6 +26,7 @@ const navItems: NavItem[] = [
   { name: '商品', href: '/products', icon: Package, match: 'products' },
   { name: '移動', href: '/products/transfers', icon: ArrowRightLeft, match: 'transfers' },
   { name: '一覧', href: '/sales', icon: ListOrdered, match: 'exact' },
+  { name: '生体', href: '/pets', icon: Dog, match: 'exact' },
 ]
 
 function isActivePath(pathname: string, item: NavItem) {
@@ -48,7 +50,7 @@ export default function BottomNav() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white pb-safe md:hidden">
-      <div className="grid h-16 grid-cols-5">
+      <div className="grid h-16 grid-cols-6">
         {navItems.map((item) => {
           const isActive = isActivePath(pathname, item)
 

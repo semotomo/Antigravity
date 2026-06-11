@@ -12,6 +12,7 @@
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.1",
     "@zxing/browser": "^0.1.5",
+    "cheerio": "^1.2.0",
     "clsx": "^2.1.1",
     "jsbarcode": "^3.12.3",
     "lucide-react": "^1.7.0",

@@ -1,1 +1,1 @@
-ALTER TABLE products ADD COLUMN supplier_name text;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_name text;
