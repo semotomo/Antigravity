@@ -23,8 +23,8 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-xl ${pet.species === 'dog' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>
-              {pet.species === 'dog' ? <Dog className="w-5 h-5" /> : <Cat className="w-5 h-5" />}
+            <div className={`p-2 rounded-xl ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>
+              {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-5 h-5" /> : <Cat className="w-5 h-5" />}
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -54,7 +54,7 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                   <img src={pet.image_url} alt={pet.title} className="w-full h-full object-cover" />
                 ) : (
                   <div className="text-slate-400 flex flex-col items-center">
-                    {pet.species === 'dog' ? <Dog className="w-16 h-16 opacity-30" /> : <Cat className="w-16 h-16 opacity-30" />}
+                    {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-16 h-16 opacity-30" /> : <Cat className="w-16 h-16 opacity-30" />}
                     <span className="mt-2 font-medium">No Image Available</span>
                   </div>
                 )}

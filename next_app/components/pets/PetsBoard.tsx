@@ -18,10 +18,6 @@ export function PetsBoard() {
 
   const supabase = createClient();
 
-  useEffect(() => {
-    fetchPets();
-  }, []);
-
   const fetchPets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -34,6 +30,10 @@ export function PetsBoard() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchPets();
+  }, []);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -107,7 +107,7 @@ export function PetsBoard() {
                       <img src={pet.image_url} alt={pet.breed || ''} className="w-full h-full object-cover" />
                     ) : (
                       <div className="text-slate-400 flex flex-col items-center">
-                        {pet.species === 'dog' ? <Dog className="w-8 h-8 opacity-50" /> : <Cat className="w-8 h-8 opacity-50" />}
+                        {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-8 h-8 opacity-50" /> : <Cat className="w-8 h-8 opacity-50" />}
                         <span className="text-xs mt-1">No Image</span>
                       </div>
                     )}
@@ -117,8 +117,8 @@ export function PetsBoard() {
                       <span className="text-xs font-semibold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">
                         {pet.pet_number || '番号なし'}
                       </span>
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${pet.species === 'dog' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                        {pet.species === 'dog' ? '犬' : '猫'}
+                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                        {pet.species === 'dog' || pet.species === '犬' ? '犬' : '猫'}
                       </span>
                     </div>
                     <h3 className="font-bold text-slate-800 line-clamp-2 leading-tight mb-2">

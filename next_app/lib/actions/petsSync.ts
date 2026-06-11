@@ -67,63 +67,130 @@ export async function syncPetsData() {
 
     // 2. 犬と猫のデータ取得 (blog_id=73, 82)
     const blogs = [
-      { id: 73, type: 'dog' },
-      { id: 82, type: 'cat' }
+      { id: 73, type: '犬' },
+      { id: 82, type: '猫' }
     ];
 
     let processedCount = 0;
 
     for (const blog of blogs) {
-      // 一覧JSON取得 (本来は__mode=filtered_list等を使うが、今回は簡易的に最新エントリIDを取得するため一覧HTMLを読む手もある。
-      // temp_scrape_target_entries.py にならって filtered_list は省略し、直接ID指定か、リスト画面(list_entries)をスクレイピングする)
-      
+      // 一覧HTMLからmagic_tokenを取得
       const listRes = await fetch(`${CMS_URL}?__mode=list&_type=entry&blog_id=${blog.id}`, { headers });
       const listText = await listRes.text();
       const $list = cheerio.load(listText);
-      
-      // テーブルなどからエントリIDを抽出
-      const entryIds: number[] = [];
-      $list('tr.entry').each((_, row) => {
-        const id = $(row).attr('id');
-        if (id) {
-          const match = id.match(/\d+/);
-          if (match) entryIds.push(parseInt(match[0], 10));
-        }
+      const token = $list('input[name="magic_token"]').val() as string || '';
+
+      // APIからエントリ一覧を取得
+      const reqData = new URLSearchParams();
+      reqData.append('__mode', 'filtered_list');
+      reqData.append('datasource', 'entry');
+      reqData.append('blog_id', String(blog.id));
+      reqData.append('limit', '50');
+      reqData.append('sort_by', 'modified_on');
+      reqData.append('sort_direction', 'descend');
+      reqData.append('sort_order', 'descend');
+      if (token) reqData.append('magic_token', token);
+
+      const apiRes = await fetch(CMS_URL, {
+        method: 'POST',
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: reqData.toString()
       });
-      
-      // 各エントリをパース（今回は最新10件程度に制限するか、全件回す）
-      for (const entryId of entryIds.slice(0, 15)) {
+
+      const entryIds: number[] = [];
+      if (apiRes.ok) {
+        try {
+          const data = await apiRes.json() as any;
+          if (data?.result?.objects) {
+            for (const obj of data.result.objects) {
+              const entryId = obj[0];
+              if (entryId && !isNaN(Number(entryId))) {
+                entryIds.push(Number(entryId));
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse filtered_list json:', e);
+        }
+      }
+
+      // フォールバック: HTML上のAタグからID抽出
+      if (entryIds.length === 0) {
+        $list('a').each((_, el) => {
+          const href = $list(el).attr('href') || '';
+          if (href.includes('__mode=view') && href.includes('id=')) {
+            const match = href.match(/id=(\d+)/);
+            if (match) {
+              const id = parseInt(match[1], 10);
+              if (!entryIds.includes(id)) entryIds.push(id);
+            }
+          }
+        });
+      }
+
+      // 各エントリをパース
+      for (const entryId of entryIds.slice(0, 30)) {
         const entryRes = await fetch(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers });
         const entryText = await entryRes.text();
         const $entry = cheerio.load(entryText);
-        
+
         const title = $entry('input[name="title"]').val() as string || '';
         const statusEl = $entry('select[name="status"] option:selected');
         const status = statusEl.text().trim() || '公開';
         const cat_ids = $entry('input[name="category_ids"]').val() as string || null;
+
+        // 詳細フィールドのパース
+        const petNumber = ($entry('input[name="text01"]').val() as string || $entry('input[name="text01"]').text() || '').trim();
+        const breed = ($entry('input[name="text07"]').val() as string || $entry('input[name="text07"]').text() || '').trim();
+        const color = ($entry('textarea[name="textarea04"]').val() as string || $entry('textarea[name="textarea04"]').text() || '').trim();
         
-        // 詳細フィールド
-        const petNumber = $entry('input[name="text01"]').val() as string || '';
-        const breed = $entry('input[name="text07"]').val() as string || '';
-        const color = $entry('textarea[name="textarea04"]').text() || '';
-        const gender = $entry('input[name="genderselect"]:checked').val() as string || '';
-        const birthDate = $entry('textarea[name="textarea03"]').text() || '';
-        const origin = $entry('textarea[name="textarea02"]').text() || '';
-        
-        const priceText = $entry('textarea[name="textarea09"]').text() || '';
-        let price = null;
-        const priceMatch = priceText.match(/([\d,]+)円/);
-        if (priceMatch) {
-          price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+        let gender = '';
+        const genderVal = $entry('input[name="genderselect"]:checked').val() as string || '';
+        if (genderVal) {
+          gender = genderVal;
+        } else {
+          $entry('input[name="genderselect"]').each((_, el) => {
+            if ($entry(el).attr('checked') !== undefined) {
+              gender = $entry(el).val() as string;
+            }
+          });
         }
-        
-        const vaccine = $entry('textarea[name="textarea05"]').text() || '';
-        const packContent = $entry('textarea[name="textarea06"]').text() || '';
-        
-        const pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
-        
-        // 画像は 일단 null (後日画像URLが取れる箇所を特定したら追加)
-        const imageUrl: string | null = null;
+
+        const birthDate = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
+        const origin = ($entry('textarea[name="textarea02"]').val() as string || $entry('textarea[name="textarea02"]').text() || '').trim();
+
+        const priceText = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
+        let price = null;
+        const priceMatch = priceText.replace(/,/g, '').match(/(\d+)円/);
+        if (priceMatch) {
+          price = parseInt(priceMatch[1], 10);
+        }
+
+        const vaccine = ($entry('textarea[name="textarea05"]').val() as string || $entry('textarea[name="textarea05"]').text() || '').trim();
+        const packContent = ($entry('textarea[name="textarea06"]').val() as string || $entry('textarea[name="textarea06"]').text() || '').trim();
+
+        // 生体番号の抽出
+        let pet_number_clean = '';
+        const m_no = title.match(/\b(1\d{5})\b/);
+        if (m_no) {
+          pet_number_clean = m_no[1];
+        } else {
+          const m_no2 = petNumber.match(/\b(1\d{5})\b/);
+          if (m_no2) {
+            pet_number_clean = m_no2[1];
+          } else {
+            pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
+          }
+        }
+
+        // 画像URLの取得
+        let imageUrl: string | null = $entry('input[name="og_image_url"]').val() as string || null;
+        if (!imageUrl) {
+          imageUrl = $entry('#og_image_img').attr('src') || null;
+        }
 
         const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
           entry_id: entryId,
@@ -131,23 +198,22 @@ export async function syncPetsData() {
           status,
           title,
           category_ids: cat_ids,
-          pet_number: pet_number_clean,
+          pet_number: pet_number_clean || null,
           species: blog.type,
-          breed,
-          color,
-          gender,
-          birth_date: birthDate,
-          origin,
+          breed: breed || title.replace(/\b(1\d{5})\b/g, '').replace('お問い合わせ番号', '').trim(),
+          color: color || null,
+          gender: gender || null,
+          birth_date: birthDate || null,
+          origin: origin || null,
           price,
-          vaccine_status: vaccine,
-          pack_content: packContent,
-          image_url: imageUrl,
+          vaccine_status: vaccine || null,
+          pack_content: packContent || null,
+          image_url: imageUrl || null,
           updated_at: new Date().toISOString()
         };
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await supabase.from('cms_pets').upsert(petData as any, { onConflict: 'entry_id, blog_id' });
-        
+
         processedCount++;
       }
     }

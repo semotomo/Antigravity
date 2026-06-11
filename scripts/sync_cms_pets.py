@@ -156,6 +156,9 @@ def scrape_entry_data(session, url, species):
         return None
 
     soup = BeautifulSoup(res_edit.text, 'html.parser')
+    with open("entry_debug.html", "w", encoding="utf-8") as f:
+        f.write(res_edit.text)
+    print("    [DEBUG] Dumped HTML to entry_debug.html")
     
     record = {
         'species': species,
