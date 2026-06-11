@@ -1,20 +1,16 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '../supabase/server';
 import * as cheerio from 'cheerio';
 import { Database } from '../types/database';
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-// Supabaseクライアント（サーバー環境から実行するためSERVICE_ROLE_KEYがあればそれを使う。今回はANON_KEYで代用する可能性もあり）
-const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const CMS_URL = "https://www.pets-kennel.com/cgi-bin/tl_cms/tl.cgi";
 const USERNAME = process.env.CMS_USERNAME || "manager";
 const PASSWORD = process.env.CMS_PASSWORD || "Wn3fyuVTa9";
 
 export async function syncPetsData() {
+  const supabase = await createClient();
+
   try {
     const headers = new Headers();
     headers.set('User-Agent', 'Mozilla/5.0');
@@ -149,7 +145,8 @@ export async function syncPetsData() {
           updated_at: new Date().toISOString()
         };
 
-        await supabase.from('cms_pets').upsert(petData, { onConflict: 'entry_id, blog_id' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await supabase.from('cms_pets').upsert(petData as any, { onConflict: 'entry_id, blog_id' });
         
         processedCount++;
       }
