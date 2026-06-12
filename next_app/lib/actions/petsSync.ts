@@ -22,20 +22,20 @@ export async function syncPetsData() {
     const dashRes = await fetch(`${CMS_URL}?__mode=dashboard`, { headers });
     if (!dashRes.ok) throw new Error(`Dashboard access failed: ${dashRes.status}`);
     
-    let cookie = dashRes.headers.get('set-cookie') || '';
-    // 簡単なクッキーの抽出（複数ある場合は連結）
+    // getSetCookie() を使って安全にクッキーを取得（カンマ誤分割バグの回避）
+    const dashSetCookies = dashRes.headers.getSetCookie();
+    let cookie = dashSetCookies.map(c => c.split(';')[0]).join('; ');
     if (cookie) {
-      cookie = cookie.split(',').map(c => c.split(';')[0]).join('; ');
       headers.set('Cookie', cookie);
     }
 
-    const dashText = await dashRes.text();
-    const $ = cheerio.load(dashText);
+    let dashText = await dashRes.text();
+    let $ = cheerio.load(dashText);
     
-    // ログインフォームがある場合（Basic認証だけでなくフォーム認証も必要な場合）
+    // ログインフォームがある場合（または未ログイン状態の場合）
     const form = $('form').first();
     const action = form.attr('action') || '';
-    if (action.includes('login') || dashText.includes('name="magic_token"')) {
+    if (action.includes('login') || dashText.includes('name="magic_token"') || !dashText.includes('サインアウト')) {
       const formData = new URLSearchParams();
       form.find('input').each((_, el) => {
         const name = $(el).attr('name');
@@ -58,11 +58,25 @@ export async function syncPetsData() {
         body: formData.toString()
       });
       
-      const loginCookie = loginRes.headers.get('set-cookie');
-      if (loginCookie) {
-        cookie += '; ' + loginCookie.split(',').map(c => c.split(';')[0]).join('; ');
+      const loginSetCookies = loginRes.headers.getSetCookie();
+      if (loginSetCookies.length > 0) {
+        const newCookies = loginSetCookies.map(c => c.split(';')[0]).join('; ');
+        cookie = cookie ? `${cookie}; ${newCookies}` : newCookies;
         headers.set('Cookie', cookie);
       }
+
+      // ログイン後のクッキーを反映してダッシュボードを再取得
+      const dashRes2 = await fetch(`${CMS_URL}?__mode=dashboard`, { headers });
+      dashText = await dashRes2.text();
+      $ = cheerio.load(dashText);
+    }
+
+    // ログイン成否の厳密なチェック
+    const isLoggedIn = dashText.includes('サインアウト') || dashText.includes('manager') || dashText.includes('からつケンネル');
+    if (!isLoggedIn) {
+      const title = $('title').text() || 'No Title';
+      const bodyPreview = $('body').text().substring(0, 200).replace(/\s+/g, ' ');
+      throw new Error(`CMSログイン失敗 (サーバー制限の可能性あり) - Title: ${title}, Content: ${bodyPreview}`);
     }
 
     // 2. 犬と猫のデータ取得 (blog_id=73, 82)
