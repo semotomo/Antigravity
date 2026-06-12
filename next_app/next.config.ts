@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
+const nextConfig: any = {
   allowedDevOrigins: ['192.168.1.89'],
   eslint: {
     ignoreDuringBuilds: true,

@@ -7,7 +7,7 @@ import { syncPetsData } from '@/lib/actions/petsSync';
 import { Search, RefreshCw, Dog, Cat, Info } from 'lucide-react';
 import { PetDetailModal } from './PetDetailModal';
 
-type Pet = Database['public']['Tables']['cms_pets']['Row'];
+type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
 
 export function PetsBoard() {
   const [pets, setPets] = useState<Pet[]>([]);
@@ -22,11 +22,11 @@ export function PetsBoard() {
     setLoading(true);
     const { data, error } = await supabase
       .from('cms_pets')
-      .select('*')
+      .select('*, stores(name)')
       .order('updated_at', { ascending: false });
 
     if (!error && data) {
-      setPets(data);
+      setPets(data as any);
     }
     setLoading(false);
   };
@@ -48,8 +48,7 @@ export function PetsBoard() {
   };
 
   const filteredPets = pets.filter(p => 
-    (p.title?.includes(searchTerm) || '') || 
-    (p.pet_number?.includes(searchTerm) || '') ||
+    (p.management_no?.includes(searchTerm) || '') ||
     (p.breed?.includes(searchTerm) || '')
   );
 
@@ -96,7 +95,17 @@ export function PetsBoard() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredPets.map(pet => (
+              {[...filteredPets].sort((a, b) => {
+                const isADog = a.species === 'dog' || a.species === '犬';
+                const isBDog = b.species === 'dog' || b.species === '犬';
+                
+                if (isADog && !isBDog) return -1;
+                if (!isADog && isBDog) return 1;
+                
+                const noA = a.management_no || '';
+                const noB = b.management_no || '';
+                return noA.localeCompare(noB, 'ja-JP');
+              }).map(pet => (
                 <div 
                   key={pet.id} 
                   className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer flex"
@@ -115,17 +124,18 @@ export function PetsBoard() {
                   <div className="p-4 flex-1">
                     <div className="flex items-start justify-between mb-1">
                       <span className="text-xs font-semibold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">
-                        {pet.pet_number || '番号なし'}
+                        {pet.management_no || '番号なし'}
                       </span>
                       <span className={`text-xs font-semibold px-2 py-1 rounded-full ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
                         {pet.species === 'dog' || pet.species === '犬' ? '犬' : '猫'}
                       </span>
                     </div>
                     <h3 className="font-bold text-slate-800 line-clamp-2 leading-tight mb-2">
-                      {pet.breed || pet.title}
+                      {pet.breed || '品種不明'}
                     </h3>
                     <div className="text-xs text-slate-500 space-y-1">
-                      <p>毛色: {pet.color || '-'}</p>
+                      <p className="font-semibold text-slate-700">店舗: {pet.stores?.name || '未割り当て'}</p>
+                      <p>毛色: {pet.coat_color || '-'}</p>
                       <p>性別: {pet.gender || '-'}</p>
                       <p>誕生日: {pet.birth_date || '-'}</p>
                     </div>

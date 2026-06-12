@@ -173,30 +173,59 @@ export async function syncPetsData() {
           });
         }
 
-        const birthDate = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
+        const birthDateText = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
+        // 生年月日 (例: "2026年1月25日" を "2026-01-25" にフォーマット変換)
+        let formattedBirthDate = null;
+        if (birthDateText) {
+          const dateMatch = birthDateText.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+          if (dateMatch) {
+            const y = dateMatch[1];
+            const m = dateMatch[2].padStart(2, '0');
+            const d = dateMatch[3].padStart(2, '0');
+            formattedBirthDate = `${y}-${m}-${d}`;
+          } else {
+            formattedBirthDate = birthDateText; // フォーマット不一致時は文字列そのまま
+          }
+        }
+
         const origin = ($entry('textarea[name="textarea02"]').val() as string || $entry('textarea[name="textarea02"]').text() || '').trim();
 
+        // 価格のパース (税込・税抜の抽出)
         const priceText = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
-        let price = null;
-        const priceMatch = priceText.replace(/,/g, '').match(/(\d+)円/);
-        if (priceMatch) {
-          price = parseInt(priceMatch[1], 10);
+        let priceExcludingTax = null;
+        let priceIncludingTax = null;
+        
+        if (priceText) {
+          const cleanPriceText = priceText.replace(/<[^>]*>/g, '').replace(/,/g, '');
+          const exMatch = cleanPriceText.match(/(\d+)円/);
+          if (exMatch) {
+            priceExcludingTax = parseInt(exMatch[1], 10);
+          }
+          const incMatch = cleanPriceText.match(/税込(\d+)円?/);
+          if (incMatch) {
+            priceIncludingTax = parseInt(incMatch[1], 10);
+          }
         }
 
         const vaccine = ($entry('textarea[name="textarea05"]').val() as string || $entry('textarea[name="textarea05"]').text() || '').trim();
         const packContent = ($entry('textarea[name="textarea06"]').val() as string || $entry('textarea[name="textarea06"]').text() || '').trim();
 
-        // 生体番号の抽出
+        // 生体番号（お問合せ番号）の抽出 (6桁の数字を抽出)
         let pet_number_clean = '';
-        const m_no = title.match(/\b(1\d{5})\b/);
+        const m_no = title.match(/\b(\d{6})\b/);
         if (m_no) {
           pet_number_clean = m_no[1];
         } else {
-          const m_no2 = petNumber.match(/\b(1\d{5})\b/);
+          const m_no2 = petNumber.match(/\b(\d{6})\b/);
           if (m_no2) {
             pet_number_clean = m_no2[1];
           } else {
-            pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
+            const numOnly = petNumber.replace(/\D/g, '');
+            if (numOnly.length >= 5 && numOnly.length <= 8) {
+              pet_number_clean = numOnly;
+            } else {
+              pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
+            }
           }
         }
 
@@ -206,27 +235,52 @@ export async function syncPetsData() {
           imageUrl = $entry('#og_image_img').attr('src') || null;
         }
 
+        // 店舗IDの判定ヘルパー関数
+        const getStoreIdFromCategoryIds = (categoryIdsStr: string | null): number | null => {
+          if (!categoryIdsStr) return null;
+          const ids = categoryIdsStr.split(',').map(id => id.trim());
+          const mapping: { [cmsCategoryId: string]: number } = {
+            '379': 7, // karatsu -> 本店
+            '380': 2, // pets-max -> マックス
+            '381': 6, // pet-center -> わんわん
+            '414': 5, // susenji -> 周船寺
+            '426': 3, // imari -> 伊万里
+            '425': 1, // sasebo -> 佐世保
+            '432': 4, // takeo -> 武雄
+          };
+          for (const id of ids) {
+            if (mapping[id]) return mapping[id];
+          }
+          return null;
+        };
+
+        const storeId = getStoreIdFromCategoryIds(cat_ids);
+
         const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
-          entry_id: entryId,
-          blog_id: blog.id,
-          status,
-          title,
-          category_ids: cat_ids,
-          pet_number: pet_number_clean || null,
+          cms_entry_id: entryId,
+          publish_status: status,
+          cms_category_ids: cat_ids,
+          management_no: pet_number_clean || `UNKNOWN-${entryId}`,
           species: blog.type,
-          breed: breed || title.replace(/\b(1\d{5})\b/g, '').replace('お問い合わせ番号', '').trim(),
-          color: color || null,
+          breed: breed || title.replace(/\b(\d{6})\b/g, '').replace('お問い合わせ番号', '').trim(),
+          coat_color: color || null,
           gender: gender || null,
-          birth_date: birthDate || null,
-          origin: origin || null,
-          price,
-          vaccine_status: vaccine || null,
-          pack_content: packContent || null,
+          birth_date: formattedBirthDate,
+          birth_place: origin || null,
+          price_tax_excluded: priceExcludingTax,
+          price_tax_included: priceIncludingTax,
+          vaccines: vaccine || null,
           image_url: imageUrl || null,
+          store_id: storeId,
+          cms_updated_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
 
-        await supabase.from('cms_pets').upsert(petData as any, { onConflict: 'entry_id, blog_id' });
+        const { error: upsertErr } = await supabase.from('cms_pets').upsert(petData as any, { onConflict: 'cms_entry_id' });
+        if (upsertErr) {
+          console.error(`Failed to upsert pet entry_id ${entryId}:`, upsertErr);
+          throw new Error(`DB書き込み失敗 (EntryID: ${entryId}): ${upsertErr.message}`);
+        }
 
         processedCount++;
       }

@@ -12,78 +12,66 @@ export interface Database {
       cms_pets: {
         Row: {
           id: string
-          entry_id: number
-          blog_id: number
-          status: string
-          title: string
-          category_ids: string | null
-          store_id: number | null
-          pet_number: string | null
-          species: string | null
+          management_no: string
+          species: string
           breed: string | null
-          color: string | null
-          gender: string | null
           birth_date: string | null
-          origin: string | null
-          price: number | null
-          vaccine_status: string | null
-          pack_content: string | null
-          memo: string | null
-          image_url: string | null
-          cms_created_at: string | null
+          birth_place: string | null
+          gender: string | null
+          price_tax_excluded: number | null
+          price_tax_included: number | null
+          coat_color: string | null
+          vaccines: string | null
+          publish_status: string | null
+          store_id: number | null
+          cms_category_ids: string | null
+          cms_entry_id: number
           cms_updated_at: string | null
           created_at: string
           updated_at: string
+          image_url: string | null
         }
         Insert: {
           id?: string
-          entry_id: number
-          blog_id: number
-          status: string
-          title: string
-          category_ids?: string | null
-          store_id?: number | null
-          pet_number?: string | null
-          species?: string | null
+          management_no: string
+          species: string
           breed?: string | null
-          color?: string | null
-          gender?: string | null
           birth_date?: string | null
-          origin?: string | null
-          price?: number | null
-          vaccine_status?: string | null
-          pack_content?: string | null
-          memo?: string | null
-          image_url?: string | null
-          cms_created_at?: string | null
+          birth_place?: string | null
+          gender?: string | null
+          price_tax_excluded?: number | null
+          price_tax_included?: number | null
+          coat_color?: string | null
+          vaccines?: string | null
+          publish_status?: string | null
+          store_id?: number | null
+          cms_category_ids?: string | null
+          cms_entry_id: number
           cms_updated_at?: string | null
           created_at?: string
           updated_at?: string
+          image_url?: string | null
         }
         Update: {
           id?: string
-          entry_id?: number
-          blog_id?: number
-          status?: string
-          title?: string
-          category_ids?: string | null
-          store_id?: number | null
-          pet_number?: string | null
-          species?: string | null
+          management_no?: string
+          species?: string
           breed?: string | null
-          color?: string | null
-          gender?: string | null
           birth_date?: string | null
-          origin?: string | null
-          price?: number | null
-          vaccine_status?: string | null
-          pack_content?: string | null
-          memo?: string | null
-          image_url?: string | null
-          cms_created_at?: string | null
+          birth_place?: string | null
+          gender?: string | null
+          price_tax_excluded?: number | null
+          price_tax_included?: number | null
+          coat_color?: string | null
+          vaccines?: string | null
+          publish_status?: string | null
+          store_id?: number | null
+          cms_category_ids?: string | null
+          cms_entry_id?: number
           cms_updated_at?: string | null
           created_at?: string
           updated_at?: string
+          image_url?: string | null
         }
         Relationships: []
       }

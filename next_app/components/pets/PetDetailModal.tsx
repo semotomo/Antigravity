@@ -1,7 +1,7 @@
 import { Database } from '@/lib/types/database';
 import { X, Dog, Cat, Info, MapPin, DollarSign, Activity } from 'lucide-react';
 
-type Pet = Database['public']['Tables']['cms_pets']['Row'];
+type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
 
 interface Props {
   pet: Pet;
@@ -28,9 +28,9 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                {pet.breed || pet.title}
+                {pet.breed || '品種不明'}
                 <span className="text-sm font-normal px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  {pet.pet_number}
+                  {pet.management_no}
                 </span>
               </h2>
             </div>
@@ -51,16 +51,16 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
             <div className="space-y-4">
               <div className="aspect-square bg-slate-200 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center shadow-inner relative">
                 {pet.image_url ? (
-                  <img src={pet.image_url} alt={pet.title} className="w-full h-full object-cover" />
+                  <img src={pet.image_url} alt={pet.breed || ''} className="w-full h-full object-cover" />
                 ) : (
                   <div className="text-slate-400 flex flex-col items-center">
                     {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-16 h-16 opacity-30" /> : <Cat className="w-16 h-16 opacity-30" />}
                     <span className="mt-2 font-medium">No Image Available</span>
                   </div>
                 )}
-                {pet.status !== '公開' && (
+                {pet.publish_status !== '公開' && (
                   <div className="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">
-                    {pet.status}
+                    {pet.publish_status}
                   </div>
                 )}
               </div>
@@ -74,9 +74,13 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                   <Info className="w-4 h-4 mr-2 text-indigo-500" /> 基本情報
                 </h3>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div className="col-span-2">
+                    <dt className="text-slate-500 text-xs mb-1">所属店舗</dt>
+                    <dd className="font-semibold text-slate-800">{pet.stores?.name || '未割り当て'}</dd>
+                  </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">毛色</dt>
-                    <dd className="font-medium text-slate-800">{pet.color || '-'}</dd>
+                    <dd className="font-medium text-slate-800">{pet.coat_color || '-'}</dd>
                   </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">性別</dt>
@@ -88,7 +92,7 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                   </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">出身地</dt>
-                    <dd className="font-medium text-slate-800">{pet.origin || '-'}</dd>
+                    <dd className="font-medium text-slate-800">{pet.birth_place || '-'}</dd>
                   </div>
                 </dl>
               </div>
@@ -100,20 +104,20 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                 <dl className="grid grid-cols-1 gap-y-3 text-sm">
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">生体価格</dt>
-                    <dd className="font-bold text-lg text-rose-600">
-                      {pet.price ? `${pet.price.toLocaleString()}円` : '-'}
+                    <dd className="font-bold text-lg text-rose-600 flex items-baseline gap-1">
+                      {pet.price_tax_excluded ? `${pet.price_tax_excluded.toLocaleString()}円` : '-'}
+                      {pet.price_tax_included && (
+                        <span className="text-xs font-normal text-slate-500">
+                          (税込 {pet.price_tax_included.toLocaleString()}円)
+                        </span>
+                      )}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">ワクチン接種</dt>
-                    <dd className="font-medium text-slate-800">{pet.vaccine_status || '-'}</dd>
+                    <dd className="font-medium text-slate-800">{pet.vaccines || '-'}</dd>
                   </div>
-                  {pet.pack_content && (
-                    <div>
-                      <dt className="text-slate-500 text-xs mb-1">パック内容</dt>
-                      <dd className="font-medium text-slate-800 whitespace-pre-wrap">{pet.pack_content}</dd>
-                    </div>
-                  )}
+
                 </dl>
               </div>
 
