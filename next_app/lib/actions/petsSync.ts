@@ -152,9 +152,34 @@ export async function syncPetsData() {
         const $entry = cheerio.load(entryText);
 
         const title = $entry('input[name="title"]').val() as string || '';
-        const statusEl = $entry('select[name="status"] option:selected');
-        const status = statusEl.text().trim() || '公開';
-        const cat_ids = $entry('input[name="category_ids"]').val() as string || null;
+        
+        // ステータス制限: '2'(公開) 以外のものは同期をスキップする
+        const statusVal = $entry('select[name="status"]').val() as string || '';
+        if (statusVal !== '2') {
+          continue; // 公開中でないエントリは同期をスキップ
+        }
+        const status = '公開';
+
+        // チェックされているカテゴリIDをチェックボックスから直接抽出
+        const checkedCats: string[] = [];
+        $entry('input[name^="add_category_id_"]').each((_, el) => {
+          if ($entry(el).attr('checked') !== undefined || $entry(el).prop('checked')) {
+            const name = $entry(el).attr('name') || '';
+            const match = name.match(/add_category_id_(\d+)/);
+            if (match) {
+              checkedCats.push(match[1]);
+            }
+          }
+        });
+        
+        // category_ids の input にも入っているかもしれないのでマージ
+        const cat_ids_val = $entry('input[name="category_ids"]').val() as string || '';
+        if (cat_ids_val) {
+          cat_ids_val.split(',').forEach(id => {
+            const tid = id.trim();
+            if (tid && !checkedCats.includes(tid)) checkedCats.push(tid);
+          });
+        }
 
         // 詳細フィールドのパース
         const petNumber = ($entry('input[name="text01"]').val() as string || $entry('input[name="text01"]').text() || '').trim();
@@ -229,37 +254,53 @@ export async function syncPetsData() {
           }
         }
 
-        // 画像URLの取得
-        let imageUrl: string | null = $entry('input[name="og_image_url"]').val() as string || null;
+        // ACF画像プレビューから優先的に画像URLを取得 (acf_image01_preview 〜 acf_image30_preview)
+        let imageUrl: string | null = null;
+        for (let i = 1; i <= 30; i++) {
+          const numStr = String(i).padStart(2, '0');
+          const previewImg = $entry(`#acf_image${numStr}_preview img`);
+          if (previewImg.length > 0) {
+            imageUrl = previewImg.attr('src') || null;
+            if (imageUrl) break;
+          }
+        }
+
+        // 見つからない場合は従来のメタタグ等から取得
+        if (!imageUrl) {
+          imageUrl = $entry('input[name="og_image_url"]').val() as string || null;
+        }
         if (!imageUrl) {
           imageUrl = $entry('#og_image_img').attr('src') || null;
         }
 
+        // 相対パスの場合はドメインを付与して絶対URL化
+        if (imageUrl && imageUrl.startsWith('/')) {
+          imageUrl = `https://www.pets-kennel.com${imageUrl}`;
+        }
+
         // 店舗IDの判定ヘルパー関数
-        const getStoreIdFromCategoryIds = (categoryIdsStr: string | null): number | null => {
-          if (!categoryIdsStr) return null;
-          const ids = categoryIdsStr.split(',').map(id => id.trim());
+        const getStoreIdFromCategoryIds = (categoryIds: string[]): number | null => {
           const mapping: { [cmsCategoryId: string]: number } = {
             '379': 7, // karatsu -> 本店
-            '380': 2, // pets-max -> マックス
-            '381': 6, // pet-center -> わんわん
+            '380': 2, // pets-max -> マックス (ペッツマックス唐津店)
+            '381': 6, // pet-center -> わんわん (わんわんペットセンター)
             '414': 5, // susenji -> 周船寺
             '426': 3, // imari -> 伊万里
             '425': 1, // sasebo -> 佐世保
             '432': 4, // takeo -> 武雄
           };
-          for (const id of ids) {
+          for (const id of categoryIds) {
             if (mapping[id]) return mapping[id];
           }
           return null;
         };
 
-        const storeId = getStoreIdFromCategoryIds(cat_ids);
+        const storeId = getStoreIdFromCategoryIds(checkedCats);
 
         const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
           cms_entry_id: entryId,
           publish_status: status,
-          cms_category_ids: cat_ids,
+          cms_category_ids: checkedCats.join(','),
           management_no: pet_number_clean || `UNKNOWN-${entryId}`,
           species: blog.type,
           breed: breed || title.replace(/\b(\d{6})\b/g, '').replace('お問い合わせ番号', '').trim(),

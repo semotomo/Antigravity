@@ -23,6 +23,7 @@ export function PetsBoard() {
     const { data, error } = await supabase
       .from('cms_pets')
       .select('*, stores(name)')
+      .eq('publish_status', '公開')
       .order('updated_at', { ascending: false });
 
     if (!error && data) {
@@ -94,7 +95,7 @@ export function PetsBoard() {
               見つかりませんでした。
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5">
               {[...filteredPets].sort((a, b) => {
                 const isADog = a.species === 'dog' || a.species === '犬';
                 const isBDog = b.species === 'dog' || b.species === '犬';
@@ -108,33 +109,26 @@ export function PetsBoard() {
               }).map(pet => (
                 <div 
                   key={pet.id} 
-                  className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer flex"
+                  className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer p-3.5 flex flex-col justify-between"
                   onClick={() => setSelectedPet(pet)}
                 >
-                  <div className="w-32 bg-slate-100 flex items-center justify-center border-r border-slate-100 relative">
-                    {pet.image_url ? (
-                      <img src={pet.image_url} alt={pet.breed || ''} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="text-slate-400 flex flex-col items-center">
-                        {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-8 h-8 opacity-50" /> : <Cat className="w-8 h-8 opacity-50" />}
-                        <span className="text-xs mt-1">No Image</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-4 flex-1">
-                    <div className="flex items-start justify-between mb-1">
-                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-indigo-50 text-indigo-700">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
                         {pet.management_no || '番号なし'}
                       </span>
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
                         {pet.species === 'dog' || pet.species === '犬' ? '犬' : '猫'}
                       </span>
                     </div>
-                    <h3 className="font-bold text-slate-800 line-clamp-2 leading-tight mb-2">
+                    <h3 className="font-bold text-slate-800 line-clamp-1 leading-tight mb-2 flex items-center gap-1.5">
+                      {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-4 h-4 text-orange-500 shrink-0" /> : <Cat className="w-4 h-4 text-emerald-500 shrink-0" />}
                       {pet.breed || '品種不明'}
                     </h3>
                     <div className="text-xs text-slate-500 space-y-1">
-                      <p className="font-semibold text-slate-700">店舗: {pet.stores?.name || '未割り当て'}</p>
+                      <p className="font-semibold text-indigo-600 bg-indigo-50/50 px-1.5 py-0.5 rounded inline-block">
+                        {pet.stores?.name ? `${pet.stores.name}店` : '未割り当て'}
+                      </p>
                       <p>毛色: {pet.coat_color || '-'}</p>
                       <p>性別: {pet.gender || '-'}</p>
                       <p>誕生日: {pet.birth_date || '-'}</p>
