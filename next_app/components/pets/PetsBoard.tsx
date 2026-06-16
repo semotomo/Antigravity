@@ -9,14 +9,36 @@ import { PetDetailModal } from './PetDetailModal';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
 
+const fallbackStores = [
+  { id: 7, name: '本店' },
+  { id: 1, name: '佐世保' },
+  { id: 2, name: 'マックス' },
+  { id: 3, name: '伊万里' },
+  { id: 4, name: '武雄' },
+  { id: 5, name: '周船寺' },
+  { id: 6, name: 'わんわん' },
+];
+
 export function PetsBoard() {
   const [pets, setPets] = useState<Pet[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
+  const [stores, setStores] = useState<{ id: number; name: string }[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<number | 'all'>(7); // デフォルト本店
 
   const supabase = createClient();
+
+  const fetchStores = async () => {
+    const { data, error } = await supabase
+      .from('stores')
+      .select('*')
+      .order('id', { ascending: true });
+    if (!error && data) {
+      setStores(data);
+    }
+  };
 
   const fetchPets = async () => {
     setLoading(true);
@@ -33,6 +55,7 @@ export function PetsBoard() {
   };
 
   useEffect(() => {
+    fetchStores();
     fetchPets();
   }, []);
 
@@ -48,10 +71,17 @@ export function PetsBoard() {
     setSyncing(false);
   };
 
-  const filteredPets = pets.filter(p => 
-    (p.management_no?.includes(searchTerm) || '') ||
-    (p.breed?.includes(searchTerm) || '')
-  );
+  const filteredPets = pets.filter(p => {
+    // 店舗での絞り込み
+    if (selectedStoreId !== 'all' && p.store_id !== selectedStoreId) {
+      return false;
+    }
+    // 検索語での絞り込み
+    const matchesSearch = 
+      (p.management_no?.includes(searchTerm) || false) ||
+      (p.breed?.includes(searchTerm) || false);
+    return matchesSearch;
+  });
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-6">
@@ -71,8 +101,8 @@ export function PetsBoard() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
-        <div className="p-4 border-b border-slate-200 flex items-center gap-4 bg-slate-50/50">
-          <div className="relative max-w-sm flex-1">
+        <div className="p-4 border-b border-slate-200 flex flex-wrap items-center gap-4 bg-slate-50/50">
+          <div className="relative max-w-sm flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
@@ -81,6 +111,19 @@ export function PetsBoard() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-sm border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">店舗:</span>
+            <select
+              value={selectedStoreId}
+              onChange={(e) => setSelectedStoreId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              className="border border-slate-300 rounded-lg text-sm bg-white px-3 py-2 focus:ring-indigo-500 focus:border-indigo-500 font-medium text-slate-700 min-w-[150px]"
+            >
+              <option value="all">すべての店舗</option>
+              {(stores.length > 0 ? stores : fallbackStores).map(store => (
+                <option key={store.id} value={store.id}>{store.name}店</option>
+              ))}
+            </select>
           </div>
         </div>
 

@@ -10,6 +10,7 @@ const PASSWORD = process.env.CMS_PASSWORD || "Wn3fyuVTa9";
 
 export async function syncPetsData() {
   const supabase = await createClient();
+  const syncedEntryIds: number[] = [];
 
   try {
     const headers = new Headers();
@@ -99,7 +100,7 @@ export async function syncPetsData() {
       reqData.append('__mode', 'filtered_list');
       reqData.append('datasource', 'entry');
       reqData.append('blog_id', String(blog.id));
-      reqData.append('limit', '50');
+      reqData.append('limit', '100');
       reqData.append('sort_by', 'modified_on');
       reqData.append('sort_direction', 'descend');
       reqData.append('sort_order', 'descend');
@@ -146,16 +147,17 @@ export async function syncPetsData() {
       }
 
       // 各エントリをパース
-      for (const entryId of entryIds.slice(0, 30)) {
+      for (const entryId of entryIds.slice(0, 100)) {
         const entryRes = await fetch(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers });
         const entryText = await entryRes.text();
         const $entry = cheerio.load(entryText);
 
         const title = $entry('input[name="title"]').val() as string || '';
         
-        // ステータス制限: '2'(公開) 以外のものは同期をスキップする
+        // ステータス制限: '2'(公開) 以外のものは同期をスキップし、DBからも削除する
         const statusVal = $entry('select[name="status"]').val() as string || '';
         if (statusVal !== '2') {
+          await supabase.from('cms_pets').delete().eq('cms_entry_id', entryId);
           continue; // 公開中でないエントリは同期をスキップ
         }
         const status = '公開';
@@ -323,7 +325,19 @@ export async function syncPetsData() {
           throw new Error(`DB書き込み失敗 (EntryID: ${entryId}): ${upsertErr.message}`);
         }
 
+        syncedEntryIds.push(entryId);
         processedCount++;
+      }
+    }
+
+    // CMS側で非公開になった、または古いデータをDBから一括削除する
+    if (syncedEntryIds.length > 0) {
+      const { error: deleteErr } = await supabase
+        .from('cms_pets')
+        .delete()
+        .not('cms_entry_id', 'in', `(${syncedEntryIds.join(',')})`);
+      if (deleteErr) {
+        console.error('Failed to delete obsolete pets:', deleteErr);
       }
     }
 
