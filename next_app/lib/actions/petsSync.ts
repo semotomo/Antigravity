@@ -100,7 +100,7 @@ export async function syncPetsData() {
       reqData.append('__mode', 'filtered_list');
       reqData.append('datasource', 'entry');
       reqData.append('blog_id', String(blog.id));
-      reqData.append('limit', '100');
+      reqData.append('limit', '20');
       reqData.append('sort_by', 'modified_on');
       reqData.append('sort_direction', 'descend');
       reqData.append('sort_order', 'descend');
@@ -147,7 +147,7 @@ export async function syncPetsData() {
       }
 
       // 各エントリをパース
-      for (const entryId of entryIds.slice(0, 100)) {
+      for (const entryId of entryIds.slice(0, 20)) {
         const entryRes = await fetch(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers });
         const entryText = await entryRes.text();
         const $entry = cheerio.load(entryText);
@@ -201,17 +201,21 @@ export async function syncPetsData() {
         }
 
         const birthDateText = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
-        // 生年月日 (例: "2026年1月25日" を "2026-01-25" にフォーマット変換)
+        // 生年月日のパース (例: "2026年1月25日" や入力ミス "2025年1月16月" から数字を抽出して "2026-01-25" 形式に自動修正)
         let formattedBirthDate = null;
         if (birthDateText) {
-          const dateMatch = birthDateText.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-          if (dateMatch) {
-            const y = dateMatch[1];
-            const m = dateMatch[2].padStart(2, '0');
-            const d = dateMatch[3].padStart(2, '0');
-            formattedBirthDate = `${y}-${m}-${d}`;
-          } else {
-            formattedBirthDate = birthDateText; // フォーマット不一致時は文字列そのまま
+          const digits = birthDateText.match(/\d+/g);
+          if (digits && digits.length >= 3) {
+            const y = digits[0];
+            const m = digits[1].padStart(2, '0');
+            const d = digits[2].padStart(2, '0');
+            const year = parseInt(y, 10);
+            const month = parseInt(m, 10);
+            const day = parseInt(d, 10);
+            // 妥当な日付範囲の場合のみ適用
+            if (year > 2000 && year < 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+              formattedBirthDate = `${y}-${m}-${d}`;
+            }
           }
         }
 
@@ -327,17 +331,6 @@ export async function syncPetsData() {
 
         syncedEntryIds.push(entryId);
         processedCount++;
-      }
-    }
-
-    // CMS側で非公開になった、または古いデータをDBから一括削除する
-    if (syncedEntryIds.length > 0) {
-      const { error: deleteErr } = await supabase
-        .from('cms_pets')
-        .delete()
-        .not('cms_entry_id', 'in', `(${syncedEntryIds.join(',')})`);
-      if (deleteErr) {
-        console.error('Failed to delete obsolete pets:', deleteErr);
       }
     }
 

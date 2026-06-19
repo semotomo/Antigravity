@@ -27,6 +27,7 @@ export function PetsBoard() {
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [stores, setStores] = useState<{ id: number; name: string }[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState<number | 'all'>(7); // デフォルト本店
+  const [lastSyncTime, setLastSyncTime] = useState<string>('');
 
   const supabase = createClient();
 
@@ -50,6 +51,21 @@ export function PetsBoard() {
 
     if (!error && data) {
       setPets(data as any);
+      if (data.length > 0) {
+        const times = data
+          .map((p: any) => p.updated_at ? new Date(p.updated_at).getTime() : 0)
+          .filter(t => t > 0);
+        if (times.length > 0) {
+          const maxTime = Math.max(...times);
+          setLastSyncTime(new Date(maxTime).toLocaleString('ja-JP', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+          }));
+        }
+      }
     }
     setLoading(false);
   };
@@ -90,14 +106,21 @@ export function PetsBoard() {
           <Dog className="w-6 h-6 mr-2 text-indigo-600" />
           生体情報（犬猫）
         </h1>
-        <button 
-          onClick={handleSync} 
-          disabled={syncing}
-          className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-          {syncing ? '同期中...' : '最新情報を同期'}
-        </button>
+        <div className="flex items-center gap-4">
+          {lastSyncTime && (
+            <span className="text-xs text-slate-500 font-medium">
+              最終同期: {lastSyncTime}
+            </span>
+          )}
+          <button 
+            onClick={handleSync} 
+            disabled={syncing}
+            className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? '同期中...' : '最新情報を同期'}
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
@@ -121,7 +144,7 @@ export function PetsBoard() {
             >
               <option value="all">すべての店舗</option>
               {(stores.length > 0 ? stores : fallbackStores).map(store => (
-                <option key={store.id} value={store.id}>{store.name}店</option>
+                <option key={store.id} value={store.id}>{store.name}</option>
               ))}
             </select>
           </div>
@@ -170,7 +193,7 @@ export function PetsBoard() {
                     </h3>
                     <div className="text-xs text-slate-500 space-y-1">
                       <p className="font-semibold text-indigo-600 bg-indigo-50/50 px-1.5 py-0.5 rounded inline-block">
-                        {pet.stores?.name ? `${pet.stores.name}店` : '未割り当て'}
+                        {pet.stores?.name ? pet.stores.name : '未割り当て'}
                       </p>
                       <p>毛色: {pet.coat_color || '-'}</p>
                       <p>性別: {pet.gender || '-'}</p>
