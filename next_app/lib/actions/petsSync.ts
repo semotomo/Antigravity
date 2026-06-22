@@ -8,9 +8,11 @@ const CMS_URL = "https://www.pets-kennel.com/cgi-bin/tl_cms/tl.cgi";
 const USERNAME = process.env.CMS_USERNAME || "manager";
 const PASSWORD = process.env.CMS_PASSWORD || "Wn3fyuVTa9";
 
-export async function syncPetsData() {
+export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
   const supabase = await createClient();
   const syncedEntryIds: number[] = [];
+  const allPetData: Database['public']['Tables']['cms_pets']['Insert'][] = [];
+  const nonPublicEntryIdsToDelete: number[] = [];
 
   try {
     const headers = new Headers();
@@ -86,7 +88,8 @@ export async function syncPetsData() {
       { id: 82, type: '猫' }
     ];
 
-    let processedCount = 0;
+    const limitVal = mode === 'quick' ? '50' : '500';
+    const loopLimit = mode === 'quick' ? 50 : 500;
 
     for (const blog of blogs) {
       // 一覧HTMLからmagic_tokenを取得
@@ -100,7 +103,7 @@ export async function syncPetsData() {
       reqData.append('__mode', 'filtered_list');
       reqData.append('datasource', 'entry');
       reqData.append('blog_id', String(blog.id));
-      reqData.append('limit', '20');
+      reqData.append('limit', limitVal);
       reqData.append('sort_by', 'modified_on');
       reqData.append('sort_direction', 'descend');
       reqData.append('sort_order', 'descend');
@@ -147,7 +150,7 @@ export async function syncPetsData() {
       }
 
       // 各エントリをパース
-      for (const entryId of entryIds.slice(0, 20)) {
+      for (const entryId of entryIds.slice(0, loopLimit)) {
         const entryRes = await fetch(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers });
         const entryText = await entryRes.text();
         const $entry = cheerio.load(entryText);
@@ -157,10 +160,14 @@ export async function syncPetsData() {
         // ステータス制限: '2'(公開) 以外のものは同期をスキップし、DBからも削除する
         const statusVal = $entry('select[name="status"]').val() as string || '';
         if (statusVal !== '2') {
-          await supabase.from('cms_pets').delete().eq('cms_entry_id', entryId);
+          nonPublicEntryIdsToDelete.push(entryId);
           continue; // 公開中でないエントリは同期をスキップ
         }
-        const status = '公開';
+
+        // 販売終了チェックボックス (checkboxoff01_acf)
+        const isSoldOut = $entry('input[name="checkboxoff01_acf"]').prop('checked') || 
+                          $entry('input[name="checkboxoff01_acf"]').attr('checked') !== undefined;
+        const status = isSoldOut ? '販売終了' : '公開';
 
         // チェックされているカテゴリIDをチェックボックスから直接抽出
         const checkedCats: string[] = [];
@@ -188,6 +195,10 @@ export async function syncPetsData() {
         const breed = ($entry('input[name="text07"]').val() as string || $entry('input[name="text07"]').text() || '').trim();
         const color = ($entry('textarea[name="textarea04"]').val() as string || $entry('textarea[name="textarea04"]').text() || '').trim();
         
+        // 公開・更新日時
+        const authoredOnDate = $entry('input[name="authored_on_date"]').val() as string || '';
+        const authoredOnTime = $entry('input[name="authored_on_time"]').val() as string || '';
+
         let gender = '';
         const genderVal = $entry('input[name="genderselect"]:checked').val() as string || '';
         if (genderVal) {
@@ -201,7 +212,7 @@ export async function syncPetsData() {
         }
 
         const birthDateText = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
-        // 生年月日のパース (例: "2026年1月25日" や入力ミス "2025年1月16月" から数字を抽出して "2026-01-25" 形式に自動修正)
+        // 生年月日のパース
         let formattedBirthDate = null;
         if (birthDateText) {
           const digits = birthDateText.match(/\d+/g);
@@ -260,7 +271,7 @@ export async function syncPetsData() {
           }
         }
 
-        // ACF画像プレビューから優先的に画像URLを取得 (acf_image01_preview 〜 acf_image30_preview)
+        // ACF画像プレビューから優先的に画像URLを取得
         let imageUrl: string | null = null;
         for (let i = 1; i <= 30; i++) {
           const numStr = String(i).padStart(2, '0');
@@ -303,6 +314,15 @@ export async function syncPetsData() {
 
         const storeId = getStoreIdFromCategoryIds(checkedCats);
 
+        let cmsUpdatedAtIso = new Date().toISOString();
+        if (authoredOnDate && authoredOnTime) {
+          const jstStr = `${authoredOnDate}T${authoredOnTime}+09:00`;
+          const d = new Date(jstStr);
+          if (!isNaN(d.getTime())) {
+            cmsUpdatedAtIso = d.toISOString();
+          }
+        }
+
         const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
           cms_entry_id: entryId,
           publish_status: status,
@@ -319,22 +339,53 @@ export async function syncPetsData() {
           vaccines: vaccine || null,
           image_url: imageUrl || null,
           store_id: storeId,
-          cms_updated_at: new Date().toISOString(),
+          cms_updated_at: cmsUpdatedAtIso,
           updated_at: new Date().toISOString()
         };
 
-        const { error: upsertErr } = await supabase.from('cms_pets').upsert(petData as any, { onConflict: 'cms_entry_id' });
-        if (upsertErr) {
-          console.error(`Failed to upsert pet entry_id ${entryId}:`, upsertErr);
-          throw new Error(`DB書き込み失敗 (EntryID: ${entryId}): ${upsertErr.message}`);
-        }
-
+        allPetData.push(petData);
         syncedEntryIds.push(entryId);
-        processedCount++;
       }
     }
 
-    return { success: true, count: processedCount, message: `${processedCount} 件の生体データを同期しました` };
+    // 3. 非公開・下書きステータスのペットを一括削除
+    if (nonPublicEntryIdsToDelete.length > 0) {
+      await supabase
+        .from('cms_pets')
+        .delete()
+        .in('cms_entry_id', nonPublicEntryIdsToDelete);
+    }
+
+    // 4. 新規・更新生体データの一括バルクUpsert
+    let processedCount = 0;
+    if (allPetData.length > 0) {
+      const { error: upsertErr } = await supabase
+        .from('cms_pets')
+        .upsert(allPetData as any, { onConflict: 'cms_entry_id' });
+      if (upsertErr) {
+        console.error('Failed to bulk upsert pets:', upsertErr);
+        throw new Error(`DBバルク書き込み失敗: ${upsertErr.message}`);
+      }
+      processedCount = allPetData.length;
+    }
+
+    // 5. フル同期時の古いレコードの一括削除
+    if (mode === 'full' && syncedEntryIds.length > 0) {
+      const { error: deleteErr } = await supabase
+        .from('cms_pets')
+        .delete()
+        .in('species', ['犬', '猫'])
+        .not('cms_entry_id', 'in', syncedEntryIds);
+      if (deleteErr) {
+        console.error('Failed to batch delete old pets:', deleteErr);
+      }
+    }
+
+    return { 
+      success: true, 
+      count: processedCount, 
+      message: `${processedCount} 件の生体データを同期しました` + (mode === 'full' ? '（古いデータの削除完了）' : '') 
+    };
   } catch (error: any) {
     console.error('Sync Error:', error);
     return { success: false, message: error.message };

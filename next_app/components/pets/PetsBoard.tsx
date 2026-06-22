@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Database } from '@/lib/types/database';
 import { syncPetsData } from '@/lib/actions/petsSync';
-import { Search, RefreshCw, Dog, Cat, Info } from 'lucide-react';
+import { Search, RefreshCw, Dog, Cat } from 'lucide-react';
 import { PetDetailModal } from './PetDetailModal';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
@@ -27,6 +27,7 @@ export function PetsBoard() {
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [stores, setStores] = useState<{ id: number; name: string }[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState<number | 'all'>(7); // デフォルト本店
+  const [showSoldOut, setShowSoldOut] = useState<boolean>(false); // デフォルト販売終了は非表示
   const [lastSyncTime, setLastSyncTime] = useState<string>('');
 
   const supabase = createClient();
@@ -43,10 +44,11 @@ export function PetsBoard() {
 
   const fetchPets = async () => {
     setLoading(true);
+    // 「公開」と「販売終了」の両方のデータをDBから取得
     const { data, error } = await supabase
       .from('cms_pets')
       .select('*, stores(name)')
-      .eq('publish_status', '公開')
+      .in('publish_status', ['公開', '販売終了'])
       .order('updated_at', { ascending: false });
 
     if (!error && data) {
@@ -75,9 +77,9 @@ export function PetsBoard() {
     fetchPets();
   }, []);
 
-  const handleSync = async () => {
+  const handleSync = async (mode: 'quick' | 'full') => {
     setSyncing(true);
-    const result = await syncPetsData();
+    const result = await syncPetsData(mode);
     if (result.success) {
       alert(`同期成功: ${result.message}`);
       await fetchPets();
@@ -88,6 +90,10 @@ export function PetsBoard() {
   };
 
   const filteredPets = pets.filter(p => {
+    // 販売終了の子を含めるかどうかのチェック
+    if (!showSoldOut && p.publish_status === '販売終了') {
+      return false;
+    }
     // 店舗での絞り込み
     if (selectedStoreId !== 'all' && p.store_id !== selectedStoreId) {
       return false;
@@ -112,14 +118,24 @@ export function PetsBoard() {
               最終同期: {lastSyncTime}
             </span>
           )}
-          <button 
-            onClick={handleSync} 
-            disabled={syncing}
-            className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? '同期中...' : '最新情報を同期'}
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => handleSync('quick')} 
+              disabled={syncing}
+              className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? '同期中...' : '最新情報を同期'}
+            </button>
+            <button 
+              onClick={() => handleSync('full')} 
+              disabled={syncing}
+              className="flex items-center px-4 py-2 rounded-md font-medium text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? '同期中...' : 'フル同期を実行'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -148,6 +164,21 @@ export function PetsBoard() {
               ))}
             </select>
           </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="showSoldOut"
+              checked={showSoldOut}
+              onChange={(e) => setShowSoldOut(e.target.checked)}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+            />
+            <label 
+              htmlFor="showSoldOut" 
+              className="text-xs font-semibold text-slate-700 cursor-pointer select-none"
+            >
+              販売終了の子を含める
+            </label>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto p-4">
@@ -175,7 +206,7 @@ export function PetsBoard() {
               }).map(pet => (
                 <div 
                   key={pet.id} 
-                  className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer p-3.5 flex flex-col justify-between"
+                  className={`bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-md transition-all cursor-pointer p-3.5 flex flex-col justify-between ${pet.publish_status === '販売終了' ? 'opacity-70 bg-slate-50/50' : ''}`}
                   onClick={() => setSelectedPet(pet)}
                 >
                   <div>
@@ -183,9 +214,16 @@ export function PetsBoard() {
                       <span className="text-xs font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
                         {pet.management_no || '番号なし'}
                       </span>
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                        {pet.species === 'dog' || pet.species === '犬' ? '犬' : '猫'}
-                      </span>
+                      <div className="flex gap-1.5 items-center">
+                        {pet.publish_status === '販売終了' && (
+                          <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-slate-200 text-slate-600 border border-slate-300">
+                            販売終了
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${pet.species === 'dog' || pet.species === '犬' ? 'bg-orange-50 text-orange-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                          {pet.species === 'dog' || pet.species === '犬' ? '犬' : '猫'}
+                        </span>
+                      </div>
                     </div>
                     <h3 className="font-bold text-slate-800 line-clamp-1 leading-tight mb-2 flex items-center gap-1.5">
                       {pet.species === 'dog' || pet.species === '犬' ? <Dog className="w-4 h-4 text-orange-500 shrink-0" /> : <Cat className="w-4 h-4 text-emerald-500 shrink-0" />}
