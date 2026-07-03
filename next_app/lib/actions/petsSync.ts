@@ -13,6 +13,48 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
   const syncedEntryIds: number[] = [];
   const allPetData: Database['public']['Tables']['cms_pets']['Insert'][] = [];
   const nonPublicEntryIdsToDelete: number[] = [];
+
+  // 動的フィルター用の日付範囲算出
+  let fromDate = '';
+  let toDate = '';
+
+  if (mode === 'quick') {
+    try {
+      const { data: latestPet, error: latestErr } = await supabase
+        .from('cms_pets')
+        .select('updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      const formatJstDate = (date: Date) => {
+        const jstDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+        const y = jstDate.getFullYear();
+        const m = String(jstDate.getMonth() + 1).padStart(2, '0');
+        const d = String(jstDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      };
+
+      const baseDate = new Date();
+      const latestPetTyped = latestPet as { updated_at: string | null }[] | null;
+      if (!latestErr && latestPetTyped && latestPetTyped.length > 0 && latestPetTyped[0].updated_at) {
+        baseDate.setTime(new Date(latestPetTyped[0].updated_at).getTime());
+      } else {
+        baseDate.setDate(baseDate.getDate() - 7);
+      }
+
+      // 安全マージンとして最終同期の1日前から本日までを対象範囲とする
+      const fromDateObj = new Date(baseDate);
+      fromDateObj.setDate(fromDateObj.getDate() - 1);
+      
+      fromDate = formatJstDate(fromDateObj);
+      toDate = formatJstDate(new Date());
+
+      console.log(`Quick sync date filter applied: from ${fromDate} to ${toDate}`);
+    } catch (e) {
+      console.error('Failed to calculate sync date range:', e);
+    }
+  }
+
   try {
     const headers = new Headers();
     headers.set('User-Agent', 'Mozilla/5.0');
@@ -108,7 +150,20 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
       reqData.append('sort_order', 'descend');
       if (token) reqData.append('magic_token', token);
 
-
+      // クイック同期時の更新日フィルター適用
+      if (mode === 'quick' && fromDate && toDate) {
+        const filterItems = [
+          {
+            type: 'modified_on',
+            args: {
+              option: 'range',
+              from: fromDate,
+              to: toDate
+            }
+          }
+        ];
+        reqData.append('items', JSON.stringify(filterItems));
+      }
 
       const apiRes = await fetch(CMS_URL, {
         method: 'POST',
