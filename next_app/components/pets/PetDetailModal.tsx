@@ -1,5 +1,6 @@
 import { Database } from '@/lib/types/database';
 import { X, Dog, Cat, Info, MapPin, DollarSign, Activity } from 'lucide-react';
+import { getGenderClass, renderPriceText } from './PetsBoard';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
 
@@ -84,7 +85,11 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                   </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">性別</dt>
-                    <dd className="font-medium text-slate-800">{pet.gender || '-'}</dd>
+                    <dd className="mt-1">
+                      <span className={getGenderClass(pet.gender) || 'font-medium text-slate-800'}>
+                        {pet.gender || '-'}
+                      </span>
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">生年月日</dt>
@@ -106,8 +111,8 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                     <dt className="text-slate-500 text-xs mb-1">生体価格</dt>
                     <dd className="font-bold text-slate-800">
                       {pet.price_text ? (
-                        <div className="whitespace-pre-line text-sm font-semibold text-slate-700 leading-relaxed bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-1">
-                          {pet.price_text}
+                        <div className="bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-1">
+                          {renderPriceText(pet.price_text)}
                         </div>
                       ) : (
                         <div className="text-lg font-bold text-rose-600 flex items-baseline gap-1 mt-1">

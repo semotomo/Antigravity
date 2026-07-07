@@ -9,6 +9,65 @@ import { PetDetailModal } from './PetDetailModal';
 
 type Pet = Database['public']['Tables']['cms_pets']['Row'] & { stores: { name: string } | null };
 
+export const getGenderClass = (gender: string | null) => {
+  if (!gender) return '';
+  if (gender.includes('女') || gender.includes('♀') || gender.includes('メス')) {
+    return 'text-pink-600 font-bold bg-pink-50 px-1.5 py-0.5 rounded';
+  }
+  if (gender.includes('男') || gender.includes('♂') || gender.includes('オス')) {
+    return 'text-sky-600 font-bold bg-sky-50 px-1.5 py-0.5 rounded';
+  }
+  return '';
+};
+
+export const renderPriceText = (text: string | null) => {
+  if (!text) return <span className="text-slate-400">-</span>;
+  const lines = text.split(/\r?\n/);
+  const hasDiscount = text.includes('↓');
+  
+  if (!hasDiscount) {
+    return (
+      <div className="space-y-0.5 text-xs font-bold text-slate-700">
+        {lines.map((line, idx) => {
+          const hasNumber = /\d+/.test(line);
+          return (
+            <div key={idx} className={hasNumber ? 'text-rose-600' : ''}>
+              {line}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  
+  let arrowFound = false;
+  return (
+    <div className="space-y-0.5 text-[10px] leading-tight">
+      {lines.map((line, idx) => {
+        if (line.includes('↓')) {
+          arrowFound = true;
+          return <div key={idx} className="text-slate-400 font-bold my-0.5">{line}</div>;
+        }
+        
+        if (arrowFound) {
+          const hasNumber = /\d+/.test(line);
+          if (hasNumber) {
+            return <div key={idx} className="text-rose-600 font-bold text-xs">{line}</div>;
+          } else {
+            return <div key={idx} className="text-amber-600 font-semibold">{line}</div>;
+          }
+        }
+        
+        const hasNumber = /\d+/.test(line);
+        if (hasNumber) {
+          return <div key={idx} className="text-slate-400 line-through">{line}</div>;
+        }
+        return <div key={idx} className="text-slate-400">{line}</div>;
+      })}
+    </div>
+  );
+};
+
 const fallbackStores = [
   { id: 7, name: '本店' },
   { id: 1, name: '佐世保' },
@@ -260,24 +319,28 @@ export function PetsBoard() {
                       
                       <div className="text-xs text-slate-500 space-y-0.5">
                         <p><span className="font-medium text-slate-400">毛色:</span> {pet.coat_color || '-'}</p>
-                        <p><span className="font-medium text-slate-400">性別:</span> {pet.gender || '-'}</p>
+                        <p>
+                          <span className="font-medium text-slate-400">性別:</span>{' '}
+                          <span className={getGenderClass(pet.gender)}>
+                            {pet.gender || '-'}
+                          </span>
+                        </p>
                       </div>
                       
                       <div className="text-xs text-slate-500 space-y-0.5">
                         <p><span className="font-medium text-slate-400">誕生日:</span> {pet.birth_date || '-'}</p>
                         <p><span className="font-medium text-slate-400">店舗:</span> <span className="font-semibold text-indigo-600 bg-indigo-50/50 px-1 py-0.2 rounded">{pet.stores?.name || '未割り当て'}</span></p>
+                        <p className="line-clamp-1"><span className="font-medium text-slate-400">ワクチン:</span> <span className="font-medium text-slate-700">{pet.vaccines || '-'}</span></p>
                       </div>
                       
                       <div className="text-xs">
                         <span className="text-slate-400 font-medium block mb-0.5">価格:</span>
                         {pet.price_text ? (
-                          <div className="text-[10px] font-bold text-rose-600 line-clamp-2 leading-tight">
-                            {pet.price_text.replace(/\r?\n/g, ' ')}
-                          </div>
+                          renderPriceText(pet.price_text)
                         ) : pet.price_tax_excluded ? (
-                          <div className="font-bold text-rose-600">
+                          <div className="font-bold text-rose-600 text-xs">
                             {pet.price_tax_excluded.toLocaleString()}円
-                            {pet.price_tax_included && <span className="text-[9px] font-normal text-slate-500 ml-1">(税込{pet.price_tax_included.toLocaleString()}円)</span>}
+                            {pet.price_tax_included && <span className="text-[9px] font-normal text-slate-500 block">(税込{pet.price_tax_included.toLocaleString()}円)</span>}
                           </div>
                         ) : (
                           <span className="text-slate-400">-</span>
