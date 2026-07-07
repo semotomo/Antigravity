@@ -60,7 +60,7 @@ export const renderPriceText = (text: string | null) => {
         
         const hasNumber = /\d+/.test(line);
         if (hasNumber) {
-          return <div key={idx} className="text-slate-400 line-through">{line}</div>;
+          return <div key={idx} className="text-slate-400">{line}</div>;
         }
         return <div key={idx} className="text-slate-400">{line}</div>;
       })}
