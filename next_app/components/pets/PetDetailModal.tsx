@@ -104,12 +104,20 @@ export function PetDetailModal({ pet, isOpen, onClose }: Props) {
                 <dl className="grid grid-cols-1 gap-y-3 text-sm">
                   <div>
                     <dt className="text-slate-500 text-xs mb-1">生体価格</dt>
-                    <dd className="font-bold text-lg text-rose-600 flex items-baseline gap-1">
-                      {pet.price_tax_excluded ? `${pet.price_tax_excluded.toLocaleString()}円` : '-'}
-                      {pet.price_tax_included && (
-                        <span className="text-xs font-normal text-slate-500">
-                          (税込 {pet.price_tax_included.toLocaleString()}円)
-                        </span>
+                    <dd className="font-bold text-slate-800">
+                      {pet.price_text ? (
+                        <div className="whitespace-pre-line text-sm font-semibold text-slate-700 leading-relaxed bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-1">
+                          {pet.price_text}
+                        </div>
+                      ) : (
+                        <div className="text-lg font-bold text-rose-600 flex items-baseline gap-1 mt-1">
+                          {pet.price_tax_excluded ? `${pet.price_tax_excluded.toLocaleString()}円` : '-'}
+                          {pet.price_tax_included && (
+                            <span className="text-xs font-normal text-slate-500">
+                              (税込 {pet.price_tax_included.toLocaleString()}円)
+                            </span>
+                          )}
+                        </div>
                       )}
                     </dd>
                   </div>

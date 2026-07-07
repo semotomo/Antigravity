@@ -20,6 +20,7 @@ export interface Database {
           gender: string | null
           price_tax_excluded: number | null
           price_tax_included: number | null
+          price_text: string | null
           coat_color: string | null
           vaccines: string | null
           publish_status: string | null
@@ -41,6 +42,7 @@ export interface Database {
           gender?: string | null
           price_tax_excluded?: number | null
           price_tax_included?: number | null
+          price_text?: string | null
           coat_color?: string | null
           vaccines?: string | null
           publish_status?: string | null
@@ -62,6 +64,7 @@ export interface Database {
           gender?: string | null
           price_tax_excluded?: number | null
           price_tax_included?: number | null
+          price_text?: string | null
           coat_color?: string | null
           vaccines?: string | null
           publish_status?: string | null

@@ -288,20 +288,50 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
 
         const origin = ($entry('textarea[name="textarea02"]').val() as string || $entry('textarea[name="textarea02"]').text() || '').trim();
 
-        // 価格のパース (税込・税抜の抽出)
-        const priceText = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
+        // 価格のパース (税込・税抜の抽出と、テキスト表現の取得)
+        const priceTextRaw = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
         let priceExcludingTax = null;
         let priceIncludingTax = null;
+        let priceDisplay = null;
         
-        if (priceText) {
-          const cleanPriceText = priceText.replace(/<[^>]*>/g, '').replace(/,/g, '');
-          const exMatch = cleanPriceText.match(/(\d+)円/);
-          if (exMatch) {
-            priceExcludingTax = parseInt(exMatch[1], 10);
+        if (priceTextRaw) {
+          // HTMLタグ（スタイルなど）を取り除くが、改行は維持する
+          const cleanPriceText = priceTextRaw.replace(/<[^>]*>/g, '');
+          priceDisplay = cleanPriceText.trim();
+
+          // カンマを除外したテキストから数値価格を抽出する
+          const cleanNumbersOnly = priceTextRaw.replace(/,/g, '');
+
+          // 全ての「数字＋円」をマッチさせ、最も最後（値下げ後）の数値を採用
+          const numbersExcludingTax = [];
+          const regexEx = /(\d+)円/g;
+          let matchEx;
+          while ((matchEx = regexEx.exec(cleanNumbersOnly)) !== null) {
+            numbersExcludingTax.push(parseInt(matchEx[1], 10));
           }
-          const incMatch = cleanPriceText.match(/税込(\d+)円?/);
-          if (incMatch) {
-            priceIncludingTax = parseInt(incMatch[1], 10);
+          if (numbersExcludingTax.length > 0) {
+            priceExcludingTax = numbersExcludingTax[numbersExcludingTax.length - 1];
+          }
+
+          // 「税込＋数字」をマッチさせ、最も最後（値下げ後）の数値を採用
+          const numbersIncludingTax = [];
+          const regexInc = /税込(\d+)円?/g;
+          let matchInc;
+          while ((matchInc = regexInc.exec(cleanNumbersOnly)) !== null) {
+            numbersIncludingTax.push(parseInt(matchInc[1], 10));
+          }
+          if (numbersIncludingTax.length > 0) {
+            priceIncludingTax = numbersIncludingTax[numbersIncludingTax.length - 1];
+          } else {
+            // (税込141,900円) のように「税込」ではなく括弧内の数字等のフォールバック
+            const regexInc2 = /\(税込(\d+)円?\)/g;
+            let matchInc2;
+            while ((matchInc2 = regexInc2.exec(cleanNumbersOnly)) !== null) {
+              numbersIncludingTax.push(parseInt(matchInc2[1], 10));
+            }
+            if (numbersIncludingTax.length > 0) {
+              priceIncludingTax = numbersIncludingTax[numbersIncludingTax.length - 1];
+            }
           }
         }
 
@@ -392,6 +422,7 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
           birth_place: origin || null,
           price_tax_excluded: priceExcludingTax,
           price_tax_included: priceIncludingTax,
+          price_text: priceDisplay,
           vaccines: vaccine || null,
           image_url: imageUrl || null,
           store_id: storeId,
