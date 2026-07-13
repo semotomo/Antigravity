@@ -31,6 +31,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, de
 // 店舗IDの判定ヘルパー関数
 const getStoreIdFromCategoryIds = (categoryIds: string[]): number | null => {
   const mapping: { [cmsCategoryId: string]: number } = {
+    // 犬 (blog_id=73) のカテゴリID
     '379': 7, // karatsu -> 本店
     '380': 2, // pets-max -> マックス (ペッツマックス唐津店)
     '381': 6, // pet-center ->わんわん (わんわんペットセンター)
@@ -38,6 +39,15 @@ const getStoreIdFromCategoryIds = (categoryIds: string[]): number | null => {
     '426': 3, // imari -> 伊万里
     '425': 1, // sasebo -> 佐世保
     '432': 4, // takeo -> 武雄
+
+    // 猫 (blog_id=82) のカテゴリID
+    '392': 7, // karatsu -> 本店
+    '393': 2, // pets-max -> マックス (ペッツマックス唐津店)
+    '394': 6, // pet-center ->わんわん (わんわんペットセンター)
+    '415': 5, // susenji -> 周船寺
+    '428': 3, // imari -> 伊万里
+    '427': 1, // sasebo -> 佐世保
+    '433': 4, // takeo -> 武雄
   };
   for (const id of categoryIds) {
     if (mapping[id]) return mapping[id];
