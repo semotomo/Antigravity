@@ -490,7 +490,7 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
         .from('cms_pets')
         .delete()
         .in('species', ['犬', '猫'])
-        .not('cms_entry_id', 'in', syncedEntryIds);
+        .not('cms_entry_id', 'in', `(${syncedEntryIds.join(',')})`);
       if (deleteErr) {
         console.error('Failed to batch delete old pets:', deleteErr);
       }
