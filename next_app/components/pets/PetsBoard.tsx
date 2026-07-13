@@ -138,6 +138,18 @@ export function PetsBoard() {
   }, []);
 
   const handleSync = async (mode: 'quick' | 'full') => {
+    if (mode === 'full') {
+      const confirmFull = window.confirm(
+        "【注意】フル同期の実行確認\n\n" +
+        "フル同期は全生体データを1件ずつ再スキャンするため、完了するまでに数分以上の時間がかかる場合があります。\n" +
+        "サーバーへの負荷も高まるため、通常は「最新情報を同期」をご利用ください。\n\n" +
+        "本当にフル同期を実行しますか？"
+      );
+      if (!confirmFull) {
+        return;
+      }
+    }
+
     setSyncing(true);
     const result = await syncPetsData(mode);
     if (result.success) {

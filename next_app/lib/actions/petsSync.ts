@@ -8,11 +8,46 @@ const CMS_URL = "https://www.pets-kennel.com/cgi-bin/tl_cms/tl.cgi";
 const USERNAME = process.env.CMS_USERNAME || "manager";
 const PASSWORD = process.env.CMS_PASSWORD || "Wn3fyuVTa9";
 
+// リトライ機能付き fetch ヘルパー関数
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, delayMs = 1500): Promise<Response> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      // 一時的な高負荷エラー (503 / 429) もリトライ対象にする
+      if (res.status === 503 || res.status === 429) {
+        throw new Error(`HTTP Status ${res.status}`);
+      }
+      return res;
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      console.warn(`Fetch failed (attempt ${i + 1}/${retries}), retrying in ${delayMs * (i + 1)}ms...`, e);
+      // バックオフディレイを挟んで再試行
+      await new Promise(resolve => setTimeout(resolve, delayMs * (i + 1)));
+    }
+  }
+  throw new Error('Fetch failed after retries');
+}
+
+// 店舗IDの判定ヘルパー関数
+const getStoreIdFromCategoryIds = (categoryIds: string[]): number | null => {
+  const mapping: { [cmsCategoryId: string]: number } = {
+    '379': 7, // karatsu -> 本店
+    '380': 2, // pets-max -> マックス (ペッツマックス唐津店)
+    '381': 6, // pet-center ->わんわん (わんわんペットセンター)
+    '414': 5, // susenji -> 周船寺
+    '426': 3, // imari -> 伊万里
+    '425': 1, // sasebo -> 佐世保
+    '432': 4, // takeo -> 武雄
+  };
+  for (const id of categoryIds) {
+    if (mapping[id]) return mapping[id];
+  }
+  return null;
+};
+
 export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
   const supabase = await createClient();
   const syncedEntryIds: number[] = [];
-  const allPetData: Database['public']['Tables']['cms_pets']['Insert'][] = [];
-  const nonPublicEntryIdsToDelete: number[] = [];
 
   // 動的フィルター用の日付範囲算出
   let fromDate = '';
@@ -56,27 +91,26 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
   }
 
   try {
-    const headers = new Headers();
-    headers.set('User-Agent', 'Mozilla/5.0');
-    // ベーシック認証ヘッダー
+    // 1. CMSログイン処理 (リトライ機能付き接続)
+  let loginHeaders = new Headers();
+  let cookie = '';
+  try {
+    loginHeaders.set('User-Agent', 'Mozilla/5.0');
     const authString = Buffer.from(`${USERNAME}:${PASSWORD}`).toString('base64');
-    headers.set('Authorization', `Basic ${authString}`);
+    loginHeaders.set('Authorization', `Basic ${authString}`);
 
-    // 1. ダッシュボードへアクセスしてクッキーとフォーム情報を取得
-    const dashRes = await fetch(`${CMS_URL}?__mode=dashboard`, { headers });
+    const dashRes = await fetchWithRetry(`${CMS_URL}?__mode=dashboard`, { headers: loginHeaders });
     if (!dashRes.ok) throw new Error(`Dashboard access failed: ${dashRes.status}`);
     
-    // getSetCookie() を使って安全にクッキーを取得（カンマ誤分割バグの回避）
     const dashSetCookies = dashRes.headers.getSetCookie();
-    let cookie = dashSetCookies.map(c => c.split(';')[0]).join('; ');
+    cookie = dashSetCookies.map(c => c.split(';')[0]).join('; ');
     if (cookie) {
-      headers.set('Cookie', cookie);
+      loginHeaders.set('Cookie', cookie);
     }
 
     let dashText = await dashRes.text();
     let $ = cheerio.load(dashText);
-    
-    // ログインフォームがある場合（または未ログイン状態の場合）
+
     const form = $('form').first();
     const action = form.attr('action') || '';
     if (action.includes('login') || dashText.includes('name="magic_token"') || !dashText.includes('サインアウト')) {
@@ -91,12 +125,12 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
           else formData.append(name, value);
         }
       });
-      
+
       const loginAction = action.startsWith('http') ? action : `https://www.pets-kennel.com${action}`;
-      const loginRes = await fetch(loginAction, {
+      const loginRes = await fetchWithRetry(loginAction, {
         method: 'POST',
         headers: {
-          ...Object.fromEntries(headers.entries()),
+          ...Object.fromEntries(loginHeaders.entries()),
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: formData.toString()
@@ -106,35 +140,52 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
       if (loginSetCookies.length > 0) {
         const newCookies = loginSetCookies.map(c => c.split(';')[0]).join('; ');
         cookie = cookie ? `${cookie}; ${newCookies}` : newCookies;
-        headers.set('Cookie', cookie);
+        loginHeaders.set('Cookie', cookie);
       }
 
-      // ログイン後のクッキーを反映してダッシュボードを再取得
-      const dashRes2 = await fetch(`${CMS_URL}?__mode=dashboard`, { headers });
+      const dashRes2 = await fetchWithRetry(`${CMS_URL}?__mode=dashboard`, { headers: loginHeaders });
       dashText = await dashRes2.text();
       $ = cheerio.load(dashText);
     }
 
-    // ログイン成否の厳密なチェック
     const isLoggedIn = dashText.includes('サインアウト') || dashText.includes('manager') || dashText.includes('からつケンネル');
     if (!isLoggedIn) {
       const title = $('title').text() || 'No Title';
       const bodyPreview = $('body').text().substring(0, 200).replace(/\s+/g, ' ');
-      throw new Error(`CMSログイン失敗 (サーバー制限の可能性あり) - Title: ${title}, Content: ${bodyPreview}`);
+      throw new Error(`CMSログイン失敗 - Title: ${title}, Content: ${bodyPreview}`);
     }
+  } catch (loginErr: any) {
+    console.error('CMS Login failed:', loginErr);
+    return { success: false, message: `CMSログイン失敗: ${loginErr.message}` };
+  }
 
-    // 2. 犬と猫のデータ取得 (blog_id=73, 82)
-    const blogs = [
-      { id: 73, type: '犬' },
-      { id: 82, type: '猫' }
-    ];
+  // 2. 犬と猫のデータ取得 (blog_id=73:犬, 82:猫) を独立処理
+  const blogs = [
+    { id: 73, type: '犬' },
+    { id: 82, type: '猫' }
+  ];
 
-    const limitVal = mode === 'quick' ? '50' : '500';
-    const loopLimit = mode === 'quick' ? 50 : 500;
+  const limitVal = mode === 'quick' ? '50' : '500';
+  const loopLimit = mode === 'quick' ? 50 : 500;
+  let processedCount = 0;
+  let blogIndex = 0;
 
-    for (const blog of blogs) {
+  for (const blog of blogs) {
+    // 2回目以降のブログ処理開始前に、安全のために1秒ウェイトを挟む
+    if (blogIndex > 0) {
+      console.log(`[接続制限回避] 1秒待機してからブログ ID ${blog.id} (${blog.type}) の処理を開始します...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    blogIndex++;
+
+    try {
+      const blogPetData: Database['public']['Tables']['cms_pets']['Insert'][] = [];
+      const blogNonPublicEntryIdsToDelete: number[] = [];
+
+      console.log(`[同期開始] ブログ ID: ${blog.id} (${blog.type})`);
+
       // 一覧HTMLからmagic_tokenを取得
-      const listRes = await fetch(`${CMS_URL}?__mode=list&_type=entry&blog_id=${blog.id}`, { headers });
+      const listRes = await fetchWithRetry(`${CMS_URL}?__mode=list&_type=entry&blog_id=${blog.id}`, { headers: loginHeaders });
       const listText = await listRes.text();
       const $list = cheerio.load(listText);
       const token = $list('input[name="magic_token"]').val() as string || '';
@@ -150,7 +201,6 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
       reqData.append('sort_order', 'descend');
       if (token) reqData.append('magic_token', token);
 
-      // クイック同期時の更新日フィルター適用
       if (mode === 'quick' && fromDate && toDate) {
         const filterItems = [
           {
@@ -165,10 +215,10 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
         reqData.append('items', JSON.stringify(filterItems));
       }
 
-      const apiRes = await fetch(CMS_URL, {
+      const apiRes = await fetchWithRetry(CMS_URL, {
         method: 'POST',
         headers: {
-          ...Object.fromEntries(headers.entries()),
+          ...Object.fromEntries(loginHeaders.entries()),
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: reqData.toString()
@@ -187,7 +237,7 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
             }
           }
         } catch (e) {
-          console.error('Failed to parse filtered_list json:', e);
+          console.error(`Failed to parse filtered_list json for ${blog.type}:`, e);
         }
       }
 
@@ -205,259 +255,237 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
         });
       }
 
+      console.log(`ブログ ${blog.type}: ${entryIds.length} 件のエントリを検出しました。同期を実行します。`);
+
       // 各エントリをパース
       for (const entryId of entryIds.slice(0, loopLimit)) {
-        const entryRes = await fetch(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers });
-        const entryText = await entryRes.text();
-        const $entry = cheerio.load(entryText);
+        try {
+          // 接続遮断制限を避けるために詳細リクエスト間に 150ms のウェイトを置く
+          await new Promise(resolve => setTimeout(resolve, 150));
 
-        const title = $entry('input[name="title"]').val() as string || '';
-        
-        // ステータス制限: '2'(公開) 以外のものは同期をスキップし、DBからも削除する
-        const statusVal = $entry('select[name="status"]').val() as string || '';
-        if (statusVal !== '2') {
-          nonPublicEntryIdsToDelete.push(entryId);
-          continue; // 公開中でないエントリは同期をスキップ
-        }
+          const entryRes = await fetchWithRetry(`${CMS_URL}?__mode=view&_type=entry&blog_id=${blog.id}&id=${entryId}`, { headers: loginHeaders });
+          const entryText = await entryRes.text();
+          const $entry = cheerio.load(entryText);
 
-        // 販売終了チェックボックス (checkboxoff01_acf)
-        const isSoldOut = $entry('input[name="checkboxoff01_acf"]').prop('checked') || 
-                          $entry('input[name="checkboxoff01_acf"]').attr('checked') !== undefined;
-        const status = isSoldOut ? '販売終了' : '公開';
-
-        // チェックされているカテゴリIDをチェックボックスから直接抽出
-        const checkedCats: string[] = [];
-        $entry('input[name^="add_category_id_"]').each((_, el) => {
-          if ($entry(el).attr('checked') !== undefined || $entry(el).prop('checked')) {
-            const name = $entry(el).attr('name') || '';
-            const match = name.match(/add_category_id_(\d+)/);
-            if (match) {
-              checkedCats.push(match[1]);
-            }
+          const title = $entry('input[name="title"]').val() as string || '';
+          
+          // ステータス制限: '2'(公開) 以外のものは同期をスキップし、DBからも削除する
+          const statusVal = $entry('select[name="status"]').val() as string || '';
+          if (statusVal !== '2') {
+            blogNonPublicEntryIdsToDelete.push(entryId);
+            continue;
           }
-        });
-        
-        // category_ids の input にも入っているかもしれないのでマージ
-        const cat_ids_val = $entry('input[name="category_ids"]').val() as string || '';
-        if (cat_ids_val) {
-          cat_ids_val.split(',').forEach(id => {
-            const tid = id.trim();
-            if (tid && !checkedCats.includes(tid)) checkedCats.push(tid);
-          });
-        }
 
-        // 詳細フィールドのパース
-        const petNumber = ($entry('input[name="text01"]').val() as string || $entry('input[name="text01"]').text() || '').trim();
-        const breed = ($entry('input[name="text07"]').val() as string || $entry('input[name="text07"]').text() || '').trim();
-        const color = ($entry('textarea[name="textarea04"]').val() as string || $entry('textarea[name="textarea04"]').text() || '').trim();
-        
-        // 公開・更新日時
-        const authoredOnDate = $entry('input[name="authored_on_date"]').val() as string || '';
-        const authoredOnTime = $entry('input[name="authored_on_time"]').val() as string || '';
+          // 販売終了チェックボックス (checkboxoff01_acf)
+          const isSoldOut = $entry('input[name="checkboxoff01_acf"]').prop('checked') || 
+                            $entry('input[name="checkboxoff01_acf"]').attr('checked') !== undefined;
+          const status = isSoldOut ? '販売終了' : '公開';
 
-        let gender = '';
-        const genderVal = $entry('input[name="genderselect"]:checked').val() as string || '';
-        if (genderVal) {
-          gender = genderVal;
-        } else {
-          $entry('input[name="genderselect"]').each((_, el) => {
-            if ($entry(el).attr('checked') !== undefined) {
-              gender = $entry(el).val() as string;
+          // カテゴリIDの抽出
+          const checkedCats: string[] = [];
+          $entry('input[name^="add_category_id_"]').each((_, el) => {
+            if ($entry(el).attr('checked') !== undefined || $entry(el).prop('checked')) {
+              const name = $entry(el).attr('name') || '';
+              const match = name.match(/add_category_id_(\d+)/);
+              if (match) {
+                checkedCats.push(match[1]);
+              }
             }
           });
-        }
-
-        const birthDateText = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
-        // 生年月日のパース
-        let formattedBirthDate = null;
-        if (birthDateText) {
-          const digits = birthDateText.match(/\d+/g);
-          if (digits && digits.length >= 3) {
-            const y = digits[0];
-            const m = digits[1].padStart(2, '0');
-            const d = digits[2].padStart(2, '0');
-            const year = parseInt(y, 10);
-            const month = parseInt(m, 10);
-            const day = parseInt(d, 10);
-            // 妥当な日付範囲の場合のみ適用
-            if (year > 2000 && year < 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-              formattedBirthDate = `${y}-${m}-${d}`;
-            }
-          }
-        }
-
-        const origin = ($entry('textarea[name="textarea02"]').val() as string || $entry('textarea[name="textarea02"]').text() || '').trim();
-
-        // 価格のパース (税込・税抜の抽出と、テキスト表現の取得)
-        const priceTextRaw = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
-        let priceExcludingTax = null;
-        let priceIncludingTax = null;
-        let priceDisplay = null;
-        
-        if (priceTextRaw) {
-          // HTMLタグ（スタイルなど）を取り除くが、改行は維持する
-          const cleanPriceText = priceTextRaw.replace(/<[^>]*>/g, '');
-          priceDisplay = cleanPriceText.trim();
-
-          // カンマを除外したテキストから数値価格を抽出する
-          const cleanNumbersOnly = priceTextRaw.replace(/,/g, '');
-
-          // 全ての「数字＋円」をマッチさせ、最も最後（値下げ後）の数値を採用
-          const numbersExcludingTax = [];
-          const regexEx = /(\d+)円/g;
-          let matchEx;
-          while ((matchEx = regexEx.exec(cleanNumbersOnly)) !== null) {
-            numbersExcludingTax.push(parseInt(matchEx[1], 10));
-          }
-          if (numbersExcludingTax.length > 0) {
-            priceExcludingTax = numbersExcludingTax[numbersExcludingTax.length - 1];
+          
+          const cat_ids_val = $entry('input[name="category_ids"]').val() as string || '';
+          if (cat_ids_val) {
+            cat_ids_val.split(',').forEach(id => {
+              const tid = id.trim();
+              if (tid && !checkedCats.includes(tid)) checkedCats.push(tid);
+            });
           }
 
-          // 「税込＋数字」をマッチさせ、最も最後（値下げ後）の数値を採用
-          const numbersIncludingTax = [];
-          const regexInc = /税込(\d+)円?/g;
-          let matchInc;
-          while ((matchInc = regexInc.exec(cleanNumbersOnly)) !== null) {
-            numbersIncludingTax.push(parseInt(matchInc[1], 10));
-          }
-          if (numbersIncludingTax.length > 0) {
-            priceIncludingTax = numbersIncludingTax[numbersIncludingTax.length - 1];
+          const petNumber = ($entry('input[name="text01"]').val() as string || $entry('input[name="text01"]').text() || '').trim();
+          const breed = ($entry('input[name="text07"]').val() as string || $entry('input[name="text07"]').text() || '').trim();
+          const color = ($entry('textarea[name="textarea04"]').val() as string || $entry('textarea[name="textarea04"]').text() || '').trim();
+          const authoredOnDate = $entry('input[name="authored_on_date"]').val() as string || '';
+          const authoredOnTime = $entry('input[name="authored_on_time"]').val() as string || '';
+
+          let gender = '';
+          const genderVal = $entry('input[name="genderselect"]:checked').val() as string || '';
+          if (genderVal) {
+            gender = genderVal;
           } else {
-            // (税込141,900円) のように「税込」ではなく括弧内の数字等のフォールバック
-            const regexInc2 = /\(税込(\d+)円?\)/g;
-            let matchInc2;
-            while ((matchInc2 = regexInc2.exec(cleanNumbersOnly)) !== null) {
-              numbersIncludingTax.push(parseInt(matchInc2[1], 10));
+            $entry('input[name="genderselect"]').each((_, el) => {
+              if ($entry(el).attr('checked') !== undefined) {
+                gender = $entry(el).val() as string;
+              }
+            });
+          }
+
+          const birthDateText = ($entry('textarea[name="textarea03"]').val() as string || $entry('textarea[name="textarea03"]').text() || '').trim();
+          let formattedBirthDate = null;
+          if (birthDateText) {
+            const digits = birthDateText.match(/\d+/g);
+            if (digits && digits.length >= 3) {
+              const y = digits[0];
+              const m = digits[1].padStart(2, '0');
+              const d = digits[2].padStart(2, '0');
+              const year = parseInt(y, 10);
+              const month = parseInt(m, 10);
+              const day = parseInt(d, 10);
+              if (year > 2000 && year < 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+                formattedBirthDate = `${y}-${m}-${d}`;
+              }
+            }
+          }
+
+          const origin = ($entry('textarea[name="textarea02"]').val() as string || $entry('textarea[name="textarea02"]').text() || '').trim();
+
+          const priceTextRaw = ($entry('textarea[name="textarea09"]').val() as string || $entry('textarea[name="textarea09"]').text() || '').trim();
+          let priceExcludingTax = null;
+          let priceIncludingTax = null;
+          let priceDisplay = null;
+          
+          if (priceTextRaw) {
+            const cleanPriceText = priceTextRaw.replace(/<[^>]*>/g, '');
+            priceDisplay = cleanPriceText.trim();
+
+            const cleanNumbersOnly = priceTextRaw.replace(/,/g, '');
+
+            const numbersExcludingTax = [];
+            const regexEx = /(\d+)円/g;
+            let matchEx;
+            while ((matchEx = regexEx.exec(cleanNumbersOnly)) !== null) {
+              numbersExcludingTax.push(parseInt(matchEx[1], 10));
+            }
+            if (numbersExcludingTax.length > 0) {
+              priceExcludingTax = numbersExcludingTax[numbersExcludingTax.length - 1];
+            }
+
+            const numbersIncludingTax = [];
+            const regexInc = /税込(\d+)円?/g;
+            let matchInc;
+            while ((matchInc = regexInc.exec(cleanNumbersOnly)) !== null) {
+              numbersIncludingTax.push(parseInt(matchInc[1], 10));
             }
             if (numbersIncludingTax.length > 0) {
               priceIncludingTax = numbersIncludingTax[numbersIncludingTax.length - 1];
-            }
-          }
-        }
-
-        const vaccine = ($entry('textarea[name="textarea05"]').val() as string || $entry('textarea[name="textarea05"]').text() || '').trim();
-        const packContent = ($entry('textarea[name="textarea06"]').val() as string || $entry('textarea[name="textarea06"]').text() || '').trim();
-
-        // 生体番号（お問合せ番号）の抽出 (6桁の数字を抽出)
-        let pet_number_clean = '';
-        const m_no = title.match(/\b(\d{6})\b/);
-        if (m_no) {
-          pet_number_clean = m_no[1];
-        } else {
-          const m_no2 = petNumber.match(/\b(\d{6})\b/);
-          if (m_no2) {
-            pet_number_clean = m_no2[1];
-          } else {
-            const numOnly = petNumber.replace(/\D/g, '');
-            if (numOnly.length >= 5 && numOnly.length <= 8) {
-              pet_number_clean = numOnly;
             } else {
-              pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
+              const regexInc2 = /\(税込(\d+)円?\)/g;
+              let matchInc2;
+              while ((matchInc2 = regexInc2.exec(cleanNumbersOnly)) !== null) {
+                numbersIncludingTax.push(parseInt(matchInc2[1], 10));
+              }
+              if (numbersIncludingTax.length > 0) {
+                priceIncludingTax = numbersIncludingTax[numbersIncludingTax.length - 1];
+              }
             }
           }
-        }
 
-        // ACF画像プレビューから優先的に画像URLを取得
-        let imageUrl: string | null = null;
-        for (let i = 1; i <= 30; i++) {
-          const numStr = String(i).padStart(2, '0');
-          const previewImg = $entry(`#acf_image${numStr}_preview img`);
-          if (previewImg.length > 0) {
-            imageUrl = previewImg.attr('src') || null;
-            if (imageUrl) break;
+          const vaccine = ($entry('textarea[name="textarea05"]').val() as string || $entry('textarea[name="textarea05"]').text() || '').trim();
+
+          let pet_number_clean = '';
+          const m_no = title.match(/\b(\d{6})\b/);
+          if (m_no) {
+            pet_number_clean = m_no[1];
+          } else {
+            const m_no2 = petNumber.match(/\b(\d{6})\b/);
+            if (m_no2) {
+              pet_number_clean = m_no2[1];
+            } else {
+              const numOnly = petNumber.replace(/\D/g, '');
+              if (numOnly.length >= 5 && numOnly.length <= 8) {
+                pet_number_clean = numOnly;
+              } else {
+                pet_number_clean = petNumber.replace('お問い合わせ番号', '').trim();
+              }
+            }
           }
-        }
 
-        // 見つからない場合は従来のメタタグ等から取得
-        if (!imageUrl) {
-          imageUrl = $entry('input[name="og_image_url"]').val() as string || null;
-        }
-        if (!imageUrl) {
-          imageUrl = $entry('#og_image_img').attr('src') || null;
-        }
+          let imageUrl: string | null = null;
+          for (let i = 1; i <= 30; i++) {
+            const numStr = String(i).padStart(2, '0');
+            const previewImg = $entry(`#acf_image${numStr}_preview img`);
+            if (previewImg.length > 0) {
+              imageUrl = previewImg.attr('src') || null;
+              if (imageUrl) break;
+            }
+          }
+          if (!imageUrl) imageUrl = $entry('input[name="og_image_url"]').val() as string || null;
+          if (!imageUrl) imageUrl = $entry('#og_image_img').attr('src') || null;
+          if (imageUrl && imageUrl.startsWith('/')) {
+            imageUrl = `https://www.pets-kennel.com${imageUrl}`;
+          }
 
-        // 相対パスの場合はドメインを付与して絶対URL化
-        if (imageUrl && imageUrl.startsWith('/')) {
-          imageUrl = `https://www.pets-kennel.com${imageUrl}`;
-        }
+          const storeId = getStoreIdFromCategoryIds(checkedCats);
 
-        // 店舗IDの判定ヘルパー関数
-        const getStoreIdFromCategoryIds = (categoryIds: string[]): number | null => {
-          const mapping: { [cmsCategoryId: string]: number } = {
-            '379': 7, // karatsu -> 本店
-            '380': 2, // pets-max -> マックス (ペッツマックス唐津店)
-            '381': 6, // pet-center ->わんわん (わんわんペットセンター)
-            '414': 5, // susenji -> 周船寺
-            '426': 3, // imari -> 伊万里
-            '425': 1, // sasebo -> 佐世保
-            '432': 4, // takeo -> 武雄
+          let cmsUpdatedAtIso = new Date().toISOString();
+          if (authoredOnDate && authoredOnTime) {
+            const jstStr = `${authoredOnDate}T${authoredOnTime}+09:00`;
+            const d = new Date(jstStr);
+            if (!isNaN(d.getTime())) {
+              cmsUpdatedAtIso = d.toISOString();
+            }
+          }
+
+          const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
+            cms_entry_id: entryId,
+            publish_status: status,
+            cms_category_ids: checkedCats.join(','),
+            management_no: pet_number_clean || `UNKNOWN-${entryId}`,
+            species: blog.type,
+            breed: breed || title.replace(/\b(\d{6})\b/g, '').replace('お問い合わせ番号', '').trim(),
+            coat_color: color || null,
+            gender: gender || null,
+            birth_date: formattedBirthDate,
+            birth_place: origin || null,
+            price_tax_excluded: priceExcludingTax,
+            price_tax_included: priceIncludingTax,
+            price_text: priceDisplay,
+            vaccines: vaccine || null,
+            image_url: imageUrl || null,
+            store_id: storeId,
+            cms_updated_at: cmsUpdatedAtIso,
+            updated_at: new Date().toISOString()
           };
-          for (const id of categoryIds) {
-            if (mapping[id]) return mapping[id];
-          }
-          return null;
-        };
 
-        const storeId = getStoreIdFromCategoryIds(checkedCats);
-
-        let cmsUpdatedAtIso = new Date().toISOString();
-        if (authoredOnDate && authoredOnTime) {
-          const jstStr = `${authoredOnDate}T${authoredOnTime}+09:00`;
-          const d = new Date(jstStr);
-          if (!isNaN(d.getTime())) {
-            cmsUpdatedAtIso = d.toISOString();
-          }
+          blogPetData.push(petData);
+          syncedEntryIds.push(entryId);
+        } catch (entryErr) {
+          console.error(`Failed to parse entry ID ${entryId} for ${blog.type}:`, entryErr);
         }
-
-        const petData: Database['public']['Tables']['cms_pets']['Insert'] = {
-          cms_entry_id: entryId,
-          publish_status: status,
-          cms_category_ids: checkedCats.join(','),
-          management_no: pet_number_clean || `UNKNOWN-${entryId}`,
-          species: blog.type,
-          breed: breed || title.replace(/\b(\d{6})\b/g, '').replace('お問い合わせ番号', '').trim(),
-          coat_color: color || null,
-          gender: gender || null,
-          birth_date: formattedBirthDate,
-          birth_place: origin || null,
-          price_tax_excluded: priceExcludingTax,
-          price_tax_included: priceIncludingTax,
-          price_text: priceDisplay,
-          vaccines: vaccine || null,
-          image_url: imageUrl || null,
-          store_id: storeId,
-          cms_updated_at: cmsUpdatedAtIso,
-          updated_at: new Date().toISOString()
-        };
-
-        allPetData.push(petData);
-        syncedEntryIds.push(entryId);
       }
-    }
 
-    // 3. 非公開・下書きステータスのペットを一括削除
-    if (nonPublicEntryIdsToDelete.length > 0) {
-      await supabase
-        .from('cms_pets')
-        .delete()
-        .in('cms_entry_id', nonPublicEntryIdsToDelete);
-    }
-
-    // 4. 新規・更新生体データの一括バルクUpsert
-    let processedCount = 0;
-    if (allPetData.length > 0) {
-      const { error: upsertErr } = await supabase
-        .from('cms_pets')
-        .upsert(allPetData as any, { onConflict: 'cms_entry_id' });
-      if (upsertErr) {
-        console.error('Failed to bulk upsert pets:', upsertErr);
-        throw new Error(`DBバルク書き込み失敗: ${upsertErr.message}`);
+      // ブログ（犬・猫）単位でのSupabaseへの独立した書き込み
+      if (blogNonPublicEntryIdsToDelete.length > 0) {
+        console.log(`Deleting ${blogNonPublicEntryIdsToDelete.length} non-public entries for ${blog.type}...`);
+        await supabase
+          .from('cms_pets')
+          .delete()
+          .in('cms_entry_id', blogNonPublicEntryIdsToDelete);
       }
-      processedCount = allPetData.length;
-    }
 
-    // 5. フル同期時の古いレコードの一括削除
-    if (mode === 'full' && syncedEntryIds.length > 0) {
+      if (blogPetData.length > 0) {
+        console.log(`Upserting ${blogPetData.length} records for ${blog.type} into DB...`);
+        const { error: upsertErr } = await supabase
+          .from('cms_pets')
+          .upsert(blogPetData as any, { onConflict: 'cms_entry_id' });
+        
+        if (upsertErr) {
+          console.error(`Failed to upsert data for ${blog.type}:`, upsertErr);
+          throw new Error(`DB書き込み失敗 (${blog.type}): ${upsertErr.message}`);
+        }
+        processedCount += blogPetData.length;
+      }
+
+      console.log(`[同期成功] ブログ ID: ${blog.id} (${blog.type}) - ${blogPetData.length}件保存完了`);
+    } catch (blogErr: any) {
+      console.error(`Blog sync failed for ${blog.type}:`, blogErr);
+      // 片方のブログでエラーが発生しても処理を継続させる
+    }
+  }
+
+  // 3. フル同期時の古いレコードの一括クリーンアップ削除 (全ブログ処理の完了後に安全に実行)
+  if (mode === 'full' && syncedEntryIds.length > 0) {
+    try {
+      console.log(`[クリーンアップ] フル同期用の古いレコードの一括削除を実行します...`);
       const { error: deleteErr } = await supabase
         .from('cms_pets')
         .delete()
@@ -466,15 +494,18 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
       if (deleteErr) {
         console.error('Failed to batch delete old pets:', deleteErr);
       }
+    } catch (cleanErr) {
+      console.error('Clean up failed:', cleanErr);
     }
-
-    return { 
-      success: true, 
-      count: processedCount, 
-      message: `${processedCount} 件の生体データを同期しました` + (mode === 'full' ? '（古いデータの削除完了）' : '') 
-    };
-  } catch (error: any) {
-    console.error('Sync Error:', error);
-    return { success: false, message: error.message };
   }
+
+  return { 
+    success: true, 
+    count: processedCount, 
+    message: `${processedCount} 件の生体データを同期しました` + (mode === 'full' ? '（古いデータの削除完了）' : '') 
+  };
+} catch (error: any) {
+  console.error('Sync Error:', error);
+  return { success: false, message: error.message };
+}
 }
