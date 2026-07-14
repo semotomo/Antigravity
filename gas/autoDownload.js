@@ -728,15 +728,7 @@ function extractAllFormFields_(html, formIdPrefix) {
                      tag.match(/value\s*=\s*([^\s>]+)/i);
     var value = valueMatch ? valueMatch[1] : '';
 
-    // 同名のフィールド（チェックボックス等）は配列にする
-    if (fields[name] !== undefined) {
-      if (!Array.isArray(fields[name])) {
-        fields[name] = [fields[name]];
-      }
-      fields[name].push(value);
-    } else {
-      fields[name] = value;
-    }
+    fields[name] = value;
   }
 
   Logger.log('extractAllFormFields_: 全input数=' + totalInputs + ', "' + formIdPrefix + '"マッチ=' + Object.keys(fields).length);
@@ -1076,7 +1068,7 @@ function downloadProductSalesMenu() {
 function downloadProductSalesFromPOS_(posConfig, year, month) {
   Logger.log('商品別売上のダウンロードを開始します...');
 
-  // 指定された年月の1日を基準日として設定（POSのカレンダー切替に必要）
+// 指定された年月の1日を基準日として設定（POSのカレンダー切替に必要）
   var kijyunDate = year + '/' + (month < 10 ? '0' : '') + month + '/01';
 
   // STEP 1: ログイン（完全版を使用）
