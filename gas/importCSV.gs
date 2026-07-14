@@ -1174,8 +1174,12 @@ function processProductMasterCSV_(csvBlob) {
       continue;
     }
 
-    // JANコードを文字列として取得（先頭ゼロを保持するためtrim()のみ）
-    var janCode = (row[COL.JAN_CODE] || '').trim();
+    // JANコードを文字列として取得
+    var janCode = (row[COL.JAN_CODE] || '').toString().trim();
+    // 浮動小数の末尾「.0」を削除（例: 490123456789.0 -> 490123456789）
+    if (janCode.indexOf('.0') !== -1) {
+      janCode = janCode.replace(/\.0$/, '');
+    }
     var productName = (row[COL.PRODUCT_NAME] || '').trim();
 
     // JANコードまたは商品名が空の行はスキップ
