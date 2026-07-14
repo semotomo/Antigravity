@@ -112,7 +112,7 @@ export default async function SalesPage({
 
   const supabase = await createClient()
 
-  const [salesData, { stores, categories }, latestProductData, latestSalesData] = await Promise.all([
+  const [salesData, { stores, categories }, syncHistoryData] = await Promise.all([
     fetchSales({
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
@@ -123,32 +123,36 @@ export default async function SalesPage({
       sortOrder,
     }),
     fetchSalesFilterOptions(),
-    supabase.from('products').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle() as any,
-    supabase.from('sales_enriched_v').select('created_at').order('created_at', { ascending: false }).limit(1).maybeSingle() as any,
+    supabase.from('sync_history').select('*') as any,
   ])
 
   let productSyncTime = ''
-  if (latestProductData?.data?.updated_at) {
-    productSyncTime = new Date(latestProductData.data.updated_at).toLocaleString('ja-JP', {
-      timeZone: 'Asia/Tokyo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
-
   let salesImportTime = ''
-  if (latestSalesData?.data?.created_at) {
-    salesImportTime = new Date(latestSalesData.data.created_at).toLocaleString('ja-JP', {
-      timeZone: 'Asia/Tokyo',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+
+  if (Array.isArray(syncHistoryData?.data)) {
+    const pHistory = syncHistoryData.data.find((h: any) => h.sync_type === 'products_sync')
+    if (pHistory?.last_synced_at) {
+      productSyncTime = new Date(pHistory.last_synced_at).toLocaleString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    }
+
+    const sHistory = syncHistoryData.data.find((h: any) => h.sync_type === 'sales_import')
+    if (sHistory?.last_synced_at) {
+      salesImportTime = new Date(sHistory.last_synced_at).toLocaleString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    }
   }
 
   const columns: DataTableColumn<SaleRow>[] = [

@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient() as any
     const {
       data: { user },
       error,
@@ -82,6 +82,12 @@ export async function POST(request: Request) {
     revalidatePath('/sales/daily')
     revalidatePath('/sales/products')
     revalidatePath('/sales/abc')
+
+    // 同期履歴の更新
+    await supabase.from('sync_history').upsert({
+      sync_type: 'sales_import',
+      last_synced_at: new Date().toISOString(),
+    })
 
     return NextResponse.json({
       message: '売上データの取込を実行しました。最新結果へ更新します。',

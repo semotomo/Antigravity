@@ -1,5 +1,6 @@
 import { revalidatePath } from 'next/cache';
 import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +73,13 @@ export async function GET(request: Request) {
     revalidatePath('/sales/daily');
     revalidatePath('/sales/products');
     revalidatePath('/sales/abc');
+
+    // 同期履歴の更新
+    const supabase = await createClient() as any;
+    await supabase.from('sync_history').upsert({
+      sync_type: 'sales_import',
+      last_synced_at: new Date().toISOString(),
+    });
 
     console.log('[Cron Sales Import] 売上データの自動取込が正常終了しました:', gasResult);
     return NextResponse.json({

@@ -1,5 +1,6 @@
 import { revalidatePath } from 'next/cache';
 import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,13 @@ export async function GET(request: Request) {
     revalidatePath('/sales/products');
     revalidatePath('/sales/abc');
     revalidatePath('/products');
+
+    // 同期履歴の更新
+    const supabase = await createClient() as any;
+    await supabase.from('sync_history').upsert({
+      sync_type: 'products_sync',
+      last_synced_at: new Date().toISOString(),
+    });
 
     const syncCount = masterResult?.syncResult?.count ?? 0;
     const csvCount = masterResult?.csvRowCount ?? 0;

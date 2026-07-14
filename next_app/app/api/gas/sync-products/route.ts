@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 // GAS Web App を mode=master で呼び出す
 export async function POST() {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient() as any
     const {
       data: { user },
       error,
@@ -78,12 +78,17 @@ export async function POST() {
       )
     }
 
-    // 売上関連ページのキャッシュを再検証（商品マスタ更新で紐付けが変わる可能性）
     revalidatePath('/sales')
     revalidatePath('/sales/daily')
     revalidatePath('/sales/products')
     revalidatePath('/sales/abc')
     revalidatePath('/products')
+
+    // 同期履歴の更新
+    await supabase.from('sync_history').upsert({
+      sync_type: 'products_sync',
+      last_synced_at: new Date().toISOString(),
+    })
 
     // 詳細情報を含むレスポンス
     const syncCount = masterResult?.syncResult?.count ?? 0
