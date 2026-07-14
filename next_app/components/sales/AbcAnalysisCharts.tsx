@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import {
   ResponsiveContainer,
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -104,7 +105,7 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
     })
   }
 
-  // カスタムツールチップ (BarChart用)
+  // カスタムツールチップ (ComposedChart/Pareto用)
   const CustomBarTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const item = payload[0].payload as AbcAnalysisRow
@@ -124,6 +125,10 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
             <div className="flex justify-between gap-4">
               <span className="text-gray-500">売上金額:</span>
               <span className="font-semibold text-gray-900">{formatYen(item.total_sales_amount)}</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-gray-500">累積売上構成比:</span>
+              <span className="font-semibold text-indigo-600">{(item.cumulativeSalesShare * 100).toFixed(1)}%</span>
             </div>
             <div className="flex justify-between gap-4">
               <span className="text-gray-500">販売数量:</span>
@@ -166,12 +171,12 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.3fr,0.7fr]">
-      {/* 1. 売上貢献度 TOP15 横棒グラフ */}
+      {/* 1. 売上貢献度 TOP15 パレート図 */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col">
         <div className="mb-4">
-          <h3 className="text-base font-bold text-gray-900">売上高 TOP 15 商品</h3>
+          <h3 className="text-base font-bold text-gray-900">売上高パレート図 (TOP 15 商品)</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            選択した期間・店舗において売上が最も高かった上位15商品の売上規模とランク別分布です。
+            各商品の売上高（棒グラフ：左軸）と売上累積構成比（折れ線グラフ：右軸）を重ね合わせた図です。上位で全体の売上の大部分が決定されている様子が把握できます。
           </p>
         </div>
         <div className="relative w-full h-[400px]">
@@ -181,34 +186,59 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
+              <ComposedChart
                 data={top15}
-                layout="vertical"
-                margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                margin={{ top: 15, right: 10, left: 10, bottom: 20 }}
               >
-                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#E5E7EB" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                 <XAxis
+                  dataKey="label"
+                  tickFormatter={(val) => (val.length > 10 ? `${val.slice(0, 9)}...` : val)}
+                  tick={{ fill: '#374151', fontSize: 9, fontWeight: 500 }}
+                  axisLine={{ stroke: '#E5E7EB' }}
+                  angle={-30}
+                  textAnchor="end"
+                  height={60}
+                />
+                {/* 左軸：売上金額 */}
+                <YAxis
+                  yAxisId="left"
                   type="number"
                   tickFormatter={(val) => `¥${(val / 1000).toLocaleString('ja-JP')}k`}
-                  tick={{ fill: '#6B7280', fontSize: 10 }}
+                  tick={{ fill: '#6B7280', fontSize: 9 }}
                   axisLine={{ stroke: '#E5E7EB' }}
                 />
+                {/* 右軸：累積構成比 */}
                 <YAxis
-                  dataKey="label"
-                  type="category"
-                  width={140}
-                  tickFormatter={(val) => (val.length > 16 ? `${val.slice(0, 15)}...` : val)}
-                  tick={{ fill: '#374151', fontSize: 10, fontWeight: 500 }}
+                  yAxisId="right"
+                  orientation="right"
+                  type="number"
+                  domain={[0, 1]}
+                  tickFormatter={(val) => `${(val * 100).toFixed(0)}%`}
+                  tick={{ fill: '#8B5CF6', fontSize: 9 }}
                   axisLine={{ stroke: '#E5E7EB' }}
                 />
                 <Tooltip content={<CustomBarTooltip />} cursor={{ fill: '#F3F4F6', opacity: 0.6 }} />
-                <Bar dataKey="total_sales_amount" radius={[0, 8, 8, 0]} barSize={16}>
+                
+                {/* 売上高の棒グラフ */}
+                <Bar yAxisId="left" dataKey="total_sales_amount" radius={[6, 6, 0, 0]} barSize={24}>
                   {top15.map((entry, index) => {
                     const color = COLORS[entry.rank as keyof typeof COLORS] || COLORS.C
                     return <Cell key={`cell-${index}`} fill={color} />
                   })}
                 </Bar>
-              </BarChart>
+
+                {/* 累積構成比の折れ線グラフ */}
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="cumulativeSalesShare"
+                  stroke="#8B5CF6"
+                  strokeWidth={3}
+                  dot={{ r: 3, fill: '#8B5CF6', strokeWidth: 1 }}
+                  activeDot={{ r: 5 }}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </div>

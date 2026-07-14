@@ -3,9 +3,8 @@ import { ArrowUpDown } from 'lucide-react'
 import { SalesImportButton } from '@/components/sales/SalesImportButton'
 import { ProductMasterSyncButton } from '@/components/sales/ProductMasterSyncButton'
 import { SalesHistoryModal } from '@/components/sales/SalesHistoryModal'
-import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
-import { StatusBadge } from '@/components/ui/StatusBadge'
-import { fetchSales, fetchSalesFilterOptions, type SaleRow } from '@/lib/queries/sales'
+import { SalesListView } from '@/components/sales/SalesListView'
+import { fetchSales, fetchSalesFilterOptions } from '@/lib/queries/sales'
 import { createClient } from '@/lib/supabase/server'
 
 type SalesSearchParams = { [key: string]: string | string[] | undefined }
@@ -155,50 +154,6 @@ export default async function SalesPage({
     }
   }
 
-  const columns: DataTableColumn<SaleRow>[] = [
-    { key: 'sale_date', header: '日付' },
-    { key: 'store_name', header: '店舗名' },
-    { key: 'category', header: 'カテゴリ' },
-    {
-      key: 'product_name',
-      header: '商品名',
-      render: (item) => (
-        <div className="flex flex-col">
-          <span className="font-medium text-gray-900">{item.product_name}</span>
-          <span className="text-xs text-gray-500">JAN: {item.jan_code || '-'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'quantity',
-      header: '数量',
-      align: 'right',
-      render: (item) => item.quantity.toLocaleString(),
-    },
-    {
-      key: 'sales_amount',
-      header: '売上金額',
-      align: 'right',
-      render: (item) => `¥${item.sales_amount.toLocaleString()}`,
-    },
-    {
-      key: 'status',
-      header: '紐付け状態',
-      align: 'center',
-      render: (item) => {
-        if (item.unmatched_master) {
-          return <StatusBadge variant="danger">未紐付け</StatusBadge>
-        }
-
-        if (item.match_source === 'alias') {
-          return <StatusBadge variant="info">エイリアス</StatusBadge>
-        }
-
-        return <StatusBadge variant="success">直接一致</StatusBadge>
-      },
-    },
-  ]
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -260,38 +215,44 @@ export default async function SalesPage({
 
           <button
             type="submit"
-            className="rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 transition-colors hover:bg-indigo-100"
+            className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800"
           >
-            適用
+            検索
           </button>
         </form>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={`/sales?${buildSearchParams(currentSearchParams, {
-              unmatched: unmatchedOnly ? undefined : 'true',
-            })}`}
-            className={`rounded-full border px-4 py-2 text-sm font-medium ${
-              unmatchedOnly
-                ? 'border-gray-900 bg-gray-900 text-white'
-                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            要対応（未紐付け）のみ表示
-          </Link>
-          <Link
-            href={`/sales?${buildSearchParams(currentSearchParams, {
-              sort: sortOrder === 'desc' ? 'asc' : undefined,
-            })}`}
-            className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-          >
-            <ArrowUpDown className="h-4 w-4" />
-            {sortOrder === 'desc' ? '日付: 新しい順' : '日付: 古い順'}
-          </Link>
+        <div className="flex flex-wrap gap-4 py-2 lg:py-0">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              defaultChecked={unmatchedOnly}
+              onChange={(e) => {
+                const nextParams = buildSearchParams(currentSearchParams, {
+                  unmatched: e.target.checked ? 'true' : undefined,
+                })
+                window.location.href = `/sales?${nextParams}`
+              }}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            未紐付けのみ表示
+          </label>
         </div>
 
-        <div className="text-sm text-gray-500 lg:text-right">
-          サービス除外や未紐付け確認、日付並び替えをここから切り替えられます。
+        <div className="flex items-center gap-2 self-start lg:self-end">
+          <span className="text-xs font-medium text-gray-500">並び順</span>
+          <select
+            defaultValue={sortOrder}
+            onChange={(e) => {
+              const nextParams = buildSearchParams(currentSearchParams, {
+                sort: e.target.value || undefined,
+              })
+              window.location.href = `/sales?${nextParams}`
+            }}
+            className="rounded border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700"
+          >
+            <option value="desc">日付の新しい順</option>
+            <option value="asc">日付の古い順</option>
+          </select>
         </div>
       </div>
 
@@ -374,13 +335,7 @@ export default async function SalesPage({
         </div>
       </div>
 
-      <DataTable
-        data={salesData}
-        columns={columns}
-        keyExtractor={(item) => String(item.sales_row_id)}
-        emptyMessage="条件に一致する売上が見つかりませんでした。"
-        rowClassName={(item) => (item.unmatched_master ? 'bg-red-50 hover:bg-red-100' : '')}
-      />
+      <SalesListView salesData={salesData} />
     </div>
   )
 }

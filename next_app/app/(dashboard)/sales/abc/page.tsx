@@ -1,8 +1,7 @@
 import Link from 'next/link'
-import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
-import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AbcAnalysisCharts } from '@/components/sales/AbcAnalysisCharts'
-import { fetchAbcAnalysis, type AbcAnalysisRow } from '@/lib/queries/abc'
+import { AbcAnalysisView } from '@/components/sales/AbcAnalysisView'
+import { fetchAbcAnalysis } from '@/lib/queries/abc'
 import { fetchSalesFilterOptions } from '@/lib/queries/sales'
 
 type AbcSearchParams = { [key: string]: string | string[] | undefined }
@@ -81,7 +80,12 @@ export default async function SalesAbcPage({
 
   const storeName = getStringParam(resolvedParams.store)
   const category = getStringParam(resolvedParams.category)
-  const excludeCategory = getStringParam(resolvedParams.excludeCategory)
+  
+  // 初回アクセス時（パラメータがない場合）はデフォルトで「サービス」を除外する
+  const hasExcludeCategory = Object.prototype.hasOwnProperty.call(resolvedParams, 'excludeCategory')
+  const excludeCategory = hasExcludeCategory 
+    ? getStringParam(resolvedParams.excludeCategory) 
+    : 'サービス'
 
   const currentSearchParams: AbcSearchParams = {
     ...(dateFrom ? { dateFrom } : {}),
@@ -101,63 +105,6 @@ export default async function SalesAbcPage({
     ),
     fetchSalesFilterOptions(),
   ])
-
-  const columns: DataTableColumn<AbcAnalysisRow>[] = [
-    {
-      key: 'rank',
-      header: 'ランク',
-      align: 'center',
-      render: (item) => (
-        <StatusBadge
-          variant={item.rank === 'A' ? 'success' : item.rank === 'B' ? 'info' : 'warning'}
-        >
-          {item.rank}
-        </StatusBadge>
-      ),
-    },
-    {
-      key: 'label',
-      header: '商品',
-      render: (item) => (
-        <div className="min-w-[240px]">
-          <p className="font-semibold text-gray-900">{item.label}</p>
-          <p className="mt-1 text-xs text-gray-500">
-            JAN: {item.jan_code || '-'} / カテゴリ: {item.category || '-'}
-          </p>
-        </div>
-      ),
-    },
-    {
-      key: 'total_quantity',
-      header: '販売数',
-      align: 'right',
-      render: (item) => item.total_quantity.toLocaleString('ja-JP'),
-    },
-    {
-      key: 'total_sales_amount',
-      header: '売上金額',
-      align: 'right',
-      render: (item) => `¥${item.total_sales_amount.toLocaleString('ja-JP')}`,
-    },
-    {
-      key: 'estimated_profit',
-      header: '粗利見込',
-      align: 'right',
-      render: (item) => `¥${item.estimated_profit.toLocaleString('ja-JP')}`,
-    },
-    {
-      key: 'salesShare',
-      header: '売上構成比',
-      align: 'right',
-      render: (item) => `${(item.salesShare * 100).toFixed(1)}%`,
-    },
-    {
-      key: 'cumulativeSalesShare',
-      header: '累積構成比',
-      align: 'right',
-      render: (item) => `${(item.cumulativeSalesShare * 100).toFixed(1)}%`,
-    },
-  ]
 
   return (
     <div className="space-y-6">
@@ -326,12 +273,7 @@ export default async function SalesAbcPage({
 
       <AbcAnalysisCharts data={rows} />
 
-      <DataTable
-        data={rows}
-        columns={columns}
-        keyExtractor={(item) => item.key}
-        emptyMessage="指定期間に集計できる商品データが見つかりませんでした。"
-      />
+      <AbcAnalysisView rows={rows} />
     </div>
   )
 }
