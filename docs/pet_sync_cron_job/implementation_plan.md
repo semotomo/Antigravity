@@ -25,12 +25,19 @@
 #### [NEW] [gas_trigger_sample.js](file:///C:/Users/kirik/Desktop/Antigravity/docs/pet_sync_cron_job/gas_trigger_sample.js)
 - Vercel環境以外でホストしている場合に備え、Google Apps Script (GAS) の時間主導型トリガーから API をセキュアに叩くためのスクリプトサンプルをドキュメントとして作成します。
 
+### 3. 認証ミドルウェアの定期実行API除外設定
+#### [MODIFY] [proxy.ts](file:///C:/Users/kirik/Desktop/Antigravity/next_app/proxy.ts)
+- `matcher` に `api/cron` を追加し、自動同期APIを呼び出した際にミドルウェア処理が起動しないように除外します。
+
+#### [MODIFY] [middleware.ts](file:///C:/Users/kirik/Desktop/Antigravity/next_app/lib/supabase/middleware.ts)
+- `updateSession` 内でリクエストパスが `/api/cron` から始まる場合は、認証判定（ログインチェック）をスルーして直接処理を通す安全ロジックを追加します。
+
 ---
 
 ## Verification Plan (検証計画)
 
 ### 1. 型チェック
-- `npx tsc --noEmit` を実行し、新規追加した API エンドポイントに TypeScript のビルドエラーがないことを確認します。
+- `npx tsc --noEmit` を実行し、ミドルウェアや新規APIに TypeScript のビルド型エラーがないことを確認します。
 
 ### 2. ローカル動作検証
-- 開発サーバーを起動し、Postman や curl 等を用いて正しい Bearer トークンを送った際に同期が正常に走り、不正なトークンやトークン無しの場合に `401 Unauthorized` が返ることを検証します。
+- APIに正しい Bearer トークンを送った際に同期が正常に走り、不正なトークンやトークン無しの場合に `401 Unauthorized` が返り、ログイン画面への `307` リダイレクトが発生しないことを検証します。
