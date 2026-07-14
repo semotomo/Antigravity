@@ -6,6 +6,7 @@ import { SalesHistoryModal } from '@/components/sales/SalesHistoryModal'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { fetchSales, fetchSalesFilterOptions, type SaleRow } from '@/lib/queries/sales'
+import { createClient } from '@/lib/supabase/server'
 
 type SalesSearchParams = { [key: string]: string | string[] | undefined }
 
@@ -109,7 +110,9 @@ export default async function SalesPage({
     ...(sortOrder !== 'desc' ? { sort: sortOrder } : {}),
   }
 
-  const [salesData, { stores, categories }] = await Promise.all([
+  const supabase = await createClient()
+
+  const [salesData, { stores, categories }, latestProductData, latestSalesData] = await Promise.all([
     fetchSales({
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
@@ -120,7 +123,31 @@ export default async function SalesPage({
       sortOrder,
     }),
     fetchSalesFilterOptions(),
+    supabase.from('products').select('updated_at').order('updated_at', { ascending: false }).limit(1).maybeSingle() as any,
+    supabase.from('sales_enriched_v').select('created_at').order('created_at', { ascending: false }).limit(1).maybeSingle() as any,
   ])
+
+  let productSyncTime = ''
+  if (latestProductData?.data?.updated_at) {
+    productSyncTime = new Date(latestProductData.data.updated_at).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  let salesImportTime = ''
+  if (latestSalesData?.data?.created_at) {
+    salesImportTime = new Date(latestSalesData.data.created_at).toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
 
   const columns: DataTableColumn<SaleRow>[] = [
     { key: 'sale_date', header: '日付' },
@@ -175,10 +202,24 @@ export default async function SalesPage({
         </div>
         <div className="flex flex-col items-start gap-3 lg:items-end">
           <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <SalesHistoryModal />
-            <ProductMasterSyncButton />
-            <SalesImportButton />
+            <div className="flex flex-col items-center gap-1">
+              <ProductMasterSyncButton />
+              {productSyncTime && (
+                <span className="text-[10px] text-gray-400 font-medium select-none">
+                  最終同期: {productSyncTime}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <SalesImportButton />
+              {salesImportTime && (
+                <span className="text-[10px] text-gray-400 font-medium select-none">
+                  最終取込: {salesImportTime}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
