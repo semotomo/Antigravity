@@ -4,6 +4,7 @@ import { SalesImportButton } from '@/components/sales/SalesImportButton'
 import { ProductMasterSyncButton } from '@/components/sales/ProductMasterSyncButton'
 import { SalesHistoryModal } from '@/components/sales/SalesHistoryModal'
 import { SalesListView } from '@/components/sales/SalesListView'
+import { SalesFilterControls } from '@/components/sales/SalesFilterControls'
 import { fetchSales, fetchSalesFilterOptions } from '@/lib/queries/sales'
 import { createClient } from '@/lib/supabase/server'
 
@@ -221,39 +222,11 @@ export default async function SalesPage({
           </button>
         </form>
 
-        <div className="flex flex-wrap gap-4 py-2 lg:py-0">
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              defaultChecked={unmatchedOnly}
-              onChange={(e) => {
-                const nextParams = buildSearchParams(currentSearchParams, {
-                  unmatched: e.target.checked ? 'true' : undefined,
-                })
-                window.location.href = `/sales?${nextParams}`
-              }}
-              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            未紐付けのみ表示
-          </label>
-        </div>
-
-        <div className="flex items-center gap-2 self-start lg:self-end">
-          <span className="text-xs font-medium text-gray-500">並び順</span>
-          <select
-            defaultValue={sortOrder}
-            onChange={(e) => {
-              const nextParams = buildSearchParams(currentSearchParams, {
-                sort: e.target.value || undefined,
-              })
-              window.location.href = `/sales?${nextParams}`
-            }}
-            className="rounded border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700"
-          >
-            <option value="desc">日付の新しい順</option>
-            <option value="asc">日付の古い順</option>
-          </select>
-        </div>
+        <SalesFilterControls
+          currentSearchParams={currentSearchParams}
+          unmatchedOnly={unmatchedOnly}
+          sortOrder={sortOrder}
+        />
       </div>
 
       <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,minmax(0,1fr)] lg:items-start">
