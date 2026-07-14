@@ -34,10 +34,15 @@
 - サイドバーメニュー（[SideNav.tsx](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/layout/SideNav.tsx)）および下部メニュー（[SalesMoreMenu.tsx](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/layout/SalesMoreMenu.tsx)）から不要になったリンク定義を削除しました。
 - 各種同期・インポートアクション等（`actions/products.ts` や各同期API）で実行されていた `/sales/products` パスへのキャッシュ再検証処理を、主力となった `/sales/abc` への再検証に移行・クリーンアップしました。
 
+### 6. 【バグ修正】サーバーコンポーネント内クライアントイベントの分離
+- [SalesFilterControls.tsx [NEW]](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/sales/SalesFilterControls.tsx) / [page.tsx (売上一覧)](file:///C:/Users/kirik/Desktop/Antigravity/next_app/app/(dashboard)/sales/page.tsx)
+  - サーバーコンポーネントである売上一覧ページ内に直接記述されていた「未紐付けチェックボックス」および「並び順セレクトボックス」の `onChange` イベントハンドラが、サーバーサイドレンダリング（RSC）時にシリアライズできず Vercel サーバー上で例外エラー（`ERROR 4262037434`）を引き起こしていた問題を解決しました。
+  - これらの操作UIとURL書き換え処理（`router.push`）を新設したクライアントコンポーネント `SalesFilterControls` に切り離し、ページコンポーネントからはクリーンに呼び出すように修正することで、本番サーバーでの動作不具合を完全に解消しました。
+
 ---
 
 ## 検証結果
 
 - **ビルド＆型チェック**:
-  - `npx tsc --noEmit` を実行し、全コードで構文エラーおよび型定義エラーが無いこと（Exit Code 0）を確認しました。
+  - `npx tsc --noEmit` および `npm run build` を実行し、全コードで構文エラー・型定義エラー・ビルド時静的生成エラーが無いこと（Exit Code 0）を確認しました。
 
