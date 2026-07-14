@@ -130,6 +130,7 @@ export default async function SalesPage({
   let productSyncTime = ''
   if (latestProductData?.data?.updated_at) {
     productSyncTime = new Date(latestProductData.data.updated_at).toLocaleString('ja-JP', {
+      timeZone: 'Asia/Tokyo',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -141,6 +142,7 @@ export default async function SalesPage({
   let salesImportTime = ''
   if (latestSalesData?.data?.created_at) {
     salesImportTime = new Date(latestSalesData.data.created_at).toLocaleString('ja-JP', {
+      timeZone: 'Asia/Tokyo',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

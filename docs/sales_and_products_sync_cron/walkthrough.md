@@ -21,9 +21,13 @@
 - 売上ダッシュボード (`SalesPage`) にて、商品マスタテーブル (`products`) の最新 `updated_at` と、売上データビュー (`sales_enriched_v`) の最新 `created_at` を取得する処理を追加しました。
 - 「商品マスタ同期」ボタンおよび「売上データ取込」ボタンの直下に、小さく「最終同期: YYYY/MM/DD HH:MM」および「最終取込: YYYY/MM/DD HH:MM」と表示するUIを追加しました。
 
+### 5. 最終同期時間のタイムゾーン表示修正 (`next_app/app/(dashboard)/sales/page.tsx`)
+- サーバーサイドの実行環境に関わらず常に日本標準時 (JST) で日時が表示されるよう、日時のフォーマット処理 (`toLocaleString`) において `timeZone: 'Asia/Tokyo'` オプションを明示的に指定するように修正しました。
+
 ---
 
 ## 検証結果
 
 ### 1. ビルド・型チェック
 - `npx tsc --noEmit` を実行し、すべての新規ファイルおよび修正箇所に TypeScript のビルドエラーが無いことを確認しました。
+
