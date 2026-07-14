@@ -71,7 +71,6 @@ export async function GET(request: Request) {
     // キャッシュ再検証
     revalidatePath('/sales');
     revalidatePath('/sales/daily');
-    revalidatePath('/sales/products');
     revalidatePath('/sales/abc');
 
     // 同期履歴の更新

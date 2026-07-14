@@ -9,7 +9,7 @@ type AbcSearchParams = { [key: string]: string | string[] | undefined }
 function buildSearchParams(
   params: AbcSearchParams,
   updates: Partial<
-    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'excludeCategory', string | undefined>
+    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'excludeCategory' | 'q', string | undefined>
   >
 ) {
   const nextParams = new URLSearchParams()
@@ -87,12 +87,15 @@ export default async function SalesAbcPage({
     ? getStringParam(resolvedParams.excludeCategory) 
     : 'サービス'
 
+  const q = getStringParam(resolvedParams.q)
+
   const currentSearchParams: AbcSearchParams = {
     ...(dateFrom ? { dateFrom } : {}),
     ...(dateTo ? { dateTo } : {}),
     ...(storeName ? { store: storeName } : {}),
     ...(category ? { category } : {}),
     ...(excludeCategory ? { excludeCategory } : {}),
+    ...(q ? { q } : {}),
   }
 
   const [rows, { stores, categories }] = await Promise.all([
@@ -101,7 +104,8 @@ export default async function SalesAbcPage({
       dateTo,
       storeName || undefined,
       category || undefined,
-      excludeCategory || undefined
+      excludeCategory || undefined,
+      q || undefined
     ),
     fetchSalesFilterOptions(),
   ])
@@ -116,9 +120,20 @@ export default async function SalesAbcPage({
       </div>
 
       <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-        <form className="grid gap-4 md:grid-cols-3 xl:grid-cols-[repeat(3,minmax(0,1fr)),auto] xl:items-end">
+        <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr)),auto] xl:items-end">
           <input type="hidden" name="category" value={category} />
           <input type="hidden" name="excludeCategory" value={excludeCategory} />
+
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-700">商品名・JANコードで検索</span>
+            <input
+              type="text"
+              name="q"
+              defaultValue={q}
+              placeholder="商品名またはJANコード"
+              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+            />
+          </label>
 
           <label className="space-y-2">
             <span className="text-sm font-medium text-gray-700">期間 (From)</span>

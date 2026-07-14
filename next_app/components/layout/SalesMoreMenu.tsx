@@ -13,7 +13,6 @@ type SalesMoreMenuProps = {
 
 const SALES_MORE_ITEMS = [
   { name: '日次集計', href: '/sales/daily', icon: CalendarDays },
-  { name: '商品別集計', href: '/sales/products', icon: Package },
   { name: 'ABC分析', href: '/sales/abc', icon: BarChart3 },
 ] as const
 

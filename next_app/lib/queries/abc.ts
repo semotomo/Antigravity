@@ -43,7 +43,8 @@ export async function fetchAbcAnalysis(
   dateTo: string,
   storeName?: string,
   category?: string,
-  excludeCategory?: string
+  excludeCategory?: string,
+  searchQuery?: string
 ): Promise<AbcAnalysisRow[]> {
   const supabase = await createClient()
   let query = supabase
@@ -62,6 +63,11 @@ export async function fetchAbcAnalysis(
 
   if (excludeCategory && excludeCategory !== 'サービス') {
     query = query.neq('category', excludeCategory)
+  }
+
+  if (searchQuery) {
+    // 商品名またはJANコードの部分一致
+    query = query.or(`product_name.ilike.%${searchQuery}%,jan_code.ilike.%${searchQuery}%`)
   }
 
   const { data, error } = await query

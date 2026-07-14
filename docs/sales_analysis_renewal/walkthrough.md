@@ -24,9 +24,20 @@
 - [SalesListView.tsx [NEW]](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/sales/SalesListView.tsx) / [page.tsx (売上一覧)](file:///C:/Users/kirik/Desktop/Antigravity/next_app/app/(dashboard)/sales/page.tsx)
   - 売上一覧画面のテーブルも同様にクライアントコンポーネント化し、商品名クリックで即座にその商品の過去売上推移が確認できるようにしました。
 
+### 4. ABC分析画面での商品検索・絞り込み機能の追加
+- [abc.ts (クエリ)](file:///C:/Users/kirik/Desktop/Antigravity/next_app/lib/queries/abc.ts) / [page.tsx (ABC分析)](file:///C:/Users/kirik/Desktop/Antigravity/next_app/app/(dashboard)/sales/abc/page.tsx)
+  - ABC分析のフィルターエリアに「商品名・JANコードで検索」入力ボックスを追加しました。
+  - バックエンドクエリを拡張し、商品名またはJANコードのいずれかに対する部分一致（ILIKEのOR条件）での高速な絞り込みを可能にしました。他フィルター（期間・店舗・カテゴリ）との連動も維持しています。
+
+### 5. 「商品別集計」ページの完全削除および参照クリーンアップ
+- `next_app/app/(dashboard)/sales/products/` ディレクトリ全体を完全削除しました。
+- サイドバーメニュー（[SideNav.tsx](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/layout/SideNav.tsx)）および下部メニュー（[SalesMoreMenu.tsx](file:///C:/Users/kirik/Desktop/Antigravity/next_app/components/layout/SalesMoreMenu.tsx)）から不要になったリンク定義を削除しました。
+- 各種同期・インポートアクション等（`actions/products.ts` や各同期API）で実行されていた `/sales/products` パスへのキャッシュ再検証処理を、主力となった `/sales/abc` への再検証に移行・クリーンアップしました。
+
 ---
 
 ## 検証結果
 
 - **ビルド＆型チェック**:
   - `npx tsc --noEmit` を実行し、全コードで構文エラーおよび型定義エラーが無いこと（Exit Code 0）を確認しました。
+

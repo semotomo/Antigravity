@@ -80,7 +80,6 @@ export async function POST() {
 
     revalidatePath('/sales')
     revalidatePath('/sales/daily')
-    revalidatePath('/sales/products')
     revalidatePath('/sales/abc')
     revalidatePath('/products')
 

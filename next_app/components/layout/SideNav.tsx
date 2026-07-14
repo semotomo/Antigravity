@@ -37,7 +37,6 @@ const navItems: NavItem[] = [
   { name: '店舗間移動', href: '/products/transfers', icon: ArrowRightLeft, match: 'transfers' },
   { name: '売上一覧', href: '/sales', icon: ListOrdered, match: 'exact' },
   { name: '日次集計', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
-  { name: '商品別集計', href: '/sales/products', icon: Package, match: 'exact' },
   { name: 'ABC分析', href: '/sales/abc', icon: BarChart3, match: 'exact' },
   { name: '生体管理', href: '/pets', icon: Dog, match: 'exact' },
 ]

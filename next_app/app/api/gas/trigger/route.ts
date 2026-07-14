@@ -80,7 +80,6 @@ export async function POST(request: Request) {
 
     revalidatePath('/sales')
     revalidatePath('/sales/daily')
-    revalidatePath('/sales/products')
     revalidatePath('/sales/abc')
 
     // 同期履歴の更新

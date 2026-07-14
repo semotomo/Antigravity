@@ -58,7 +58,6 @@ export async function GET(request: Request) {
     // 各売上関連ページのキャッシュを再検証
     revalidatePath('/sales');
     revalidatePath('/sales/daily');
-    revalidatePath('/sales/products');
     revalidatePath('/sales/abc');
     revalidatePath('/products');
 
