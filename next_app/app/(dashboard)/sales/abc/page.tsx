@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { AbcAnalysisCharts } from '@/components/sales/AbcAnalysisCharts'
 import { AbcAnalysisView } from '@/components/sales/AbcAnalysisView'
 import { AbcFilterControls } from '@/components/sales/AbcFilterControls'
+import { AbcMetricToggler } from '@/components/sales/AbcMetricToggler'
 import { fetchAbcAnalysis } from '@/lib/queries/abc'
 import { fetchSalesFilterOptions } from '@/lib/queries/sales'
 
@@ -119,11 +120,16 @@ export default async function SalesAbcPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">ABC分析</h1>
-        <p className="text-sm text-gray-500">
-          商品ごとの売上構成比でランク分けしています。カテゴリは売上一覧と同じ条件で絞り込めます。
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">ABC分析</h1>
+          <p className="text-sm text-gray-500">
+            商品ごとの売上構成比でランク分けしています。カテゴリは売上一覧と同じ条件で絞り込めます。
+          </p>
+        </div>
+        <div className="self-start sm:self-auto">
+          <AbcMetricToggler currentSearchParams={currentSearchParams} target={target} />
+        </div>
       </div>
 
       <AbcFilterControls
@@ -217,22 +223,22 @@ export default async function SalesAbcPage({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">対象商品数</p>
-          <p className="mt-3 text-3xl font-bold text-gray-900">{rows.length.toLocaleString('ja-JP')}</p>
+      <div className="grid gap-3 grid-cols-3 max-w-2xl">
+        <div className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-500">対象商品数</span>
+          <span className="text-base font-bold text-gray-900">{rows.length.toLocaleString('ja-JP')}</span>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Aランク商品数</p>
-          <p className="mt-3 text-3xl font-bold text-gray-900">
+        <div className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-500">Aランク</span>
+          <span className="text-base font-bold text-emerald-600">
             {rows.filter((row) => row.rank === 'A').length.toLocaleString('ja-JP')}
-          </p>
+          </span>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">B/Cランク商品数</p>
-          <p className="mt-3 text-3xl font-bold text-gray-900">
+        <div className="rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 shadow-sm flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-500">B/Cランク</span>
+          <span className="text-base font-bold text-gray-700">
             {rows.filter((row) => row.rank !== 'A').length.toLocaleString('ja-JP')}
-          </p>
+          </span>
         </div>
       </div>
 

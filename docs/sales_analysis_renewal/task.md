@@ -16,11 +16,11 @@
   - [x] `npx tsc --noEmit` を実行してビルド型エラーがないか確認
 
 ## 🚀 指標切り替え＆カメラJANコードスキャン（追加開発）
-- [ ] クエリ・ロジックの修正
-  - [ ] `next_app/lib/queries/abc.ts` の `fetchAbcAnalysis` を修正し、分析対象 (`target: 'amount' | 'quantity'`) の切り替えをサポート
-- [ ] UIコンポーネントの修正・新設
-  - [ ] `next_app/components/sales/AbcAnalysisCharts.tsx` を修正し、選択された `target`（金額/数量）に応じてグラフ描画やタイトル、単位、ドーナツ統計を動的に切り替え可能にする
-  - [ ] `next_app/components/sales/BarcodeScannerModal.tsx` を新規作成し、`@zxing/browser` を使用したJANコードスキャナーを実装
-  - [ ] `next_app/app/(dashboard)/sales/abc/page.tsx` を修正し、数量/金額の切り替えUI（タブ）の配置、および「カメラでスキャン」ボタンとモーダル連携を実装
-- [ ] 検証
-  - [ ] `npx tsc --noEmit` および `npm run build` にてコンパイル・ビルドエラーがないか検証
+- [x] クエリ・ロジックの修正
+  - [x] `next_app/lib/queries/abc.ts` の `fetchAbcAnalysis` を修正し、分析対象 (`target: 'amount' | 'quantity'`) の切り替えをサポート
+- [x] UIコンポーネントの修正・新設
+  - [x] `next_app/components/sales/AbcAnalysisCharts.tsx` を修正し、選択された `target`（金額/数量）に応じてグラフ描画やタイトル、単位、ドーナツ統計を動的に切り替え可能にする
+  - [x] `next_app/components/sales/BarcodeScannerModal.tsx` を新規作成し、`@zxing/browser` を使用したJANコードスキャナーを実装
+  - [x] `next_app/app/(dashboard)/sales/abc/page.tsx` を修正し、数量/金額の切り替えUI（タブ）の配置、および「カメラでスキャン」ボタンとモーダル連携を実装
+- [x] 検証
+  - [x] `npx tsc --noEmit` および `npm run build` にてコンパイル・ビルドエラーがないか検証

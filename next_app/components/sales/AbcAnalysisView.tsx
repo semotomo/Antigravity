@@ -33,6 +33,12 @@ export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps
       ),
     },
     {
+      key: 'total_quantity',
+      header: '販売数',
+      align: 'right',
+      render: (item) => item.total_quantity.toLocaleString('ja-JP'),
+    },
+    {
       key: 'label',
       header: '商品 (クリックで過去売上推移を表示)',
       render: (item) => (
@@ -48,12 +54,6 @@ export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps
           </p>
         </div>
       ),
-    },
-    {
-      key: 'total_quantity',
-      header: '販売数',
-      align: 'right',
-      render: (item) => item.total_quantity.toLocaleString('ja-JP'),
     },
     {
       key: 'total_sales_amount',

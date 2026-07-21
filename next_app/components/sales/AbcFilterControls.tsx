@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Camera, Search, BarChart3, Hash } from 'lucide-react'
+import { Camera, Search } from 'lucide-react'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 
 type AbcSearchParams = { [key: string]: string | string[] | undefined }
@@ -81,14 +81,6 @@ export function AbcFilterControls({
     router.push(`/sales/abc?${nextParams}`)
   }
 
-  // 分析基準（数量・金額）切り替えタブの変更ハンドラー
-  const handleTargetChange = (newTarget: 'amount' | 'quantity') => {
-    const nextParams = buildSearchParams(currentSearchParams, {
-      target: newTarget,
-    })
-    router.push(`/sales/abc?${nextParams}`)
-  }
-
   // フォームサブミット時のハンドラー
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -113,34 +105,6 @@ export function AbcFilterControls({
 
   return (
     <div className="space-y-6">
-      {/* 指標切り替えタブ (数量・金額) */}
-      <div className="flex justify-between items-center bg-gray-50 p-1.5 rounded-2xl border border-gray-150 max-w-sm">
-        <button
-          type="button"
-          onClick={() => handleTargetChange('quantity')}
-          className={`flex items-center justify-center gap-2 flex-1 py-2 text-xs font-bold rounded-xl transition ${
-            initialTarget === 'quantity'
-              ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-              : 'text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <Hash className="h-3.5 w-3.5 text-indigo-500" />
-          数量ベースで分析（標準）
-        </button>
-        <button
-          type="button"
-          onClick={() => handleTargetChange('amount')}
-          className={`flex items-center justify-center gap-2 flex-1 py-2 text-xs font-bold rounded-xl transition ${
-            initialTarget === 'amount'
-              ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-              : 'text-gray-500 hover:text-gray-800'
-          }`}
-        >
-          <BarChart3 className="h-3.5 w-3.5 text-emerald-500" />
-          売上金額ベースで分析
-        </button>
-      </div>
-
       <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
         <form ref={formRef} onSubmit={handleSubmit} className="grid gap-4 md:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr)),auto] xl:items-end">
           <input type="hidden" name="category" value={category} />
