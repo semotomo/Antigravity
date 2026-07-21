@@ -91,8 +91,12 @@ export async function syncPetsData(mode: 'quick' | 'full' = 'quick') {
       const fromDateObj = new Date(baseDate);
       fromDateObj.setDate(fromDateObj.getDate() - 1);
       
+      // 時差（UTC/JST）や登録タイミングの誤差を考慮し、終了日は明日の日付に設定
+      const tomorrowObj = new Date();
+      tomorrowObj.setDate(tomorrowObj.getDate() + 1);
+      
       fromDate = formatJstDate(fromDateObj);
-      toDate = formatJstDate(new Date());
+      toDate = formatJstDate(tomorrowObj);
 
       console.log(`Quick sync date filter applied: from ${fromDate} to ${toDate}`);
     } catch (e) {
