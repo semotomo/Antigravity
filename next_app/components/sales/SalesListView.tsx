@@ -8,9 +8,11 @@ import type { SaleRow } from '@/lib/queries/sales'
 
 type SalesListViewProps = {
   salesData: SaleRow[]
+  dateFrom?: string
+  dateTo?: string
 }
 
-export function SalesListView({ salesData }: SalesListViewProps) {
+export function SalesListView({ salesData, dateFrom, dateTo }: SalesListViewProps) {
   const [selectedProduct, setSelectedProduct] = useState<{
     janCode: string | null
     productName: string
@@ -80,6 +82,8 @@ export function SalesListView({ salesData }: SalesListViewProps) {
         onClose={() => setSelectedProduct(null)}
         janCode={selectedProduct?.janCode}
         productName={selectedProduct?.productName || ''}
+        searchDateFrom={dateFrom}
+        searchDateTo={dateTo}
       />
     </>
   )

@@ -24,18 +24,32 @@ type ProductSalesTrendsModalProps = {
   onClose: () => void
   janCode?: string | null
   productName: string
+  searchDateFrom?: string
+  searchDateTo?: string
 }
+
+type PeriodType = 'search' | '30' | '7'
 
 export function ProductSalesTrendsModal({
   isOpen,
   onClose,
   janCode,
   productName,
+  searchDateFrom,
+  searchDateTo,
 }: ProductSalesTrendsModalProps) {
-  const [days, setDays] = useState<'7' | '30'>('30')
+  const hasSearchRange = !!(searchDateFrom && searchDateTo)
+  const [periodType, setPeriodType] = useState<PeriodType>('30')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<TrendDataRow[]>([])
+
+  // モーダルが開かれた際にデフォルト期間を初期化
+  useEffect(() => {
+    if (isOpen) {
+      setPeriodType(hasSearchRange ? 'search' : '30')
+    }
+  }, [isOpen, hasSearchRange])
 
   useEffect(() => {
     if (!isOpen) return
@@ -50,7 +64,14 @@ export function ProductSalesTrendsModal({
         } else {
           url.searchParams.append('productName', productName)
         }
-        url.searchParams.append('days', days)
+
+        if (periodType === 'search' && searchDateFrom && searchDateTo) {
+          url.searchParams.append('dateFrom', searchDateFrom)
+          url.searchParams.append('dateTo', searchDateTo)
+        } else {
+          const days = periodType === '7' ? '7' : '30'
+          url.searchParams.append('days', days)
+        }
 
         const res = await fetch(url.toString())
         if (!res.ok) {
@@ -71,7 +92,7 @@ export function ProductSalesTrendsModal({
     }
 
     fetchTrends()
-  }, [isOpen, janCode, productName, days])
+  }, [isOpen, janCode, productName, periodType, searchDateFrom, searchDateTo])
 
   if (!isOpen) return null
 
@@ -104,21 +125,31 @@ export function ProductSalesTrendsModal({
         {/* 期間コントロールタブと主要指標 (KPI) */}
         <div className="border-b border-gray-100 bg-gray-50 px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex rounded-xl bg-white p-1 border border-gray-200 self-start">
+            {hasSearchRange && (
+              <button
+                onClick={() => setPeriodType('search')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  periodType === 'search' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                検索期間
+              </button>
+            )}
             <button
-              onClick={() => setDays('30')}
-              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${
-                days === '30' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              onClick={() => setPeriodType('30')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                periodType === '30' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
-              過去30日間
+              1ヶ月
             </button>
             <button
-              onClick={() => setDays('7')}
-              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${
-                days === '7' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'
+              onClick={() => setPeriodType('7')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                periodType === '7' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
-              過去7日間
+              1週間
             </button>
           </div>
 
@@ -210,7 +241,7 @@ export function ProductSalesTrendsModal({
             </div>
           ) : (
             <div className="flex h-64 items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 text-gray-400 text-sm">
-              過去の売上データが存在しません。
+              指定期間の売上データが存在しません。
             </div>
           )}
         </div>

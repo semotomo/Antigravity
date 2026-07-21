@@ -8,13 +8,16 @@ import type { AbcAnalysisRow } from '@/lib/queries/abc'
 
 type AbcAnalysisViewProps = {
   rows: AbcAnalysisRow[]
+  dateFrom?: string
+  dateTo?: string
 }
 
-export function AbcAnalysisView({ rows }: AbcAnalysisViewProps) {
+export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps) {
   const [selectedProduct, setSelectedProduct] = useState<{
     janCode: string | null
     productName: string
   } | null>(null)
+
 
   const columns: DataTableColumn<AbcAnalysisRow>[] = [
     {
@@ -92,6 +95,8 @@ export function AbcAnalysisView({ rows }: AbcAnalysisViewProps) {
         onClose={() => setSelectedProduct(null)}
         janCode={selectedProduct?.janCode}
         productName={selectedProduct?.productName || ''}
+        searchDateFrom={dateFrom}
+        searchDateTo={dateTo}
       />
     </>
   )

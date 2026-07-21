@@ -19,6 +19,7 @@ import type { AbcAnalysisRow } from '@/lib/queries/abc'
 
 type AbcAnalysisChartsProps = {
   data: AbcAnalysisRow[]
+  target?: 'amount' | 'quantity'
 }
 
 const COLORS = {
@@ -31,7 +32,7 @@ function formatYen(value: number) {
   return `¥${value.toLocaleString('ja-JP')}`
 }
 
-export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
+export function AbcAnalysisCharts({ data, target = 'quantity' }: AbcAnalysisChartsProps) {
   const [isMounted, setIsMounted] = useState(false)
 
   // Next.js (SSR) での Recharts のハイドレーションエラーを確実に防止する安全設計
@@ -47,25 +48,34 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
     )
   }
 
-  // 1. 売上貢献度 TOP15 商品の抽出
+  const isAmount = target === 'amount'
+
+  // 1. 貢献度 TOP15 商品の抽出 (金額か数量かに基づくソート)
   const top15 = [...data]
-    .sort((a, b) => b.total_sales_amount - a.total_sales_amount)
+    .sort((a, b) => {
+      if (isAmount) {
+        return b.total_sales_amount - a.total_sales_amount
+      } else {
+        return b.total_quantity - a.total_quantity
+      }
+    })
     .slice(0, 15)
 
-  // 2. カテゴリ別売上シェアの算出
-  const categorySalesMap = new Map<string, number>()
-  let totalSales = 0
+  // 2. カテゴリ別シェアの算出 (金額か数量かに基づく集計)
+  const categoryValueMap = new Map<string, number>()
+  let totalAggregate = 0
   let totalProfit = 0
 
   data.forEach((row) => {
-    totalSales += row.total_sales_amount
+    const val = isAmount ? row.total_sales_amount : row.total_quantity
+    totalAggregate += val
     totalProfit += row.estimated_profit
     const cat = row.category || '未分類'
-    categorySalesMap.set(cat, (categorySalesMap.get(cat) ?? 0) + row.total_sales_amount)
+    categoryValueMap.set(cat, (categoryValueMap.get(cat) ?? 0) + val)
   })
 
-  // 配列化して売上高順にソート
-  const sortedCategories = Array.from(categorySalesMap.entries())
+  // 配列化して値順にソート
+  const sortedCategories = Array.from(categoryValueMap.entries())
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value)
 
@@ -122,15 +132,15 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
                 {item.rank}ランク
               </span>
             </div>
-            <div className="flex justify-between gap-4">
+            <div className={`flex justify-between gap-4 ${isAmount ? 'bg-indigo-50/50 p-1 rounded font-bold' : ''}`}>
               <span className="text-gray-500">売上金額:</span>
               <span className="font-semibold text-gray-900">{formatYen(item.total_sales_amount)}</span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-gray-500">累積売上構成比:</span>
+              <span className="text-gray-500">累積構成比:</span>
               <span className="font-semibold text-indigo-600">{(item.cumulativeSalesShare * 100).toFixed(1)}%</span>
             </div>
-            <div className="flex justify-between gap-4">
+            <div className={`flex justify-between gap-4 ${!isAmount ? 'bg-indigo-50/50 p-1 rounded font-bold' : ''}`}>
               <span className="text-gray-500">販売数量:</span>
               <span className="font-semibold text-gray-700">{item.total_quantity.toLocaleString('ja-JP')} 個</span>
             </div>
@@ -149,17 +159,19 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
   const CustomPieTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const item = payload[0]
-      const share = totalSales > 0 ? (item.value / totalSales) * 100 : 0
+      const share = totalAggregate > 0 ? (item.value / totalAggregate) * 100 : 0
       return (
         <div className="rounded-2xl border border-gray-100 bg-white/95 p-4 shadow-xl backdrop-blur-sm">
           <p className="font-bold text-gray-900 text-sm">{item.name}</p>
           <div className="mt-2 space-y-1 text-xs">
             <div className="flex justify-between gap-4">
-              <span className="text-gray-500">売上総額:</span>
-              <span className="font-bold text-gray-900">{formatYen(item.value)}</span>
+              <span className="text-gray-500">{isAmount ? '売上総額' : '販売総数'}:</span>
+              <span className="font-bold text-gray-900">
+                {isAmount ? formatYen(item.value) : `${item.value.toLocaleString('ja-JP')} 個`}
+              </span>
             </div>
             <div className="flex justify-between gap-4">
-              <span className="text-gray-500">売上シェア:</span>
+              <span className="text-gray-500">構成シェア:</span>
               <span className="font-bold text-sky-600">{share.toFixed(1)}%</span>
             </div>
           </div>
@@ -171,13 +183,17 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.3fr,0.7fr]">
-      {/* 1. 売上貢献度 TOP15 パレート図 */}
+      {/* 1. 貢献度 TOP15 パレート図 */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col">
-        <div className="mb-4">
-          <h3 className="text-base font-bold text-gray-900">売上高パレート図 (TOP 15 商品)</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            各商品の売上高（棒グラフ：左軸）と売上累積構成比（折れ線グラフ：右軸）を重ね合わせた図です。上位で全体の売上の大部分が決定されている様子が把握できます。
-          </p>
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 className="text-base font-bold text-gray-900">
+              {isAmount ? '売上高パレート図' : '販売数パレート図'} (TOP 15 商品)
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              各商品の{isAmount ? '売上高' : '販売数量'}（棒グラフ：左軸）と累積構成比（折れ線グラフ：右軸）を重ね合わせた図です。
+            </p>
+          </div>
         </div>
         <div className="relative w-full h-[400px]">
           {top15.length === 0 ? (
@@ -200,11 +216,15 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
                   textAnchor="end"
                   height={60}
                 />
-                {/* 左軸：売上金額 */}
+                {/* 左軸：売上金額または数量 */}
                 <YAxis
                   yAxisId="left"
                   type="number"
-                  tickFormatter={(val) => `¥${(val / 1000).toLocaleString('ja-JP')}k`}
+                  tickFormatter={(val) => 
+                    isAmount 
+                      ? `¥${(val / 1000).toLocaleString('ja-JP')}k` 
+                      : `${val.toLocaleString('ja-JP')}個`
+                  }
                   tick={{ fill: '#6B7280', fontSize: 9 }}
                   axisLine={{ stroke: '#E5E7EB' }}
                 />
@@ -220,8 +240,8 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
                 />
                 <Tooltip content={<CustomBarTooltip />} cursor={{ fill: '#F3F4F6', opacity: 0.6 }} />
                 
-                {/* 売上高の棒グラフ */}
-                <Bar yAxisId="left" dataKey="total_sales_amount" radius={[6, 6, 0, 0]} barSize={24}>
+                {/* 棒グラフ */}
+                <Bar yAxisId="left" dataKey={isAmount ? 'total_sales_amount' : 'total_quantity'} radius={[6, 6, 0, 0]} barSize={24}>
                   {top15.map((entry, index) => {
                     const color = COLORS[entry.rank as keyof typeof COLORS] || COLORS.C
                     return <Cell key={`cell-${index}`} fill={color} />
@@ -244,12 +264,14 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
         </div>
       </div>
 
-      {/* 2. カテゴリ別売上シェア ドーナツチャート */}
+      {/* 2. カテゴリ別シェア ドーナツチャート */}
       <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm flex flex-col justify-between">
         <div className="mb-4">
-          <h3 className="text-base font-bold text-gray-900">カテゴリ別売上シェア</h3>
+          <h3 className="text-base font-bold text-gray-900">
+            {isAmount ? 'カテゴリ別売上シェア' : 'カテゴリ別販売数シェア'}
+          </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            各商品カテゴリの総売上高に対する貢献度比率です（売上上位順）。
+            各商品カテゴリの総{isAmount ? '売上高' : '販売数'}に対する貢献度比率です（上位順）。
           </p>
         </div>
 
@@ -284,14 +306,16 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
                   />
                 </PieChart>
               </ResponsiveContainer>
-              {/* ドーナツの中央に総売上をリッチに表示 */}
+              {/* ドーナツの中央に総数をリッチに表示 */}
               <div className="absolute flex flex-col items-center justify-center text-center">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">総売上高</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  {isAmount ? '総売上高' : '総販売数量'}
+                </span>
                 <span className="mt-0.5 text-lg font-extrabold text-gray-900">
-                  {formatYen(totalSales)}
+                  {isAmount ? formatYen(totalAggregate) : `${totalAggregate.toLocaleString('ja-JP')} 個`}
                 </span>
                 <span className="mt-0.5 text-[9px] font-medium text-green-600">
-                  粗利 {formatYen(totalProfit)}
+                  粗利見込 {formatYen(totalProfit)}
                 </span>
               </div>
             </>
@@ -300,9 +324,12 @@ export function AbcAnalysisCharts({ data }: AbcAnalysisChartsProps) {
 
         {/* 補足解説カード */}
         <div className="mt-6 rounded-2xl bg-gray-50 p-4 border border-gray-100">
-          <h4 className="text-xs font-bold text-gray-800">💡 カテゴリ別売上シェアについて</h4>
+          <h4 className="text-xs font-bold text-gray-800">💡 シェアについて</h4>
           <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500">
-            どのカテゴリ群が店舗の主力事業になっているかを可視化しています。売上シェアの高い主要カテゴリの在庫切れや品揃えに注意し、店舗全体の売上基盤を維持しましょう。
+            どのカテゴリ群が店舗の主力事業（数量・金額ベース）になっているかを可視化しています。
+            {isAmount 
+              ? '金額ベースで高いシェアを持つカテゴリは店舗の収益基盤となるため、品揃えに注意しましょう。' 
+              : '数量ベースで高いシェアを持つカテゴリは顧客の来店・購買頻度が高いため、欠品を起こさないよう管理しましょう。'}
           </p>
         </div>
       </div>

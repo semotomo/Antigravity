@@ -44,7 +44,8 @@ export async function fetchAbcAnalysis(
   storeName?: string,
   category?: string,
   excludeCategory?: string,
-  searchQuery?: string
+  searchQuery?: string,
+  target: 'amount' | 'quantity' = 'quantity'
 ): Promise<AbcAnalysisRow[]> {
   const supabase = await createClient()
   let query = supabase
@@ -117,17 +118,29 @@ export async function fetchAbcAnalysis(
     grouped.set(key, current)
   }
 
+  // ターゲット（金額 or 数量）に応じてソート順を切り替える
   const rows = Array.from(grouped.values()).sort(
-    (left, right) => right.total_sales_amount - left.total_sales_amount
+    (left, right) => {
+      if (target === 'amount') {
+        return right.total_sales_amount - left.total_sales_amount
+      } else {
+        return right.total_quantity - left.total_quantity
+      }
+    }
   )
-  const totalSales = rows.reduce((sum, row) => sum + row.total_sales_amount, 0)
 
-  let cumulativeSales = 0
+  // ターゲットに応じた総計を算出
+  const totalValue = rows.reduce((sum, row) => {
+    return sum + (target === 'amount' ? row.total_sales_amount : row.total_quantity)
+  }, 0)
+
+  let cumulativeValue = 0
 
   return rows.map((row) => {
-    cumulativeSales += row.total_sales_amount
-    const salesShare = totalSales > 0 ? row.total_sales_amount / totalSales : 0
-    const cumulativeSalesShare = totalSales > 0 ? cumulativeSales / totalSales : 0
+    const currentValue = target === 'amount' ? row.total_sales_amount : row.total_quantity
+    cumulativeValue += currentValue
+    const salesShare = totalValue > 0 ? currentValue / totalValue : 0
+    const cumulativeSalesShare = totalValue > 0 ? cumulativeValue / totalValue : 0
 
     return {
       ...row,

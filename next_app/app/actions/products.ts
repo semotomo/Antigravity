@@ -142,7 +142,7 @@ function revalidateProductPages() {
   revalidatePath('/products/unmatched')
   revalidatePath('/sales')
   revalidatePath('/sales/daily')
-  revalidatePath('/sales/products')
+  revalidatePath('/sales/abc')
   revalidatePath('/orders')
   revalidatePath('/orders/[id]', 'page')
 }
@@ -648,7 +648,7 @@ export async function uploadProductMasterCsv(formData: FormData) {
     revalidatePath('/products')
     revalidatePath('/sales')
     revalidatePath('/sales/daily')
-    revalidatePath('/sales/products')
+    revalidatePath('/sales/abc')
 
     return {
       success: true,

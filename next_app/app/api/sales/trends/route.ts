@@ -8,7 +8,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const janCode = searchParams.get('janCode') || ''
     const productName = searchParams.get('productName') || ''
-    const days = parseInt(searchParams.get('days') || '30', 10)
+    const daysParam = searchParams.get('days')
+    const dateFrom = searchParams.get('dateFrom') || ''
+    const dateTo = searchParams.get('dateTo') || ''
 
     if (!janCode && !productName) {
       return NextResponse.json(
@@ -19,21 +21,54 @@ export async function GET(request: Request) {
 
     const supabase = await createClient()
 
-    // JST(日本時間)での本日および日数分の境界を計算
-    const nowJst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
-    const dateLimit = new Date(nowJst)
-    dateLimit.setDate(dateLimit.getDate() - days)
-    
-    const yearLimit = dateLimit.getFullYear()
-    const monthLimit = String(dateLimit.getMonth() + 1).padStart(2, '0')
-    const dayLimit = String(dateLimit.getDate()).padStart(2, '0')
-    const dateLimitStr = `${yearLimit}-${monthLimit}-${dayLimit}`
+    let dateLimitStr = ''
+    let dateEndStr = ''
+    let totalDays = 30
+    let nowJst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+
+    // dateFrom と dateTo が両方指定されている場合、その日付範囲を使用
+    if (dateFrom && dateTo) {
+      dateLimitStr = dateFrom
+      dateEndStr = dateTo
+      
+      const dFrom = new Date(dateFrom)
+      const dTo = new Date(dateTo)
+      const diffTime = Math.abs(dTo.getTime() - dFrom.getTime())
+      totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
+      
+      // 最大90日までに制限してパフォーマンスを維持
+      if (totalDays > 90) {
+        totalDays = 90
+        const limitedLimit = new Date(dTo)
+        limitedLimit.setDate(limitedLimit.getDate() - 89)
+        const y = limitedLimit.getFullYear()
+        const m = String(limitedLimit.getMonth() + 1).padStart(2, '0')
+        const d = String(limitedLimit.getDate()).padStart(2, '0')
+        dateLimitStr = `${y}-${m}-${d}`
+      }
+    } else {
+      const days = parseInt(daysParam || '30', 10)
+      totalDays = days
+      const dateLimit = new Date(nowJst)
+      dateLimit.setDate(dateLimit.getDate() - days)
+      
+      const yearLimit = dateLimit.getFullYear()
+      const monthLimit = String(dateLimit.getMonth() + 1).padStart(2, '0')
+      const dayLimit = String(dateLimit.getDate()).padStart(2, '0')
+      dateLimitStr = `${yearLimit}-${monthLimit}-${dayLimit}`
+      
+      const yearEnd = nowJst.getFullYear()
+      const monthEnd = String(nowJst.getMonth() + 1).padStart(2, '0')
+      const dayEnd = String(nowJst.getDate()).padStart(2, '0')
+      dateEndStr = `${yearEnd}-${monthEnd}-${dayEnd}`
+    }
 
     // データベースから指定範囲の売上を取得
     let query = supabase
       .from('sales_enriched_v')
       .select('sale_date, quantity, sales_amount')
       .gte('sale_date', dateLimitStr)
+      .lte('sale_date', dateEndStr)
 
     if (janCode) {
       query = query.eq('jan_code', janCode)
@@ -61,11 +96,17 @@ export async function GET(request: Request) {
       })
     }
 
-    // 過去 N 日間の日付リストを生成してデータをマッピング (JST基準)
+    // 日付リストを生成してデータをマッピング (JST基準)
     const resultList = []
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(nowJst)
-      d.setDate(d.getDate() - i)
+    const baseDate = dateFrom && dateTo ? new Date(dateLimitStr) : new Date(nowJst)
+    
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(baseDate)
+      if (dateFrom && dateTo) {
+        d.setDate(d.getDate() + i)
+      } else {
+        d.setDate(d.getDate() - (totalDays - 1 - i))
+      }
       
       const year = d.getFullYear()
       const month = String(d.getMonth() + 1).padStart(2, '0')

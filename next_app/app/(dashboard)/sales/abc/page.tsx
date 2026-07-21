@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { AbcAnalysisCharts } from '@/components/sales/AbcAnalysisCharts'
 import { AbcAnalysisView } from '@/components/sales/AbcAnalysisView'
+import { AbcFilterControls } from '@/components/sales/AbcFilterControls'
 import { fetchAbcAnalysis } from '@/lib/queries/abc'
 import { fetchSalesFilterOptions } from '@/lib/queries/sales'
 
@@ -9,7 +10,7 @@ type AbcSearchParams = { [key: string]: string | string[] | undefined }
 function buildSearchParams(
   params: AbcSearchParams,
   updates: Partial<
-    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'excludeCategory' | 'q', string | undefined>
+    Record<'dateFrom' | 'dateTo' | 'store' | 'category' | 'excludeCategory' | 'q' | 'target', string | undefined>
   >
 ) {
   const nextParams = new URLSearchParams()
@@ -88,6 +89,10 @@ export default async function SalesAbcPage({
     : 'サービス'
 
   const q = getStringParam(resolvedParams.q)
+  
+  // target: amount(金額) または quantity(数量)。デフォルトは quantity(数量)
+  const targetParam = getStringParam(resolvedParams.target)
+  const target = targetParam === 'amount' ? 'amount' : 'quantity'
 
   const currentSearchParams: AbcSearchParams = {
     ...(dateFrom ? { dateFrom } : {}),
@@ -96,6 +101,7 @@ export default async function SalesAbcPage({
     ...(category ? { category } : {}),
     ...(excludeCategory ? { excludeCategory } : {}),
     ...(q ? { q } : {}),
+    target,
   }
 
   const [rows, { stores, categories }] = await Promise.all([
@@ -105,7 +111,8 @@ export default async function SalesAbcPage({
       storeName || undefined,
       category || undefined,
       excludeCategory || undefined,
-      q || undefined
+      q || undefined,
+      target
     ),
     fetchSalesFilterOptions(),
   ])
@@ -119,74 +126,17 @@ export default async function SalesAbcPage({
         </p>
       </div>
 
-      <div className="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
-        <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr)),auto] xl:items-end">
-          <input type="hidden" name="category" value={category} />
-          <input type="hidden" name="excludeCategory" value={excludeCategory} />
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">商品名・JANコードで検索</span>
-            <input
-              type="text"
-              name="q"
-              defaultValue={q}
-              placeholder="商品名またはJANコード"
-              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-            />
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">期間 (From)</span>
-            <input
-              type="date"
-              name="dateFrom"
-              defaultValue={dateFrom}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-            />
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">期間 (To)</span>
-            <input
-              type="date"
-              name="dateTo"
-              defaultValue={dateTo}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-            />
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-sm font-medium text-gray-700">店舗</span>
-            <select
-              name="store"
-              defaultValue={storeName}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-            >
-              <option value="">すべて</option>
-              {stores.map((store) => (
-                <option key={store} value={store}>
-                  {store}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="submit"
-              className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
-            >
-              分析する
-            </button>
-            <Link
-              href="/sales/abc"
-              className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-            >
-              リセット
-            </Link>
-          </div>
-        </form>
-      </div>
+      <AbcFilterControls
+        currentSearchParams={currentSearchParams}
+        q={q}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        storeName={storeName}
+        target={target}
+        stores={stores}
+        category={category}
+        excludeCategory={excludeCategory}
+      />
 
       <div className="grid gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:grid-cols-[max-content,minmax(0,1fr)] lg:items-start">
         <div className="flex min-w-0 flex-col gap-1">
@@ -286,9 +236,9 @@ export default async function SalesAbcPage({
         </div>
       </div>
 
-      <AbcAnalysisCharts data={rows} />
+      <AbcAnalysisCharts data={rows} target={target} />
 
-      <AbcAnalysisView rows={rows} />
+      <AbcAnalysisView rows={rows} dateFrom={dateFrom} dateTo={dateTo} />
     </div>
   )
 }

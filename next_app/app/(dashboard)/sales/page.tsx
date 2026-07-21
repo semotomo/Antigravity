@@ -308,7 +308,7 @@ export default async function SalesPage({
         </div>
       </div>
 
-      <SalesListView salesData={salesData} />
+      <SalesListView salesData={salesData} dateFrom={dateFrom} dateTo={dateTo} />
     </div>
   )
 }
