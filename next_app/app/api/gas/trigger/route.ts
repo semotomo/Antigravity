@@ -1,6 +1,7 @@
 import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getStoreContext } from '@/lib/storeAuth'
 
 export async function POST(request: Request) {
   try {
@@ -37,45 +38,60 @@ export async function POST(request: Request) {
       // ボディがない、またはJSONパースエラーの場合は無視
     }
 
-    // クエリパラメータの構築
-    const url = new URL(gasWebAppUrl)
-    url.searchParams.set('mode', 'sales')
-    if (year !== undefined) url.searchParams.set('year', String(year))
-    if (month !== undefined) url.searchParams.set('month', String(month))
+    const storeContext = await getStoreContext()
+    let targetStores: Array<{ name: string; pos_group_id: string | null; pos_group_name: string | null }> = []
 
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      cache: 'no-store',
-    })
-
-    if (!response.ok) {
-      const responseText = await response.text()
-      return NextResponse.json(
-        {
-          message:
-            responseText || 'GAS Web App の呼び出しに失敗しました。時間を置いて再度お試しください。',
-        },
-        { status: 502 }
-      )
+    if (storeContext.currentView === 'wanwan') {
+      targetStores = [{ name: 'わんわん', pos_group_id: '11054', pos_group_name: 'わんわん' }]
+    } else if (storeContext.currentView === 'main') {
+      targetStores = [{ name: '本店', pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
+    } else {
+      const { data: dbStores } = await supabase
+        .from('stores')
+        .select('name, pos_group_id, pos_group_name')
+        .not('pos_group_id', 'is', null)
+      targetStores = dbStores && dbStores.length > 0 ? dbStores : [{ name: '本店', pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
     }
 
-    const gasResult = (await response.json().catch(() => null)) as {
-      success?: boolean
-      message?: string
-    } | null
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-    if (!gasResult) {
-      return NextResponse.json(
-        { message: 'GAS Web App が予期しない応答（HTML等）を返しました。GASのデプロイ設定（アクセスできるユーザー: 全員）を確認してください。' },
-        { status: 502 }
-      )
-    }
+    for (let i = 0; i < targetStores.length; i++) {
+      const store = targetStores[i]
+      if (i > 0) {
+        await sleep(10000)
+      }
 
-    if (gasResult.success === false) {
-      return NextResponse.json(
-        { message: gasResult.message || 'GAS処理中にエラーが発生しました。' },
-        { status: 500 }
-      )
+      const url = new URL(gasWebAppUrl)
+      url.searchParams.set('mode', 'sales')
+      if (year !== undefined) url.searchParams.set('year', String(year))
+      if (month !== undefined) url.searchParams.set('month', String(month))
+      if (store.pos_group_id) url.searchParams.set('tenpoGroupId', store.pos_group_id)
+      if (store.pos_group_name) url.searchParams.set('tenpoGroupName', store.pos_group_name)
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        cache: 'no-store',
+      })
+
+      if (!response.ok) {
+        const responseText = await response.text()
+        return NextResponse.json(
+          { message: `[${store.name}] GAS Web App の呼び出しに失敗しました: ${responseText}` },
+          { status: 502 }
+        )
+      }
+
+      const gasResult = (await response.json().catch(() => null)) as {
+        success?: boolean
+        message?: string
+      } | null
+
+      if (!gasResult || gasResult.success === false) {
+        return NextResponse.json(
+          { message: `[${store.name}] 売上取込中にエラーが発生しました: ${gasResult?.message || ''}` },
+          { status: 500 }
+        )
+      }
     }
 
     revalidatePath('/sales')
@@ -89,7 +105,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json({
-      message: '売上データの取込を実行しました。最新結果へ更新します。',
+      message: `売上データの取込を完了しました。（対象店舗: ${targetStores.map(s => s.name).join(', ')}）`,
     })
   } catch (error) {
     console.error('Unexpected error while triggering GAS import:', error)
