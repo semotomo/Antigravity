@@ -18,9 +18,9 @@ export default async function OptionsPage() {
     redirect('/login')
   }
 
-  // 2. マスター管理者アカウント以外はアクセスを拒否して売上一覧にリダイレクトする
-  const isMaster = user.user_metadata?.store_type === 'master'
-  if (!isMaster) {
+  // 2. 店舗専用アカウント（'wanwan'）はアクセスを拒否して売上一覧にリダイレクトする（未設定含むマスター権限は許可）
+  const isStoreUser = user.user_metadata?.store_type === 'wanwan'
+  if (isStoreUser) {
     redirect('/sales')
   }
 

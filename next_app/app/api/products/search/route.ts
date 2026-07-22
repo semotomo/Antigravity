@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 
 // 商品高速検索用APIルート
@@ -13,11 +14,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: [] })
     }
 
+    const cookieStore = await cookies()
+    const storeView = cookieStore.get('current_store_view')?.value || 'main'
+
     // スペース区切りの複数キーワードに対応
     const keywords = q.split(/\s+/).filter(Boolean)
     let queryBuilder = supabase
       .from('products')
       .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name, tags')
+
+    // 表示店舗に応じたタグフィルタリング
+    if (storeView === 'main') {
+      queryBuilder = queryBuilder.or('tags.ilike.%本店%,tags.is.null')
+    } else if (storeView === 'wanwan') {
+      queryBuilder = queryBuilder.ilike('tags', '%わんわん%')
+    }
 
     // 各キーワードに対して、商品名・JAN・ブランド・カテゴリ・タグのいずれかに部分一致するAND条件をチェーンする
     keywords.forEach((kw) => {

@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, CalendarDays, MoreHorizontal, Package } from 'lucide-react'
+import { BarChart3, CalendarDays, MoreHorizontal, Settings } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { StoreViewSelector } from './StoreViewSelector'
 
 type SalesMoreMenuVariant = 'bottom' | 'header'
 
@@ -21,7 +23,10 @@ function isActivePath(pathname: string, href: string) {
 }
 
 export function isSalesMorePath(pathname: string) {
-  return SALES_MORE_ITEMS.some((item) => isActivePath(pathname, item.href))
+  return (
+    SALES_MORE_ITEMS.some((item) => isActivePath(pathname, item.href)) ||
+    pathname === '/options'
+  )
 }
 
 export function SalesMoreMenu({ variant }: SalesMoreMenuProps) {
@@ -30,6 +35,32 @@ export function SalesMoreMenu({ variant }: SalesMoreMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const isActive = isSalesMorePath(pathname)
   const isBottom = variant === 'bottom'
+
+  const [storeType, setStoreType] = useState<'master' | 'wanwan'>('master')
+  const [storeView, setStoreView] = useState<'all' | 'main' | 'wanwan'>('main')
+
+  useEffect(() => {
+    const cookiesObj = document.cookie.split('; ').reduce((acc, current) => {
+      const parts = current.split('=')
+      if (parts.length >= 2) {
+        acc[parts[0]] = parts.slice(1).join('=')
+      }
+      return acc
+    }, {} as Record<string, string>)
+    
+    if (cookiesObj.current_store_view) {
+      setStoreView(cookiesObj.current_store_view as any)
+    }
+
+    const fetchUser = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.user_metadata?.store_type === 'wanwan') {
+        setStoreType('wanwan')
+      }
+    }
+    fetchUser()
+  }, [])
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -83,31 +114,53 @@ export function SalesMoreMenu({ variant }: SalesMoreMenuProps) {
         <div
           className={
             isBottom
-              ? 'absolute bottom-full right-1 z-[60] mb-2 w-52 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl'
-              : 'absolute right-0 top-full z-[60] mt-2 w-52 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl'
+              ? 'absolute bottom-full right-1 z-[60] mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2.5 shadow-2xl'
+              : 'absolute right-0 top-full z-[60] mt-2 w-64 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2.5 shadow-2xl'
           }
           role="menu"
         >
-          {SALES_MORE_ITEMS.map((item) => {
-            const itemActive = isActivePath(pathname, item.href)
+          <div className="space-y-1">
+            {SALES_MORE_ITEMS.map((item) => {
+              const itemActive = isActivePath(pathname, item.href)
 
-            return (
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    itemActive
+                      ? 'bg-gray-900 text-white'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                  role="menuitem"
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span>{item.name}</span>
+                </Link>
+              )
+            })}
+
+            {storeType === 'master' && (
               <Link
-                key={item.href}
-                href={item.href}
+                href="/options"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                  itemActive
+                  pathname === '/options'
                     ? 'bg-gray-900 text-white'
                     : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                 }`}
                 role="menuitem"
               >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span>{item.name}</span>
+                <Settings className="h-4 w-4 shrink-0" />
+                <span>設定オプション</span>
               </Link>
-            )
-          })}
+            )}
+          </div>
+
+          <div className="border-t border-gray-150 mt-2.5 pt-2.5">
+            <StoreViewSelector initialView={storeView} storeType={storeType} />
+          </div>
         </div>
       ) : null}
     </div>
