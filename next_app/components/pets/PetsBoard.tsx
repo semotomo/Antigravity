@@ -135,6 +135,35 @@ export function PetsBoard() {
   useEffect(() => {
     fetchStores();
     fetchPets();
+
+    const initializeDefaultStore = async () => {
+      const cookiesObj = document.cookie.split('; ').reduce((acc, current) => {
+        const parts = current.split('=')
+        if (parts.length >= 2) {
+          acc[parts[0]] = parts.slice(1).join('=')
+        }
+        return acc
+      }, {} as Record<string, string>)
+
+      let initialStore: number | 'all' = 7
+
+      const storeView = cookiesObj.current_store_view
+      if (storeView === 'wanwan') {
+        initialStore = 6
+      } else if (storeView === 'all') {
+        initialStore = 'all'
+      } else if (storeView === 'main') {
+        initialStore = 7
+      } else {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user?.user_metadata?.store_type === 'wanwan') {
+          initialStore = 6
+        }
+      }
+      setSelectedStoreId(initialStore)
+    }
+
+    initializeDefaultStore()
   }, []);
 
   const handleSync = async (mode: 'quick' | 'full') => {

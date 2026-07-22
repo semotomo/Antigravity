@@ -182,6 +182,7 @@ function buildProductPayload(
   const supplierName = normalizeOptionalText(formData.get('supplier_name'))
   const costPrice = parseOptionalNonNegativeInteger(formData, 'cost_price', fieldErrors)
   const sellingPrice = parseOptionalNonNegativeInteger(formData, 'selling_price', fieldErrors)
+  const tags = normalizeOptionalText(formData.get('tags'))
 
   if (requireAliasName && !aliasName) {
     fieldErrors.alias_name = 'POS 側の商品名を取得できませんでした。'
@@ -210,6 +211,7 @@ function buildProductPayload(
     selling_price: sellingPrice,
     markup_rate: calculateMarkupRate(costPrice ?? 0, sellingPrice ?? 0),
     is_active: parseIsActive(formData, defaultIsActive),
+    tags,
   }
 
   return {

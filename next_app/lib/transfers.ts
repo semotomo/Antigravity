@@ -120,9 +120,13 @@ export function normalizeOptionalText(value: FormDataEntryValue | string | null 
   return text.length > 0 ? text : null
 }
 
-export function chooseDefaultTransferFromStoreId(stores: TransferStoreOption[]) {
-  const mainStore = stores.find((store) => store.name === '本店')
-  return mainStore?.id ?? stores[0]?.id ?? null
+export function chooseDefaultTransferFromStoreId(
+  stores: TransferStoreOption[],
+  preferredStoreName?: string
+) {
+  const targetName = preferredStoreName || '本店'
+  const targetStore = stores.find((store) => store.name === targetName)
+  return targetStore?.id ?? stores[0]?.id ?? null
 }
 
 export function chooseDefaultTransferToStoreId(

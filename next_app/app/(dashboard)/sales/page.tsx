@@ -7,6 +7,7 @@ import { SalesListView } from '@/components/sales/SalesListView'
 import { SalesFilterControls } from '@/components/sales/SalesFilterControls'
 import { fetchSales, fetchSalesFilterOptions } from '@/lib/queries/sales'
 import { createClient } from '@/lib/supabase/server'
+import { getStoreContext } from '@/lib/storeAuth'
 
 type SalesSearchParams = { [key: string]: string | string[] | undefined }
 
@@ -94,7 +95,21 @@ export default async function SalesPage({
     ;[dateFrom, dateTo] = [dateTo, dateFrom]
   }
 
-  const storeName = getStringParam(resolvedParams.store)
+  const storeContext = await getStoreContext()
+  
+  let storeName = getStringParam(resolvedParams.store)
+  if (!hasSearchParam(resolvedParams, 'store')) {
+    if (storeContext.currentView === 'main') {
+      storeName = '本店'
+    } else if (storeContext.currentView === 'wanwan') {
+      storeName = 'わんわん'
+    } else if (storeContext.currentView === 'all') {
+      storeName = ''
+    } else {
+      storeName = storeContext.defaultStoreName
+    }
+  }
+
   const category = getStringParam(resolvedParams.category)
   const excludeCategory = getStringParam(resolvedParams.excludeCategory)
   const unmatchedOnly = resolvedParams.unmatched === 'true'

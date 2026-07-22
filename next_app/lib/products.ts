@@ -40,6 +40,7 @@ export type ProductActionField =
   | 'cost_price'
   | 'selling_price'
   | 'is_active'
+  | 'tags'
 
 export type ProductMutationState = {
   status: 'idle' | 'success' | 'error'

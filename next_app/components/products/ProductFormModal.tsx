@@ -179,6 +179,16 @@ export function ProductFormModal({ open, product, onClose }: ProductFormModalPro
                 <option value="false">停止</option>
               </select>
             </label>
+
+            <label className="space-y-2 md:col-span-2">
+              <span className="text-sm font-medium text-gray-700">タグ (カンマ区切りで複数設定可能)</span>
+              <input
+                name="tags"
+                defaultValue={product.tags ?? ''}
+                placeholder="例: わんわん, 本店"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
+              />
+            </label>
           </div>
 
           {state.message ? (

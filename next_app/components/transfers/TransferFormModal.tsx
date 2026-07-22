@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useFormStatus } from 'react-dom'
 import { Minus, PackagePlus, Plus, ScanLine, Search, Trash2, X } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 import {
   createTransfersAction,
   lookupTransferProductByJanAction,
@@ -104,10 +105,39 @@ export function TransferFormModal({
   const [manualSellingPrice, setManualSellingPrice] = useState('0')
   const [entryType, setEntryType] = useState<TransferEntryType>('transfer')
   const [usageCategory, setUsageCategory] = useState<TransferUsageCategory>('expired')
-  const [fromStoreId, setFromStoreId] = useState<number | null>(chooseDefaultTransferFromStoreId(stores))
-  const [toStoreId, setToStoreId] = useState<number | null>(
-    chooseDefaultTransferToStoreId(stores, chooseDefaultTransferFromStoreId(stores))
-  )
+  const [fromStoreId, setFromStoreId] = useState<number | null>(null)
+  const [toStoreId, setToStoreId] = useState<number | null>(null)
+
+  useEffect(() => {
+    const initializeStoreSelection = async () => {
+      const cookiesObj = document.cookie.split('; ').reduce((acc, current) => {
+        const parts = current.split('=')
+        if (parts.length >= 2) {
+          acc[parts[0]] = parts.slice(1).join('=')
+        }
+        return acc
+      }, {} as Record<string, string>)
+
+      let preferredStore = '本店'
+      if (cookiesObj.current_store_view === 'wanwan') {
+        preferredStore = 'わんわん'
+      } else {
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user?.user_metadata?.store_type === 'wanwan') {
+          preferredStore = 'わんわん'
+        }
+      }
+
+      const defaultFromId = chooseDefaultTransferFromStoreId(stores, preferredStore)
+      setFromStoreId(defaultFromId)
+      setToStoreId(chooseDefaultTransferToStoreId(stores, defaultFromId))
+    }
+
+    if (open) {
+      initializeStoreSelection()
+    }
+  }, [open, stores])
 
   const productsByJan = useMemo(
     () => {

@@ -17,15 +17,15 @@ export async function GET(request: Request) {
     const keywords = q.split(/\s+/).filter(Boolean)
     let queryBuilder = supabase
       .from('products')
-      .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name')
+      .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name, tags')
 
-    // 各キーワードに対して、商品名・JAN・ブランド・カテゴリのいずれかに部分一致するAND条件をチェーンする
+    // 各キーワードに対して、商品名・JAN・ブランド・カテゴリ・タグのいずれかに部分一致するAND条件をチェーンする
     keywords.forEach((kw) => {
       // JANコード（数字）の場合はJANに完全一致または前方一致、かつ他のテキストへの部分一致
       if (/^\d+$/.test(kw)) {
-        queryBuilder = queryBuilder.or(`jan_code.ilike.%${kw}%,product_name.ilike.%${kw}%`)
+        queryBuilder = queryBuilder.or(`jan_code.ilike.%${kw}%,product_name.ilike.%${kw}%,tags.ilike.%${kw}%`)
       } else {
-        queryBuilder = queryBuilder.or(`product_name.ilike.%${kw}%,brand.ilike.%${kw}%,category.ilike.%${kw}%`)
+        queryBuilder = queryBuilder.or(`product_name.ilike.%${kw}%,brand.ilike.%${kw}%,category.ilike.%${kw}%,tags.ilike.%${kw}%`)
       }
     })
 

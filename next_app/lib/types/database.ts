@@ -188,6 +188,7 @@ export interface Database {
           supplier_name: string | null
           is_active: boolean
           updated_at: string
+          tags: string | null
         }
         Insert: {
           id?: number
@@ -202,6 +203,7 @@ export interface Database {
           supplier_name?: string | null
           is_active?: boolean
           updated_at?: string
+          tags?: string | null
         }
         Update: {
           id?: number
@@ -216,6 +218,7 @@ export interface Database {
           supplier_name?: string | null
           is_active?: boolean
           updated_at?: string
+          tags?: string | null
         }
         Relationships: []
       }
@@ -223,14 +226,20 @@ export interface Database {
         Row: {
           id: number
           name: string
+          pos_group_id: string | null
+          pos_group_name: string | null
         }
         Insert: {
           id?: number
           name: string
+          pos_group_id?: string | null
+          pos_group_name?: string | null
         }
         Update: {
           id?: number
           name?: string
+          pos_group_id?: string | null
+          pos_group_name?: string | null
         }
         Relationships: []
       }

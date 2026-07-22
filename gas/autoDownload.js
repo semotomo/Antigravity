@@ -1950,6 +1950,18 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 // ===================================================================
 function doGet(e) {
   var mode = (e.parameter.mode || 'sales');
+  
+  if (mode === 'debug_properties') {
+    var props = PropertiesService.getScriptProperties().getProperties();
+    var safeProps = {};
+    for (var k in props) {
+      if (k.indexOf('PASSWORD') === -1 && k.indexOf('KEY') === -1) {
+        safeProps[k] = props[k];
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify(safeProps)).setMimeType(ContentService.MimeType.JSON);
+  }
+
   var now = new Date();
   var targetMonth = e.parameter.month ? parseInt(e.parameter.month, 10) : now.getMonth();
   var targetYear = e.parameter.year ? parseInt(e.parameter.year, 10) : now.getFullYear();
@@ -1961,6 +1973,15 @@ function doGet(e) {
   }
 
   var posConfig = getPOSConfig_();
+  if (posConfig) {
+    if (e.parameter.tenpoGroupId) {
+      posConfig.tenpoGroupId = e.parameter.tenpoGroupId;
+    }
+    if (e.parameter.tenpoGroupName) {
+      posConfig.tenpoGroupName = e.parameter.tenpoGroupName;
+    }
+  }
+
   if (!posConfig) {
     return ContentService.createTextOutput(
       JSON.stringify({ success: false, message: 'POS接続設定が未完了です。Sheetsのメニューから設定してください。' })

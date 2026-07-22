@@ -104,6 +104,22 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       align: 'right',
     },
     {
+      key: 'tags',
+      header: 'タグ',
+      render: (product) => {
+        if (!product.tags) return <span className="text-gray-400 text-xs">-</span>
+        return (
+          <div className="flex flex-wrap gap-1">
+            {product.tags.split(',').map((tag) => (
+              <span key={tag} className="inline-flex items-center rounded-md bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 ring-1 ring-inset ring-sky-700/10">
+                {tag.trim()}
+              </span>
+            ))}
+          </div>
+        )
+      },
+    },
+    {
       key: 'status',
       header: '状態',
       align: 'center',

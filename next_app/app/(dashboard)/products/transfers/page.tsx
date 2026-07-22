@@ -22,6 +22,8 @@ export const metadata = {
   title: '店舗間移動 | Kennel Dashboard',
 }
 
+import { getStoreContext } from '@/lib/storeAuth'
+
 export default async function ProductTransfersPage({
   searchParams,
 }: {
@@ -30,11 +32,17 @@ export default async function ProductTransfersPage({
   const resolvedParams = await searchParams
   let dateFrom = getStringParam(resolvedParams.dateFrom)
   let dateTo = getStringParam(resolvedParams.dateTo)
-  const fromStoreId = getStoreIdParam(resolvedParams.fromStore)
+  const fromStoreIdParam = getStoreIdParam(resolvedParams.fromStore)
   const toStoreId = getStoreIdParam(resolvedParams.toStore)
 
-  // 初期ロード時（日付や店舗フィルタの指定が何もない状態）は、直近1週間分をデフォルト範囲とする
-  const isInitialLoad = !dateFrom && !dateTo && fromStoreId === undefined && toStoreId === undefined
+  const storeContext = await getStoreContext()
+  // URLパラメータで店舗が指定されている場合はそれを優先、無ければCookie/権限に応じたデフォルトを適用（「全店舗」の場合は絞り込みなし）
+  const fromStoreId = fromStoreIdParam !== undefined
+    ? fromStoreIdParam
+    : (storeContext.currentView === 'all' ? undefined : storeContext.defaultStoreId)
+
+  // 初期ロード時（日付フィルタの指定がない状態）は、直近1週間分をデフォルト範囲とする
+  const isInitialLoad = !dateFrom && !dateTo
   if (isInitialLoad) {
     const today = new Date()
     const oneWeekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)

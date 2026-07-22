@@ -13,9 +13,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Dog,
+  Settings,
   type LucideIcon,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
+import { StoreViewSelector } from './StoreViewSelector'
 
 type NavMatch = 'exact' | 'products' | 'transfers'
 
@@ -60,6 +63,31 @@ function isActivePath(pathname: string, item: NavItem) {
 export default function SideNav({ collapsed, onToggle }: SideNavProps) {
   const pathname = usePathname()
   const router = useRouter()
+  const [storeType, setStoreType] = useState<'master' | 'wanwan'>('master')
+  const [storeView, setStoreView] = useState<'all' | 'main' | 'wanwan'>('main')
+
+  useEffect(() => {
+    const cookiesObj = document.cookie.split('; ').reduce((acc, current) => {
+      const parts = current.split('=')
+      if (parts.length >= 2) {
+        acc[parts[0]] = parts.slice(1).join('=')
+      }
+      return acc
+    }, {} as Record<string, string>)
+    
+    if (cookiesObj.current_store_view) {
+      setStoreView(cookiesObj.current_store_view as any)
+    }
+
+    const fetchUser = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.user_metadata?.store_type === 'wanwan') {
+        setStoreType('wanwan')
+      }
+    }
+    fetchUser()
+  }, [])
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -110,40 +138,54 @@ export default function SideNav({ collapsed, onToggle }: SideNavProps) {
         ) : null}
 
         <nav className={`flex-1 space-y-1 py-4 ${collapsed ? 'px-2' : 'px-2'}`}>
-          {navItems.map((item) => {
-            const isActive = isActivePath(pathname, item)
+          {(() => {
+            const displayItems = [...navItems]
+            if (storeType === 'master') {
+              displayItems.push({
+                name: '設定オプション',
+                href: '/options',
+                icon: Settings,
+                match: 'exact',
+              })
+            }
+            return displayItems.map((item) => {
+              const isActive = isActivePath(pathname, item)
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={collapsed ? item.name : undefined}
-                className={`group flex items-center rounded-md text-sm font-medium transition-colors ${
-                  collapsed
-                    ? 'justify-center px-0 py-3'
-                    : 'px-2 py-2'
-                } ${
-                  isActive
-                    ? 'bg-gray-800 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
-              >
-                <item.icon
-                  className={`h-5 w-5 flex-shrink-0 ${
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={collapsed ? item.name : undefined}
+                  className={`group flex items-center rounded-md text-sm font-medium transition-colors ${
                     collapsed
-                      ? isActive
-                        ? 'text-white'
-                        : 'text-gray-400 group-hover:text-gray-300'
-                      : `mr-3 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'}`
+                      ? 'justify-center px-0 py-3'
+                      : 'px-2 py-2'
+                  } ${
+                    isActive
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                   }`}
-                  aria-hidden="true"
-                />
-                {collapsed ? <span className="sr-only">{item.name}</span> : item.name}
-              </Link>
-            )
-          })}
+                >
+                  <item.icon
+                    className={`h-5 w-5 flex-shrink-0 ${
+                      collapsed
+                        ? isActive
+                          ? 'text-white'
+                          : 'text-gray-400 group-hover:text-gray-300'
+                        : `mr-3 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'}`
+                    }`}
+                    aria-hidden="true"
+                  />
+                  {collapsed ? <span className="sr-only">{item.name}</span> : item.name}
+                </Link>
+              )
+            })
+          })()}
         </nav>
-        <div className="border-t border-gray-800 p-4">
+        <div className="border-t border-gray-800 p-4 space-y-4">
+          {!collapsed && (
+            <StoreViewSelector initialView={storeView} storeType={storeType} />
+          )}
           <button
             onClick={handleLogout}
             title={collapsed ? 'ログアウト' : undefined}

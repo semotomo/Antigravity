@@ -22,37 +22,87 @@ export async function GET(request: Request) {
       throw new Error('GAS_WEBAPP_URL が設定されていません。');
     }
 
-    // mode=master を付与して商品マスタ同期のみ実行
-    const url = new URL(gasWebAppUrl);
-    url.searchParams.set('mode', 'master');
+    const supabase = await createClient() as any;
 
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      cache: 'no-store',
-    });
+    // 1. 同期対象店舗（POSグループIDが設定されている店舗）を取得
+    const { data: activeStores, error: storesError } = await supabase
+      .from('stores')
+      .select('id, name, pos_group_id, pos_group_name')
+      .not('pos_group_id', 'is', null);
 
-    if (!response.ok) {
-      const responseText = await response.text();
-      throw new Error(responseText || 'GAS Web App の呼び出しに失敗しました。');
+    if (storesError) {
+      throw new Error(`店舗マッピング情報の取得に失敗しました: ${storesError.message}`);
     }
 
-    const gasResult = (await response.json().catch(() => null)) as {
-      success?: boolean;
-      master?: { success?: boolean; message?: string; csvRowCount?: number; syncResult?: { count?: number } };
-      message?: string;
-    } | null;
+    const targetStores = activeStores || [];
+    console.log(`[Cron Products Sync] 同期対象店舗数: ${targetStores.length}店舗`);
 
-    if (!gasResult) {
-      throw new Error('GAS Web App が予期しない応答（HTML等）を返しました。');
+    if (targetStores.length === 0) {
+      // 店舗設定がない場合は、デフォルトでGAS側の設定に任せる（フォールバック）
+      targetStores.push({ id: 0, name: 'デフォルト設定店舗', pos_group_id: '', pos_group_name: '' });
     }
 
-    if (gasResult.success === false) {
-      throw new Error(gasResult.message || 'GAS処理中に全体エラーが発生しました。');
-    }
+    const syncResults = [];
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const masterResult = gasResult.master;
-    if (masterResult && masterResult.success === false) {
-      throw new Error(masterResult.message || '商品マスタの取得または同期に失敗しました。');
+    for (let i = 0; i < targetStores.length; i++) {
+      const store = targetStores[i];
+
+      // 2店舗目以降は指定時間（10秒）のウェイトを設ける
+      if (i > 0) {
+        console.log(`[Cron Products Sync] 次の店舗同期まで10秒間待機します (${i + 1}/${targetStores.length})...`);
+        await sleep(10000);
+      }
+
+      console.log(`[Cron Products Sync] [${store.name}] の商品マスタ同期を呼び出します...`);
+
+      const url = new URL(gasWebAppUrl);
+      url.searchParams.set('mode', 'master');
+      if (store.pos_group_id) {
+        url.searchParams.set('tenpoGroupId', store.pos_group_id);
+      }
+      if (store.pos_group_name) {
+        url.searchParams.set('tenpoGroupName', store.pos_group_name);
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        console.error(`[Cron Products Sync] [${store.name}] の同期に失敗しました:`, responseText);
+        syncResults.push({ store: store.name, success: false, error: responseText });
+        continue;
+      }
+
+      const gasResult = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        master?: { success?: boolean; message?: string; csvRowCount?: number; syncResult?: { count?: number } };
+        message?: string;
+      } | null;
+
+      if (!gasResult || gasResult.success === false) {
+        const errMsg = gasResult?.message || 'GAS内部でエラーが発生しました。';
+        console.error(`[Cron Products Sync] [${store.name}] GAS応答エラー:`, errMsg);
+        syncResults.push({ store: store.name, success: false, error: errMsg });
+        continue;
+      }
+
+      const masterResult = gasResult.master;
+      if (masterResult && masterResult.success === false) {
+        const errMsg = masterResult.message || '商品マスタ同期処理に失敗しました。';
+        console.error(`[Cron Products Sync] [${store.name}] マスタ同期エラー:`, errMsg);
+        syncResults.push({ store: store.name, success: false, error: errMsg });
+        continue;
+      }
+
+      const syncCount = masterResult?.syncResult?.count ?? 0;
+      const csvCount = masterResult?.csvRowCount ?? 0;
+
+      console.log(`[Cron Products Sync] [${store.name}] 同期完了: CSV: ${csvCount}件 -> Supabase: ${syncCount}件`);
+      syncResults.push({ store: store.name, success: true, csvCount, syncCount });
     }
 
     // 各売上関連ページのキャッシュを再検証
@@ -62,20 +112,16 @@ export async function GET(request: Request) {
     revalidatePath('/products');
 
     // 同期履歴の更新
-    const supabase = await createClient() as any;
     await supabase.from('sync_history').upsert({
       sync_type: 'products_sync',
       last_synced_at: new Date().toISOString(),
     });
 
-    const syncCount = masterResult?.syncResult?.count ?? 0;
-    const csvCount = masterResult?.csvRowCount ?? 0;
-
-    console.log('[Cron Products Sync] 商品マスタ自動同期が正常終了しました:', gasResult);
+    console.log('[Cron Products Sync] すべての店舗の商品マスタ自動同期が終了しました。結果:', syncResults);
     return NextResponse.json({
       success: true,
-      message: `商品マスタの自動同期が完了しました。（CSV: ${csvCount}件 → Supabase: ${syncCount}件処理）`,
-      details: { csvCount, syncCount }
+      message: '商品マスタの自動同期が完了しました。',
+      results: syncResults
     });
   } catch (error: any) {
     console.error('[Cron Products Sync] 商品マスタ自動同期中にエラーが発生しました:', error);
