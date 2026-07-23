@@ -703,7 +703,7 @@ function extractAllFormFields_(html, formIdPrefix) {
   var fields = {};
   var totalInputs = 0;
 
-  // input タグを全て検索（自己閉じタグと通常タグの両方に対応）
+  // 1. input タグを全て検索（自己閉じタグと通常タグの両方に対応）
   var inputRegex = /<input[^>]*\/?>/gi;
   var inputMatch;
 
@@ -711,18 +711,14 @@ function extractAllFormFields_(html, formIdPrefix) {
     var tag = inputMatch[0];
     totalInputs++;
 
-    // nameを取得（ダブルクォート、シングルクォート、クォートなしに対応）
     var nameMatch = tag.match(/name\s*=\s*"([^"]*)"/i) ||
                     tag.match(/name\s*=\s*'([^']*)'/i) ||
                     tag.match(/name\s*=\s*([^\s>]+)/i);
     if (!nameMatch) continue;
 
     var name = nameMatch[1];
-
-    // フォームプレフィックスでフィルタ（指定がある場合）
     if (formIdPrefix && name.indexOf(formIdPrefix) === -1) continue;
 
-    // valueを取得
     var valueMatch = tag.match(/value\s*=\s*"([^"]*)"/i) ||
                      tag.match(/value\s*=\s*'([^']*)'/i) ||
                      tag.match(/value\s*=\s*([^\s>]+)/i);
@@ -731,24 +727,38 @@ function extractAllFormFields_(html, formIdPrefix) {
     fields[name] = value;
   }
 
-  Logger.log('extractAllFormFields_: 全input数=' + totalInputs + ', "' + formIdPrefix + '"マッチ=' + Object.keys(fields).length);
+  // 2. select タグとその selected オプションを検索
+  var selectRegex = /<select[^>]*>[\s\S]*?<\/select>/gi;
+  var selectMatch;
+  var totalSelects = 0;
 
-  // マッチが0の場合、最初の5つのinput nameをログに出力（デバッグ用）
-  if (Object.keys(fields).length === 0 && totalInputs > 0) {
-    var debugRegex = /<input[^>]*\/?>/gi;
-    var debugMatch;
-    var debugNames = [];
-    var count = 0;
-    while ((debugMatch = debugRegex.exec(html)) !== null && count < 5) {
-      var debugTag = debugMatch[0];
-      var dn = debugTag.match(/name\s*=\s*["']?([^"'\s>]+)/i);
-      if (dn) {
-        debugNames.push(dn[1]);
-        count++;
-      }
+  while ((selectMatch = selectRegex.exec(html)) !== null) {
+    var selectBlock = selectMatch[0];
+    totalSelects++;
+
+    var sNameMatch = selectBlock.match(/name\s*=\s*"([^"]*)"/i) ||
+                     selectBlock.match(/name\s*=\s*'([^']*)'/i) ||
+                     selectBlock.match(/name\s*=\s*([^\s>]+)/i);
+    if (!sNameMatch) continue;
+
+    var sName = sNameMatch[1];
+    if (formIdPrefix && sName.indexOf(formIdPrefix) === -1) continue;
+
+    var selectedOpt = selectBlock.match(/<option[^>]*selected[^>]*value\s*=\s*"([^"]*)"/i) ||
+                      selectBlock.match(/<option[^>]*selected[^>]*value\s*=\s*'([^']*)'/i) ||
+                      selectBlock.match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*selected/i);
+    var val = selectedOpt ? selectedOpt[1] : '';
+
+    if (!selectedOpt) {
+      var firstOpt = selectBlock.match(/<option[^>]*value\s*=\s*"([^"]*)"/i) ||
+                     selectBlock.match(/<option[^>]*value\s*=\s*'([^']*)'/i);
+      val = firstOpt ? firstOpt[1] : '';
     }
-    Logger.log('最初の5つのinput name: ' + debugNames.join(', '));
+
+    fields[sName] = val;
   }
+
+  Logger.log('extractAllFormFields_: 全input数=' + totalInputs + ', 全select数=' + totalSelects + ', "' + formIdPrefix + '"マッチ=' + Object.keys(fields).length);
 
   return fields;
 }
@@ -1957,7 +1967,15 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     });
   }
 
-  return { success: true, data: results, count: results.length };
+  return {
+    success: true,
+    data: results,
+    count: results.length,
+    targetStore: {
+      id: posConfig ? posConfig.tenpoGroupId : null,
+      name: posConfig ? posConfig.tenpoGroupName : null,
+    },
+  };
 }
 
 // ===================================================================

@@ -31,6 +31,8 @@ export function SalesHistoryModal() {
   const [startDate, setStartDate] = useState(getToday())
   const [endDate, setEndDate] = useState(getToday())
 
+  const [targetStore, setTargetStore] = useState<{ name: string; id: string } | null>(null)
+
   const fetchHistory = async () => {
     setIsLoading(true)
     setError(null)
@@ -51,6 +53,9 @@ export function SalesHistoryModal() {
       const json = await res.json()
       if (json.success && Array.isArray(json.data)) {
         setData(json.data)
+        if (json.targetStore) {
+          setTargetStore(json.targetStore)
+        }
       } else {
         throw new Error(json.message || 'データ取得に失敗しました。')
       }
@@ -116,11 +121,18 @@ export function SalesHistoryModal() {
                 データ取得
               </button>
               
-              {data.length > 0 && (
-                <span className="ml-auto text-sm text-gray-500 font-medium">
-                  {data.length} 件のデータ
-                </span>
-              )}
+              <div className="ml-auto flex items-center gap-3">
+                {targetStore && (
+                  <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-800 border border-sky-200">
+                    対象店舗: {targetStore.name} ({targetStore.id})
+                  </span>
+                )}
+                {data.length > 0 && (
+                  <span className="text-sm text-gray-500 font-medium">
+                    {data.length} 件のデータ
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 overflow-auto p-6">

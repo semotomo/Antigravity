@@ -131,12 +131,20 @@ export async function GET(request: Request) {
       return normalize(b.taskDateTime).localeCompare(normalize(a.taskDateTime))
     })
 
+    const storeInfo =
+      storeContext.currentView === 'wanwan'
+        ? { name: 'わんわん', id: '11054' }
+        : storeContext.currentView === 'main'
+        ? { name: '本店', id: '11098' }
+        : { name: '全店舗', id: '全店舗' }
+
     return NextResponse.json({
       success: true,
       data: merged,
       count: merged.length,
       gasCount: gasRows.length,
       transferCount: transferRows.length,
+      targetStore: storeInfo,
     })
   } catch (error) {
     console.error('Unexpected error in history API:', error)
