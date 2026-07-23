@@ -19,6 +19,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect } from 'react'
 import { StoreViewSelector } from './StoreViewSelector'
+import { APP_VERSION, BUILD_TIMESTAMP } from '@/lib/version'
 
 type NavMatch = 'exact' | 'products' | 'transfers'
 
@@ -186,16 +187,23 @@ export default function SideNav({ collapsed, onToggle }: SideNavProps) {
           {!collapsed && (
             <StoreViewSelector initialView={storeView} storeType={storeType} />
           )}
-          <button
-            onClick={handleLogout}
-            title={collapsed ? 'ログアウト' : undefined}
-            className={`flex w-full items-center rounded-md text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white ${
-              collapsed ? 'justify-center px-0 py-3' : 'gap-3 px-2 py-2'
-            }`}
-          >
-            <LogOut className="h-5 w-5" />
-            {collapsed ? <span className="sr-only">ログアウト</span> : 'ログアウト'}
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleLogout}
+              title={collapsed ? 'ログアウト' : undefined}
+              className={`flex w-full items-center rounded-md text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white ${
+                collapsed ? 'justify-center px-0 py-3' : 'gap-3 px-2 py-2'
+              }`}
+            >
+              <LogOut className="h-5 w-5" />
+              {collapsed ? <span className="sr-only">ログアウト</span> : 'ログアウト'}
+            </button>
+            {!collapsed && (
+              <div className="px-2 text-right text-[10px] text-gray-500 font-mono tracking-tighter">
+                {APP_VERSION} ({BUILD_TIMESTAMP})
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { BarChart3, CalendarDays, MoreHorizontal, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { StoreViewSelector } from './StoreViewSelector'
+import { APP_VERSION, BUILD_TIMESTAMP } from '@/lib/version'
 
 type SalesMoreMenuVariant = 'bottom' | 'header'
 
@@ -160,6 +161,9 @@ export function SalesMoreMenu({ variant }: SalesMoreMenuProps) {
 
           <div className="border-t border-gray-150 mt-2.5 pt-2.5">
             <StoreViewSelector initialView={storeView} storeType={storeType} />
+            <div className="mt-2 text-right text-[10px] text-gray-400 font-mono tracking-tighter">
+              {APP_VERSION} ({BUILD_TIMESTAMP})
+            </div>
           </div>
         </div>
       ) : null}

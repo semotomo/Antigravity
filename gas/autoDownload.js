@@ -1862,23 +1862,27 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   var hFormName = hFormMatch ? hFormMatch[1] : 'hmma0244AForm';
   var hPayload = extractAllFormFields_(historyHtml, hFormName);
 
-  // 店舗グループIDおよび店舗グループ名を検索条件に動的セット
-  if (posConfig && posConfig.tenpoGroupId) {
-    var tenpoFields = Object.keys(hPayload).filter(function(k) { return k.match(/Tenpo/i) || k.match(/Group/i); });
-    for (var i = 0; i < tenpoFields.length; i++) {
-      if (tenpoFields[i].match(/Name/i)) {
-        if (posConfig.tenpoGroupName) hPayload[tenpoFields[i]] = posConfig.tenpoGroupName;
-      } else {
-        hPayload[tenpoFields[i]] = posConfig.tenpoGroupId;
+  // 店舗グループIDおよび店舗グループ名を検索条件に動的セットするヘルパー
+  var applyTenpoParams_ = function(targetPayload) {
+    if (posConfig && posConfig.tenpoGroupId) {
+      var tenpoFields = Object.keys(targetPayload).filter(function(k) { return k.match(/Tenpo/i) || k.match(/Group/i); });
+      for (var i = 0; i < tenpoFields.length; i++) {
+        if (tenpoFields[i].match(/Name/i)) {
+          if (posConfig.tenpoGroupName) targetPayload[tenpoFields[i]] = posConfig.tenpoGroupName;
+        } else {
+          targetPayload[tenpoFields[i]] = posConfig.tenpoGroupId;
+        }
+      }
+      targetPayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
+      targetPayload[hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
+      if (posConfig.tenpoGroupName) {
+        targetPayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
+        targetPayload[hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
       }
     }
-    hPayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
-    hPayload[hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
-    if (posConfig.tenpoGroupName) {
-      hPayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
-      hPayload[hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
-    }
-  }
+  };
+
+  applyTenpoParams_(hPayload);
 
   var dateFields = Object.keys(hPayload).filter(function(k) { return k.match(/Date/i) || k.match(/sagyo/i); });
   var fromField = null;
@@ -1904,9 +1908,12 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     cookies = mergeCookies_(cookies, sResp);
     historyHtml = sResp.getContentText();
     hPayload = extractAllFormFields_(historyHtml, hFormName);
+    applyTenpoParams_(hPayload); // 検索応答後も再度店舗パラメータを適用
   }
 
   var ePayload = JSON.parse(JSON.stringify(hPayload));
+  applyTenpoParams_(ePayload); // CSV出力用ペイロードにも適用
+
   buttons = Object.keys(hPayload).filter(function(k) { return k.match(/:do[A-Z]/); });
   var csvBtn = null;
   for (var i = 0; i < buttons.length; i++) {
