@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react'
 import SideNav from '@/components/layout/SideNav'
 import BottomNav from '@/components/layout/BottomNav'
 import { SalesMoreMenu } from '@/components/layout/SalesMoreMenu'
+import { APP_VERSION, BUILD_TIMESTAMP } from '@/lib/version'
 
 const SIDEBAR_STORAGE_KEY = 'dashboard-sidebar-collapsed'
 const SIDEBAR_STORAGE_EVENT = 'dashboard-sidebar-storage-change'
@@ -91,7 +92,12 @@ export default function DashboardLayout({
         }`}
       >
         <header className="flex h-14 shrink-0 items-center justify-between bg-white px-4 shadow-sm md:hidden">
-          <span className="font-bold tracking-wider text-gray-900">KENNEL</span>
+          <div className="flex items-center gap-2">
+            <span className="font-bold tracking-wider text-gray-900">KENNEL</span>
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-mono font-semibold text-emerald-800 border border-emerald-300">
+              {APP_VERSION} ({BUILD_TIMESTAMP})
+            </span>
+          </div>
           <SalesMoreMenu variant="header" />
         </header>
 
