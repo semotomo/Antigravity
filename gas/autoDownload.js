@@ -719,6 +719,13 @@ function extractAllFormFields_(html, formIdPrefix) {
     var name = nameMatch[1];
     if (formIdPrefix && name.indexOf(formIdPrefix) === -1) continue;
 
+    // checkboxやradioの場合はchecked属性がある場合のみ取得する（チェックがないものは送信しない）
+    var isCheckbox = tag.match(/type\s*=\s*["']checkbox["']/i);
+    var isRadio = tag.match(/type\s*=\s*["']radio["']/i);
+    if ((isCheckbox || isRadio) && !tag.match(/checked/i)) {
+      continue;
+    }
+
     var valueMatch = tag.match(/value\s*=\s*"([^"]*)"/i) ||
                      tag.match(/value\s*=\s*'([^']*)'/i) ||
                      tag.match(/value\s*=\s*([^\s>]+)/i);
@@ -1874,21 +1881,49 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 
   // 店舗グループIDおよび店舗グループ名を検索条件に動的セットするヘルパー
   var applyTenpoParams_ = function(targetPayload) {
-    if (posConfig && posConfig.tenpoGroupId) {
-      var tenpoFields = Object.keys(targetPayload).filter(function(k) { return k.match(/Tenpo/i) || k.match(/Group/i); });
-      for (var i = 0; i < tenpoFields.length; i++) {
-        if (tenpoFields[i].match(/Name/i)) {
-          if (posConfig.tenpoGroupName) targetPayload[tenpoFields[i]] = posConfig.tenpoGroupName;
-        } else {
-          targetPayload[tenpoFields[i]] = posConfig.tenpoGroupId;
+    var storeNameTarget = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1) ? 'わんわん' : 'からつケンネル';
+    var foundValue = null;
+
+    // HTML内のすべての<select>タグからoptionをスキャン
+    var selectRegex = /<select[^>]*name\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
+    var sMatch;
+    while ((sMatch = selectRegex.exec(historyHtml)) !== null) {
+      var selectName = sMatch[1];
+      var optionsHtml = sMatch[2];
+      
+      // 店舗関連のセレクトボックスである場合
+      if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i)) {
+        var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
+        var optMatch;
+        while ((optMatch = optionRegex.exec(optionsHtml)) !== null) {
+          var optVal = optMatch[1];
+          var optText = optMatch[2].replace(/<[^>]+>/g, '').trim();
+          if (optText.indexOf(storeNameTarget) !== -1 && optVal) {
+            foundValue = optVal;
+            Logger.log('動的検出された店舗ID: ' + selectName + ' = ' + optVal + ' (' + optText + ')');
+            targetPayload[selectName] = optVal;
+          }
         }
       }
-      targetPayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
-      targetPayload[hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
-      if (posConfig.tenpoGroupName) {
-        targetPayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
-        targetPayload[hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
+    }
+
+    var finalValue = foundValue || posConfig.tenpoGroupId;
+    if (finalValue) {
+      var tenpoFields = Object.keys(targetPayload).filter(function(k) { return k.match(/Tenpo/i) || k.match(/Group/i); });
+      for (var i = 0; i < tenpoFields.length; i++) {
+        if (!tenpoFields[i].match(/Name/i)) {
+          targetPayload[tenpoFields[i]] = finalValue;
+        }
       }
+      targetPayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = finalValue;
+      targetPayload[hFormName + ':schTenpoGroup'] = finalValue;
+      targetPayload['includeChildBody:' + hFormName + ':schTenpo'] = finalValue;
+      targetPayload[hFormName + ':schTenpo'] = finalValue;
+    }
+
+    if (posConfig.tenpoGroupName) {
+      targetPayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
+      targetPayload[hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
     }
   };
 
