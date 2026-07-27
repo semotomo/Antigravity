@@ -1865,6 +1865,10 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     cookies = mergeCookies_(cookies, dashResponse);
   }
 
+  // ログイン成功後、対象店舗へ「セッション店舗の切り替え」を実行
+  var storeNameTarget = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1) ? 'わんわん' : 'からつケンネル';
+  cookies = switchStoreContext_(posConfig.baseUrl, cookies, storeNameTarget);
+
   var historyUrl = resolveUrl_(posConfig.baseUrl, POS_PATHS.SALES_HISTORY);
   var historyResponse = fetchWithCookies_(historyUrl, 'get', null, cookies);
   cookies = mergeCookies_(cookies, historyResponse);
@@ -2101,4 +2105,85 @@ function doGet(e) {
   return ContentService.createTextOutput(
     JSON.stringify(results)
   ).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===================================================================
+// 【店舗切替】ログインセッションのコンテキスト店舗を動的に切り替える
+// ===================================================================
+function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
+  Logger.log('【店舗切替】セッション店舗の切り替えを開始します。対象: ' + storeNameTarget);
+  
+  try {
+    var tcUrl = resolveUrl_(baseUrl, '/hm-hmma/view/hmma/hmma000/hmma00002.html');
+    var tcResp = fetchWithCookies_(tcUrl, 'get', null, cookies);
+    var tcCookies = mergeCookies_(cookies, tcResp);
+    var tcHtml = tcResp.getContentText();
+    
+    if (tcHtml.indexOf('店舗切替') === -1 && tcHtml.indexOf('店舗選択') === -1) {
+      Logger.log('店舗切替画面にアクセスできませんでした（ダッシュボードか別画面とみなしてスキップ）');
+      return cookies;
+    }
+    
+    var tcFormMatch = tcHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
+    var tcFormName = tcFormMatch ? tcFormMatch[1] : 'hmma00002Form';
+    var tcFields = extractAllFormFields_(tcHtml, tcFormName);
+    
+    var targetTenpoValue = null;
+    var selectRegex = /<select[^>]*name\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
+    var sMatch;
+    while ((sMatch = selectRegex.exec(tcHtml)) !== null) {
+      var selectName = sMatch[1];
+      var optionsHtml = sMatch[2];
+      
+      if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i)) {
+        var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
+        var optMatch;
+        while ((optMatch = optionRegex.exec(optionsHtml)) !== null) {
+          var optVal = optMatch[1];
+          var optText = optMatch[2].replace(/<[^>]+>/g, '').trim();
+          if (optText.indexOf(storeNameTarget) !== -1 && optVal) {
+            targetTenpoValue = optVal;
+            Logger.log('店舗切替用セレクトボックスで一致店舗を発見: ' + selectName + ' = ' + optVal + ' (' + optText + ')');
+            tcFields[selectName] = optVal;
+          }
+        }
+      }
+    }
+    
+    if (!targetTenpoValue) {
+      Logger.log('店舗切替画面に「' + storeNameTarget + '」に一致する店舗が見つかりませんでした。切り替えを行わずに現在のクッキーを返します。');
+      return cookies;
+    }
+    
+    var buttons = Object.keys(tcFields).filter(function(k) { return k.match(/:do[A-Z]/); });
+    var decisionBtn = null;
+    for (var i = 0; i < buttons.length; i++) {
+      if (buttons[i].match(/Decision/i) || buttons[i].match(/Select/i) || buttons[i].match(/Exec/i) || buttons[i].match(/Change/i)) {
+        decisionBtn = buttons[i];
+      }
+    }
+    if (!decisionBtn) {
+      decisionBtn = 'includeChildBody:' + tcFormName + ':doDecision';
+    }
+    
+    var postPayload = JSON.parse(JSON.stringify(tcFields));
+    postPayload[decisionBtn] = '決定';
+    for (var i = 0; i < buttons.length; i++) {
+      if (buttons[i] !== decisionBtn) delete postPayload[buttons[i]];
+    }
+    
+    var tcFormAction = extractFormAction_(tcHtml, tcFormName);
+    var postUrl = tcFormAction ? resolveUrl_(baseUrl, tcFormAction) : tcUrl;
+    
+    Logger.log('店舗切替の決定をPOST送信します。URL=' + postUrl);
+    var postResp = fetchWithCookies_(postUrl, 'post', postPayload, tcCookies);
+    var finalCookies = mergeCookies_(tcCookies, postResp);
+    
+    Logger.log('【店舗切替】セッション店舗の切り替え完了。店舗名: ' + storeNameTarget + ', Status=' + postResp.getResponseCode());
+    return finalCookies;
+    
+  } catch (err) {
+    Logger.log('【店舗切替エラー】処理中に予期しないエラーが発生しました: ' + err.message);
+    return cookies;
+  }
 }

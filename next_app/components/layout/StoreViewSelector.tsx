@@ -33,14 +33,14 @@ export function StoreViewSelector({ initialView, storeType }: StoreViewSelectorP
         <span>表示対象の店舗</span>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 bg-gray-100 p-0.5 rounded-xl border border-gray-200">
+      <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-xl border border-gray-200">
         <button
           type="button"
           onClick={() => handleViewChange('all')}
-          className={`flex flex-col items-center justify-center gap-1 py-1.5 text-[11px] font-bold rounded-lg transition cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-bold rounded-lg transition duration-150 cursor-pointer ${
             view === 'all'
-              ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80'
-              : 'text-gray-500 hover:text-gray-800'
+              ? 'bg-gray-900 text-white shadow-md border border-gray-900'
+              : 'text-gray-500 hover:bg-white hover:text-gray-800'
           }`}
         >
           <Layers className="h-3.5 w-3.5" />
@@ -50,26 +50,26 @@ export function StoreViewSelector({ initialView, storeType }: StoreViewSelectorP
         <button
           type="button"
           onClick={() => handleViewChange('main')}
-          className={`flex flex-col items-center justify-center gap-1 py-1.5 text-[11px] font-bold rounded-lg transition cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-bold rounded-lg transition duration-150 cursor-pointer ${
             view === 'main'
-              ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80'
-              : 'text-gray-500 hover:text-gray-800'
+              ? 'bg-indigo-600 text-white shadow-md border border-indigo-600'
+              : 'text-gray-500 hover:bg-white hover:text-gray-850 text-indigo-500'
           }`}
         >
-          <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+          <Building2 className={`h-3.5 w-3.5 ${view === 'main' ? 'text-white' : 'text-indigo-500'}`} />
           本店のみ
         </button>
 
         <button
           type="button"
           onClick={() => handleViewChange('wanwan')}
-          className={`flex flex-col items-center justify-center gap-1 py-1.5 text-[11px] font-bold rounded-lg transition cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-1 py-2 text-[11px] font-bold rounded-lg transition duration-150 cursor-pointer ${
             view === 'wanwan'
-              ? 'bg-white text-gray-900 shadow-sm border border-gray-200/80'
-              : 'text-gray-500 hover:text-gray-800'
+              ? 'bg-amber-500 text-white shadow-md border border-amber-500'
+              : 'text-gray-500 hover:bg-white hover:text-gray-850 text-amber-500'
           }`}
         >
-          <Building2 className="h-3.5 w-3.5 text-amber-500" />
+          <Building2 className={`h-3.5 w-3.5 ${view === 'wanwan' ? 'text-white' : 'text-amber-500'}`} />
           わんわん
         </button>
       </div>
