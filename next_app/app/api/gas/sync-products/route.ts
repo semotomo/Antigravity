@@ -81,11 +81,19 @@ export async function POST() {
         success?: boolean
         master?: { success?: boolean; message?: string; csvRowCount?: number; syncResult?: { count?: number } }
         message?: string
+        logs?: string
       } | null
+
+      if (gasResult?.logs) {
+        console.log(`[GAS Logs for ${store.name}]:`, gasResult.logs)
+      }
 
       if (!gasResult || gasResult.success === false) {
         return NextResponse.json(
-          { message: `[${store.name}] GAS内部でエラーが発生しました: ${gasResult?.message || ''}` },
+          {
+            message: `[${store.name}] GAS内部でエラーが発生しました: ${gasResult?.message || ''}`,
+            logs: gasResult?.logs || '',
+          },
           { status: 500 }
         )
       }
@@ -93,7 +101,10 @@ export async function POST() {
       const masterResult = gasResult.master
       if (masterResult && masterResult.success === false) {
         return NextResponse.json(
-          { message: `[${store.name}] 商品マスタ同期失敗: ${masterResult.message || ''}` },
+          {
+            message: `[${store.name}] 商品マスタ同期失敗: ${masterResult.message || ''}`,
+            logs: gasResult?.logs || '',
+          },
           { status: 500 }
         )
       }

@@ -719,13 +719,6 @@ function extractAllFormFields_(html, formIdPrefix) {
     var name = nameMatch[1];
     if (formIdPrefix && name.indexOf(formIdPrefix) === -1) continue;
 
-    // checkboxやradioの場合はchecked属性がある場合のみ取得する（チェックがないものは送信しない）
-    var isCheckbox = tag.match(/type\s*=\s*["']checkbox["']/i);
-    var isRadio = tag.match(/type\s*=\s*["']radio["']/i);
-    if ((isCheckbox || isRadio) && !tag.match(/checked/i)) {
-      continue;
-    }
-
     var valueMatch = tag.match(/value\s*=\s*"([^"]*)"/i) ||
                      tag.match(/value\s*=\s*'([^']*)'/i) ||
                      tag.match(/value\s*=\s*([^\s>]+)/i);
@@ -1883,39 +1876,20 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   var hFormName = hFormMatch ? hFormMatch[1] : 'hmma0244AForm';
   var hPayload = extractAllFormFields_(historyHtml, hFormName);
 
-  // 一時デバッグ: 「店舗切替」ボタンを押したときのレスポンスを収集
-  var debugPayload = JSON.parse(JSON.stringify(hPayload));
-  var tcBtnName = Object.keys(debugPayload).filter(function(k) { return k.indexOf('doTenpoChange') !== -1; })[0];
-  if (!tcBtnName) {
-    tcBtnName = 'includeChildBody:' + hFormName + ':doTenpoChange';
-  }
-  debugPayload[tcBtnName] = '店舗切替';
-  // 他のdoXxxボタンを削除
-  Object.keys(debugPayload).forEach(function(k) {
-    if (k.match(/:do[A-Z]/) && k !== tcBtnName) delete debugPayload[k];
-  });
-  
-  var debugResp = fetchWithCookies_(historyUrl, 'post', debugPayload, cookies);
-  var debugHtml = debugResp.getContentText();
-  
-  var extractedSnippet = "";
-  var tcFormMatch = debugHtml.match(/<form[\s\S]*?<\/form>/gi);
-  if (tcFormMatch) {
-    for (var idx = 0; idx < tcFormMatch.length; idx++) {
-      if (tcFormMatch[idx].indexOf('わんわん') !== -1 || tcFormMatch[idx].indexOf('からつ') !== -1 || tcFormMatch[idx].indexOf('tenpo') !== -1 || tcFormMatch[idx].indexOf('Tenpo') !== -1) {
-        extractedSnippet += "【Form " + idx + "】\n" + tcFormMatch[idx] + "\n\n";
+  // 入出庫履歴フォーム(hmma0244AForm)内のチェックされていないチェックボックスをペイロードから除去する
+  var checkboxRegex = /<input[^>]*type\s*=\s*["']checkbox["'][^>]*>/gi;
+  var cbMatch;
+  while ((cbMatch = checkboxRegex.exec(historyHtml)) !== null) {
+    var cbTag = cbMatch[0];
+    var cbNameMatch = cbTag.match(/name\s*=\s*["']([^"']+)["']/i);
+    if (cbNameMatch) {
+      var cbName = cbNameMatch[1];
+      if (cbTag.indexOf('checked') === -1 && hPayload[cbName] !== undefined) {
+        delete hPayload[cbName];
       }
     }
   }
-  if (!extractedSnippet) {
-    extractedSnippet = "HTMLプレビュー:\n" + debugHtml.substring(0, 3000);
-  }
-  
-  return {
-    success: false,
-    message: "店舗切替画面のHTML解析結果:\n" + extractedSnippet,
-    data: []
-  };
+
 
   // 店舗グループIDおよび店舗グループ名を検索条件に動的セットするヘルパー
   var applyTenpoParams_ = function(targetPayload) {
@@ -1929,8 +1903,8 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
       var selectName = sMatch[1];
       var optionsHtml = sMatch[2];
       
-      // 店舗関連のセレクトボックスである場合
-      if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i)) {
+      // 店舗関連、または shop/Store/Group/Tenpo にマッチするセレクトボックスである場合
+      if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i) || selectName.match(/shop/i)) {
         var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
         var optMatch;
         while ((optMatch = optionRegex.exec(optionsHtml)) !== null) {
@@ -1947,7 +1921,9 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 
     var finalValue = foundValue || posConfig.tenpoGroupId;
     if (finalValue) {
-      var tenpoFields = Object.keys(targetPayload).filter(function(k) { return k.match(/Tenpo/i) || k.match(/Group/i); });
+      var tenpoFields = Object.keys(targetPayload).filter(function(k) { 
+        return k.match(/Tenpo/i) || k.match(/Group/i) || k.match(/shop/i) || k.match(/Store/i); 
+      });
       for (var i = 0; i < tenpoFields.length; i++) {
         if (!tenpoFields[i].match(/Name/i)) {
           targetPayload[tenpoFields[i]] = finalValue;
@@ -1957,6 +1933,8 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
       targetPayload[hFormName + ':schTenpoGroup'] = finalValue;
       targetPayload['includeChildBody:' + hFormName + ':schTenpo'] = finalValue;
       targetPayload[hFormName + ':schTenpo'] = finalValue;
+      targetPayload['includeChildBody:' + hFormName + ':shopName'] = finalValue;
+      targetPayload[hFormName + ':shopName'] = finalValue;
     }
 
     if (posConfig.tenpoGroupName) {
@@ -2135,6 +2113,8 @@ function doGet(e) {
     results.success = false;
     results.message = 'エラー: ' + err.message;
   }
+
+  results.logs = Logger.getLog();
 
   return ContentService.createTextOutput(
     JSON.stringify(results)
