@@ -1809,7 +1809,7 @@ function downloadProductMasterFromPOS_(posConfig) {
   var syncResult = null;
   var csvRowCount = 0;
   try {
-    var result = processProductMasterCSV_(csvResponse.getBlob());
+    var result = processProductMasterCSV_(csvResponse.getBlob(), storePrefix);
     syncResult = result;
     csvRowCount = result.count || 0;
   } catch (e) {

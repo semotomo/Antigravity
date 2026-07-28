@@ -1125,7 +1125,8 @@ function sendProductSalesDataToSupabase_(records) {
 //    I列(8) = 商品金額（売価）
 //    L列(11) = 商品原価
 // ===================================================================
-function processProductMasterCSV_(csvBlob) {
+function processProductMasterCSV_(csvBlob, storePrefix) {
+  var storeTag = storePrefix || '本店';
   var csvContent = csvBlob.getDataAsString(CONFIG.CSV_ENCODING);
 
   // BOM除去
@@ -1213,6 +1214,15 @@ function processProductMasterCSV_(csvBlob) {
       markupRate = Math.round(((sellingPrice - costPrice) / sellingPrice) * 10000) / 10000;
     }
 
+    var currentTag = storeTag;
+    if (productName.indexOf('(w)') !== -1 ||
+        productName.indexOf('(W)') !== -1 ||
+        productName.indexOf('（ｗ）') !== -1 ||
+        productName.indexOf('（Ｗ）') !== -1 ||
+        productName.indexOf('わんわん') !== -1) {
+      currentTag = 'わんわん';
+    }
+
     records.push({
       jan_code: janCode,
       product_name: productName,
@@ -1222,6 +1232,7 @@ function processProductMasterCSV_(csvBlob) {
       selling_price: sellingPrice,
       markup_rate: markupRate,
       is_active: true,
+      tags: currentTag,
     });
   }
 

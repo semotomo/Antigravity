@@ -57,8 +57,16 @@ export async function GET(request: Request) {
           const gasRes = await fetch(gasUrl.toString(), { method: 'GET', cache: 'no-store' })
           if (gasRes.ok) {
             const gasResult = await gasRes.json().catch(() => null)
-            if (gasResult?.history?.success && Array.isArray(gasResult.history.data)) {
-              gasRows.push(...gasResult.history.data)
+            if (gasResult?.history) {
+              if (gasResult.history.success === false) {
+                return NextResponse.json({
+                  success: false,
+                  message: gasResult.history.message || 'GAS実行エラーが発生しました。',
+                })
+              }
+              if (Array.isArray(gasResult.history.data)) {
+                gasRows.push(...gasResult.history.data)
+              }
             }
           }
         }

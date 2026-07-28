@@ -108,6 +108,28 @@ export async function POST() {
     revalidatePath('/sales/abc')
     revalidatePath('/products')
 
+    // -----------------------------------------------------------
+    // 3. (w)識別子付き商品の店舗タグ自動クリーンアップ
+    // -----------------------------------------------------------
+    try {
+      // (w), (W), （ｗ）, （Ｗ）, わんわん が名前に含まれる商品は tags = 'わんわん' に強制統一
+      await supabase
+        .from('products')
+        .update({ tags: 'わんわん' })
+        .or('product_name.ilike.%(w)%,product_name.ilike.%（ｗ）%,product_name.ilike.%(W)%,product_name.ilike.%（Ｗ）%,product_name.ilike.%わんわん%')
+
+      // tags = '本店' で、かつ名前に (w) などが含まれている残存不要レコードを削除
+      await supabase
+        .from('products')
+        .delete()
+        .eq('tags', '本店')
+        .or('product_name.ilike.%(w)%,product_name.ilike.%（ｗ）%,product_name.ilike.%(W)%,product_name.ilike.%（Ｗ）%')
+        
+      console.log('商品マスタ同期後の店舗タグクリーンアップが成功しました。')
+    } catch (cleanErr) {
+      console.error('店舗タグクリーンアップエラー:', cleanErr)
+    }
+
     // 同期履歴の更新
     await supabase.from('sync_history').upsert({
       sync_type: 'products_sync',
