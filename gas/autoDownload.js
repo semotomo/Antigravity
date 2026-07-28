@@ -1883,6 +1883,40 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   var hFormName = hFormMatch ? hFormMatch[1] : 'hmma0244AForm';
   var hPayload = extractAllFormFields_(historyHtml, hFormName);
 
+  // 一時デバッグ: 「店舗切替」ボタンを押したときのレスポンスを収集
+  var debugPayload = JSON.parse(JSON.stringify(hPayload));
+  var tcBtnName = Object.keys(debugPayload).filter(function(k) { return k.indexOf('doTenpoChange') !== -1; })[0];
+  if (!tcBtnName) {
+    tcBtnName = 'includeChildBody:' + hFormName + ':doTenpoChange';
+  }
+  debugPayload[tcBtnName] = '店舗切替';
+  // 他のdoXxxボタンを削除
+  Object.keys(debugPayload).forEach(function(k) {
+    if (k.match(/:do[A-Z]/) && k !== tcBtnName) delete debugPayload[k];
+  });
+  
+  var debugResp = fetchWithCookies_(historyUrl, 'post', debugPayload, cookies);
+  var debugHtml = debugResp.getContentText();
+  
+  var extractedSnippet = "";
+  var tcFormMatch = debugHtml.match(/<form[\s\S]*?<\/form>/gi);
+  if (tcFormMatch) {
+    for (var idx = 0; idx < tcFormMatch.length; idx++) {
+      if (tcFormMatch[idx].indexOf('わんわん') !== -1 || tcFormMatch[idx].indexOf('からつ') !== -1 || tcFormMatch[idx].indexOf('tenpo') !== -1 || tcFormMatch[idx].indexOf('Tenpo') !== -1) {
+        extractedSnippet += "【Form " + idx + "】\n" + tcFormMatch[idx] + "\n\n";
+      }
+    }
+  }
+  if (!extractedSnippet) {
+    extractedSnippet = "HTMLプレビュー:\n" + debugHtml.substring(0, 3000);
+  }
+  
+  return {
+    success: false,
+    message: "店舗切替画面のHTML解析結果:\n" + extractedSnippet,
+    data: []
+  };
+
   // 店舗グループIDおよび店舗グループ名を検索条件に動的セットするヘルパー
   var applyTenpoParams_ = function(targetPayload) {
     var storeNameTarget = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1) ? 'わんわん' : 'からつケンネル';
