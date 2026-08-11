@@ -228,6 +228,42 @@ export interface Database {
         }
         Relationships: []
       }
+      realtime_history_cache: {
+        Row: {
+          store_id: number
+          start_date: string
+          end_date: string
+          history_rows: Json
+          item_count: number
+          gas_count: number
+          transfer_count: number
+          fetched_at: string
+          updated_at: string
+        }
+        Insert: {
+          store_id: number
+          start_date: string
+          end_date: string
+          history_rows?: Json
+          item_count?: number
+          gas_count?: number
+          transfer_count?: number
+          fetched_at?: string
+          updated_at?: string
+        }
+        Update: {
+          store_id?: number
+          start_date?: string
+          end_date?: string
+          history_rows?: Json
+          item_count?: number
+          gas_count?: number
+          transfer_count?: number
+          fetched_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       stores: {
         Row: {
           id: number

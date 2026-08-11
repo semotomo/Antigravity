@@ -65,6 +65,15 @@ const differentDetails = sharedPairs.filter((rows) => {
   )
 })
 
+const wanwanNamePattern = /[\(（]\s*[wｗ]\s*[\)）]/i
+const inactiveWanwanRowsInMain = products.filter(
+  (row) => row.store_id === 7 && !row.is_active && wanwanNamePattern.test(row.product_name || ''),
+)
+const inactiveWanwanIdsInMain = new Set(inactiveWanwanRowsInMain.map((row) => row.id))
+const wanwanJanCodes = new Set(
+  products.filter((row) => row.store_id === 6).map((row) => row.jan_code),
+)
+
 const result = {
   totalProducts: products.length,
   activeMain: products.filter((row) => row.store_id === 7 && row.is_active).length,
@@ -81,6 +90,16 @@ const result = {
   ).length,
   orderStoreMismatches: orders.filter(
     (order) => order.product_id && order.store_id && productById.get(order.product_id)?.store_id !== order.store_id,
+  ).length,
+  inactiveWanwanRowsInMain: inactiveWanwanRowsInMain.length,
+  inactiveWanwanRowsWithJanConflict: inactiveWanwanRowsInMain.filter(
+    (row) => wanwanJanCodes.has(row.jan_code),
+  ).length,
+  inactiveWanwanRowsWithAliasReferences: aliases.filter(
+    (alias) => inactiveWanwanIdsInMain.has(alias.product_id),
+  ).length,
+  inactiveWanwanRowsWithOrderReferences: orders.filter(
+    (order) => inactiveWanwanIdsInMain.has(order.product_id),
   ).length,
 }
 

@@ -30,6 +30,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
   const [results, setResults] = useState<ProductListRow[]>([])
   const [loading, setLoading] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(null)
+  const [includeInactive, setIncludeInactive] = useState(false)
 
   // 300ms のデバウンス付きでサーバーサイド検索APIを呼び出す
   useEffect(() => {
@@ -44,7 +45,11 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
 
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/products/search?q=${encodeURIComponent(trimmed)}`)
+        const params = new URLSearchParams({ q: trimmed })
+        if (includeInactive) {
+          params.set('includeInactive', 'true')
+        }
+        const res = await fetch(`/api/products/search?${params.toString()}`)
         if (res.ok) {
           const result = await res.json()
           if (result.success && Array.isArray(result.data)) {
@@ -59,7 +64,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
     }, 300) // 300ms デバウンス
 
     return () => clearTimeout(timer)
-  }, [query])
+  }, [includeInactive, query])
 
   const columns: DataTableColumn<ProductListRow>[] = [
     {
@@ -198,6 +203,15 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
                   />
                 </div>
               </div>
+            </label>
+            <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(event) => setIncludeInactive(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+              />
+              停止商品も表示
             </label>
           </div>
 

@@ -23,10 +23,14 @@ test('DB移行は商品を店舗IDとJANの複合キーで分離する', () => {
 
 test('商品検索と手動CSV取込はタグではなく店舗IDを使う', () => {
   const searchRoute = source('next_app/app/api/products/search/route.ts')
+  const productsBoard = source('next_app/components/products/ProductsBoard.tsx')
   const productActions = source('next_app/app/actions/products.ts')
 
   assert.match(searchRoute, /queryBuilder = queryBuilder\.eq\('store_id', productStoreId\)/)
   assert.doesNotMatch(searchRoute, /tags\.ilike/)
+  assert.match(searchRoute, /queryBuilder = queryBuilder\.eq\('is_active', true\)/)
+  assert.match(searchRoute, /searchParams\.get\('includeInactive'\) === 'true'/)
+  assert.match(productsBoard, /停止商品も表示/)
   assert.match(productActions, /onConflict: 'store_id,jan_code'/)
   assert.match(productActions, /\.eq\('store_id', store\.id\)/)
 })

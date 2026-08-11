@@ -11,6 +11,22 @@
     {
       "path": "/api/cron/products/sync",
       "schedule": "0 18 * * 0"
+    },
+    {
+      "path": "/api/cron/history-main-17",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/history-wanwan-17",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/history-main-19",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/history-wanwan-19",
+      "schedule": "0 9 * * *"
     }
   ]
 }

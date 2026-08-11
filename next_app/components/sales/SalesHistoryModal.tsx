@@ -19,8 +19,12 @@ type HistoryRow = {
 export function SalesHistoryModal() {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isLiveRefresh, setIsLiveRefresh] = useState(false)
+  const [hasLoadedCache, setHasLoadedCache] = useState(false)
+  const [hasCache, setHasCache] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<HistoryRow[]>([])
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   
   // デフォルトは今日
   const getToday = () => {
@@ -33,14 +37,18 @@ export function SalesHistoryModal() {
 
   const [targetStore, setTargetStore] = useState<{ name: string; id: string } | null>(null)
 
-  const fetchHistory = async () => {
+  const fetchHistory = async (refresh: boolean) => {
     setIsLoading(true)
+    setIsLiveRefresh(refresh)
     setError(null)
 
     try {
       const url = new URL('/api/gas/history', window.location.origin)
-      url.searchParams.append('startDate', startDate)
-      url.searchParams.append('endDate', endDate)
+      if (refresh) {
+        url.searchParams.set('refresh', 'true')
+        url.searchParams.set('startDate', startDate)
+        url.searchParams.set('endDate', endDate)
+      }
 
       const res = await fetch(url.toString(), {
         method: 'GET',
@@ -53,6 +61,10 @@ export function SalesHistoryModal() {
 
       if (json.success && Array.isArray(json.data)) {
         setData(json.data)
+        setHasCache(Boolean(json.hasCache))
+        setFetchedAt(typeof json.fetchedAt === 'string' ? json.fetchedAt : null)
+        if (typeof json.startDate === 'string') setStartDate(json.startDate)
+        if (typeof json.endDate === 'string') setEndDate(json.endDate)
         if (json.targetStore) {
           setTargetStore(json.targetStore)
         }
@@ -64,13 +76,33 @@ export function SalesHistoryModal() {
       setError(err instanceof Error ? err.message : '予期せぬエラーが発生しました。')
     } finally {
       setIsLoading(false)
+      setIsLiveRefresh(false)
+      setHasLoadedCache(true)
     }
   }
+
+  const openModal = () => {
+    setIsOpen(true)
+    if (!hasLoadedCache) {
+      void fetchHistory(false)
+    }
+  }
+
+  const formattedFetchedAt = fetchedAt
+    ? new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(fetchedAt))
+    : null
 
   return (
     <>
       <button
-        onClick={() => setIsOpen(true)}
+        onClick={openModal}
         className="inline-flex items-center gap-2 rounded-full border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
       >
         <RefreshCcw className="h-4 w-4" />
@@ -113,12 +145,12 @@ export function SalesHistoryModal() {
                 />
               </div>
               <button
-                onClick={fetchHistory}
+                onClick={() => void fetchHistory(true)}
                 disabled={isLoading}
                 className="flex items-center gap-2 rounded-lg bg-gray-900 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-50"
               >
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                データ取得
+                POSから再取得
               </button>
               
               <div className="ml-auto flex items-center gap-3">
@@ -135,6 +167,13 @@ export function SalesHistoryModal() {
               </div>
             </div>
 
+            <div className="border-b border-sky-100 bg-sky-50/70 px-6 py-2 text-xs text-sky-800">
+              {formattedFetchedAt
+                ? `保存履歴: ${formattedFetchedAt}（${startDate} 〜 ${endDate}）`
+                : '保存履歴はまだありません。'}
+              <span className="ml-3 text-sky-600">毎日17時・19時までに自動更新</span>
+            </div>
+
             <div className="flex-1 overflow-auto p-6">
               {error && (
                 <div className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-700 border border-red-200">
@@ -145,7 +184,11 @@ export function SalesHistoryModal() {
               {isLoading ? (
                 <div className="flex h-64 flex-col items-center justify-center text-gray-500 gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-sky-500" />
-                  <p>POSポータルからデータを取得しています。しばらくお待ちください...</p>
+                  <p>
+                    {isLiveRefresh
+                      ? 'POSポータルからデータを取得しています。しばらくお待ちください...'
+                      : '前回保存した履歴を読み込んでいます...'}
+                  </p>
                 </div>
               ) : data.length > 0 ? (
                 <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -180,7 +223,9 @@ export function SalesHistoryModal() {
                 </div>
               ) : (
                 <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-gray-200 text-gray-400">
-                  「データ取得」ボタンをクリックして履歴を読み込んでください。
+                  {hasCache
+                    ? '保存されている履歴は0件です。'
+                    : '「POSから再取得」で最初の履歴を保存してください。'}
                 </div>
               )}
             </div>

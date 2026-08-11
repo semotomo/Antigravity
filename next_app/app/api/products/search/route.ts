@@ -18,6 +18,7 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const q = searchParams.get('q')?.trim() || ''
+    const includeInactive = searchParams.get('includeInactive') === 'true'
 
     if (!q) {
       return NextResponse.json({ success: true, data: [] })
@@ -35,6 +36,11 @@ export async function GET(request: Request) {
     // 商品の所属はタグ文字列ではなく店舗IDで厳密に分離する
     if (productStoreId !== null) {
       queryBuilder = queryBuilder.eq('store_id', productStoreId)
+    }
+
+    // 通常検索では停止商品を除外し、必要な場合だけ画面の切り替えで含める
+    if (!includeInactive) {
+      queryBuilder = queryBuilder.eq('is_active', true)
     }
 
     // 各キーワードに対して、商品名・JAN・ブランド・カテゴリ・タグのいずれかに部分一致するAND条件をチェーンする
