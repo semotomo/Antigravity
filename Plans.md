@@ -20,7 +20,21 @@
 
 ## タスク一覧
 
+## 🔴 進行中のタスク
+
+- なし
+
 ## ✅ 完了済みのタスク
+
+- [x] POS商品マスタ本番反映・リアルタイム履歴店舗切替修復 `cc:done`
+  - 対応内容: 履歴画面の`doSelectTenpoGroup`コールバックをGASで再現し、Next.jsの店舗ID対応・GASエラー表示・Vercel実行時間を修正。GAS v54とNext.js本番をデプロイ
+  - 完了確認: 2026-08-11（本番画面の履歴: 本店2,532件、わんわん3,387件。商品同期: 本店3,778件、わんわん2,754件。`origin/main`: `0d7e375`、Vercelデプロイ成功）
+  - 対象: `gas/autoDownload.js`、`next_app/app/api/gas/sync-products/route.ts`、`next_app/app/api/gas/history/route.ts`、`next_app/components/sales/SalesHistoryModal.tsx`
+
+- [x] POS商品マスタの店舗分離・同期修復 `cc:done`
+  - 対応内容: GAS/Git接続確認、店舗グループID検証、本店CSV 0件修復、CSV店舗ガード、共通JANの複数店舗タグ、店舗単位の旧所属整理、GAS v53デプロイ
+  - 完了確認: 2026-08-11（本店3,778件、わんわん2,754件、共通JAN1,359件を本番同期・監査）
+  - 対象: `gas/autoDownload.js`、`gas/importCSV.js`、`next_app/app/api/gas/sync-products/route.ts`、Supabase `products`
 
 - [x] Next.js 売上/バーコード follow-up 修正 `cc:done`
   - 対応内容: iPad/写真バーコード読取の改善と、ホテル系サービスを「サービス以外」から除外する判定強化
