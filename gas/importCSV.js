@@ -1119,12 +1119,49 @@ function sendProductSalesDataToSupabase_(records) {
 //
 // ※ このCSVにはヘッダー行がない
 // ※ カラム位置は以下の通り（0-indexed）:
-//    D列(3) = JANコード
+//    D列(3) = JANコード（列構造の再調査中は安全側として従来値を維持）
 //    F列(5) = 商品グループ
 //    G列(6) = 商品名
 //    I列(8) = 商品金額（売価）
 //    L列(11) = 商品原価
 // ===================================================================
+function normalizeProductMasterJanCode_(value) {
+  return (value || '').toString().trim()
+    .replace(/[０-９]/g, function(char) {
+      return String.fromCharCode(char.charCodeAt(0) - 0xFEE0);
+    })
+    .replace(/\.0$/, '');
+}
+
+
+function splitProductStoreTags_(tags) {
+  if (!tags) return [];
+  return tags.toString().split(',').map(function(tag) {
+    return tag.trim();
+  }).filter(function(tag, index, allTags) {
+    return tag && allTags.indexOf(tag) === index;
+  });
+}
+
+
+function mergeProductStoreTag_(existingTags, storeTag) {
+  var tags = splitProductStoreTags_(existingTags);
+  if (tags.indexOf(storeTag) === -1) tags.push(storeTag);
+  var preferredOrder = { '本店': 1, 'わんわん': 2 };
+  tags.sort(function(left, right) {
+    return (preferredOrder[left] || 99) - (preferredOrder[right] || 99);
+  });
+  return tags.join(',');
+}
+
+
+function removeProductStoreTag_(existingTags, storeTag) {
+  return splitProductStoreTags_(existingTags).filter(function(tag) {
+    return tag !== storeTag;
+  }).join(',');
+}
+
+
 function processProductMasterCSV_(csvBlob, storePrefix) {
   var storeTag = storePrefix || '本店';
   var csvContent = csvBlob.getDataAsString(CONFIG.CSV_ENCODING);
@@ -1154,7 +1191,7 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 
   // ヘッダーなし — カラム位置を固定で指定（0-indexed）
   var COL = {
-    JAN_CODE: 3,       // D列 — JANコード
+    JAN_CODE: 3,       // D列 — JANコード（列構造を再調査中）
     PRODUCT_GROUP: 5,  // F列 — 商品グループ
     PRODUCT_NAME: 6,   // G列 — 商品名
     SELLING_PRICE: 8,  // I列 — 商品金額（売価）
@@ -1176,11 +1213,7 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
     }
 
     // JANコードを文字列として取得
-    var janCode = (row[COL.JAN_CODE] || '').toString().trim();
-    // 浮動小数の末尾「.0」を削除（例: 490123456789.0 -> 490123456789）
-    if (janCode.indexOf('.0') !== -1) {
-      janCode = janCode.replace(/\.0$/, '');
-    }
+    var janCode = normalizeProductMasterJanCode_(row[COL.JAN_CODE]);
     var productName = (row[COL.PRODUCT_NAME] || '').trim();
 
     // JANコードまたは商品名が空の行はスキップ
@@ -1214,15 +1247,6 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
       markupRate = Math.round(((sellingPrice - costPrice) / sellingPrice) * 10000) / 10000;
     }
 
-    var currentTag = storeTag;
-    if (productName.indexOf('(w)') !== -1 ||
-        productName.indexOf('(W)') !== -1 ||
-        productName.indexOf('（ｗ）') !== -1 ||
-        productName.indexOf('（Ｗ）') !== -1 ||
-        productName.indexOf('わんわん') !== -1) {
-      currentTag = 'わんわん';
-    }
-
     records.push({
       jan_code: janCode,
       product_name: productName,
@@ -1232,7 +1256,8 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
       selling_price: sellingPrice,
       markup_rate: markupRate,
       is_active: true,
-      tags: currentTag,
+      // 事前に検証したCSVの店舗を正とし、商品名から店舗を推測しない
+      tags: storeTag,
     });
   }
 
@@ -1247,15 +1272,16 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
   }
 
   if (records.length === 0) {
-    return { success: true, count: 0, message: '送信対象の商品データがありませんでした。' };
+    return { success: false, count: 0, message: '送信対象の商品データがありませんでした。' };
   }
 
-  // 100件ずつSupabaseに送信（GASタイムアウト対策）
-  var chunkSize = 100;
+  // JAN一覧をGET URLへ載せるため、GASのURLFetch URL長上限を超えない40件単位にする
+  var chunkSize = 40;
   var sentCount = 0;
+  var syncStartedAt = new Date().toISOString();
   for (var i = 0; i < records.length; i += chunkSize) {
     var chunk = records.slice(i, i + chunkSize);
-    upsertProductMasterToSupabase_(chunk);
+    upsertProductMasterToSupabase_(chunk, syncStartedAt, storeTag);
     sentCount += chunk.length;
 
     if (i + chunkSize < records.length) {
@@ -1263,9 +1289,13 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
     }
   }
 
+  // 全UPSERT成功後だけ、今回のCSVに存在しなかった商品の店舗所属を外す
+  reconcileStaleProductStoreMembership_(storeTag, syncStartedAt);
+
   return {
     success: true,
     count: sentCount,
+    syncStartedAt: syncStartedAt,
     message: sentCount + '件の商品マスタをSupabaseに同期しました。'
   };
 }
@@ -1275,22 +1305,25 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 // 【商品マスタ同期】Supabaseの products テーブルへ upsert
 // jan_code のUNIQUE制約を利用して重複時は更新
 // ===================================================================
-function upsertProductMasterToSupabase_(records) {
+function upsertProductMasterToSupabase_(records, syncStartedAt, storeTag) {
   var props = PropertiesService.getScriptProperties();
   var supabaseUrl = props.getProperty('SUPABASE_URL');
   var supabaseKey = props.getProperty('SUPABASE_KEY');
 
   if (!supabaseUrl || !supabaseKey || supabaseUrl.trim() === '') {
-    Logger.log('Supabase設定が未完了のため商品マスタ連携をスキップしました');
-    return;
+    throw new Error('Supabase設定が未完了です。');
   }
 
   var url = supabaseUrl + '/rest/v1/products?on_conflict=jan_code';
 
+  // 同じJANが複数店舗に存在する場合は、既存店舗タグを失わないように統合する
+  var janCodes = records.map(function(record) { return record.jan_code; });
+  var existingTagsByJan = fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey);
+
   // updated_at を現在時刻に設定
-  var now = new Date().toISOString();
   for (var i = 0; i < records.length; i++) {
-    records[i].updated_at = now;
+    records[i].tags = mergeProductStoreTag_(existingTagsByJan[records[i].jan_code], storeTag);
+    records[i].updated_at = syncStartedAt;
   }
 
   var options = {
@@ -1310,11 +1343,123 @@ function upsertProductMasterToSupabase_(records) {
     var response = UrlFetchApp.fetch(url, options);
     var code = response.getResponseCode();
     if (code !== 201 && code !== 200 && code !== 204) {
-      Logger.log('商品マスタSupabase送信エラー: Status ' + code + ', ' + response.getContentText());
+      throw new Error('商品マスタSupabase送信エラー: Status ' + code + ', ' + response.getContentText().substring(0, 500));
     } else {
       Logger.log('商品マスタSupabase送信成功: ' + records.length + '件');
     }
   } catch (e) {
     Logger.log('商品マスタSupabase HTTPリクエスト例外: ' + e.message);
+    throw e;
   }
+}
+
+
+// ===================================================================
+// 【商品マスタ同期】既存商品の店舗タグを取得
+// ===================================================================
+function fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey) {
+  if (!janCodes || janCodes.length === 0) return {};
+  var quotedCodes = janCodes.map(function(janCode) {
+    return '"' + janCode.replace(/"/g, '\\"') + '"';
+  }).join(',');
+  var url = supabaseUrl + '/rest/v1/products?select=jan_code,tags&jan_code=in.(' +
+    encodeURIComponent(quotedCodes) + ')';
+  var response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    headers: {
+      'apikey': supabaseKey,
+      'Authorization': 'Bearer ' + supabaseKey,
+    },
+    muteHttpExceptions: true,
+  });
+  var code = response.getResponseCode();
+  if (code !== 200) {
+    throw new Error('既存商品タグ取得エラー: Status ' + code + ', ' + response.getContentText().substring(0, 500));
+  }
+
+  var rows = JSON.parse(response.getContentText() || '[]');
+  var result = {};
+  for (var i = 0; i < rows.length; i++) {
+    result[rows[i].jan_code] = rows[i].tags || '';
+  }
+  return result;
+}
+
+
+// ===================================================================
+// 【商品マスタ同期】今回のCSVに存在しなかった商品の店舗所属を外す
+// ===================================================================
+function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
+  var props = PropertiesService.getScriptProperties();
+  var supabaseUrl = props.getProperty('SUPABASE_URL');
+  var supabaseKey = props.getProperty('SUPABASE_KEY');
+  if (!supabaseUrl || !supabaseKey || supabaseUrl.trim() === '') {
+    throw new Error('Supabase設定が未完了です。');
+  }
+
+  var staleRows = [];
+  for (var offset = 0; ; offset += 1000) {
+    var selectUrl = supabaseUrl + '/rest/v1/products?select=id,tags' +
+      '&tags=ilike.' + encodeURIComponent('*' + storeTag + '*') +
+      '&or=(updated_at.lt.' + encodeURIComponent(syncStartedAt) + ',updated_at.is.null)' +
+      '&limit=1000&offset=' + offset;
+    var selectResponse = UrlFetchApp.fetch(selectUrl, {
+      method: 'get',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': 'Bearer ' + supabaseKey,
+      },
+      muteHttpExceptions: true,
+    });
+    if (selectResponse.getResponseCode() !== 200) {
+      throw new Error('旧商品取得エラー: Status ' + selectResponse.getResponseCode() + ', ' +
+        selectResponse.getContentText().substring(0, 500));
+    }
+    var page = JSON.parse(selectResponse.getContentText() || '[]');
+    staleRows = staleRows.concat(page);
+    if (page.length < 1000) break;
+  }
+
+  var updateGroups = {};
+  for (var i = 0; i < staleRows.length; i++) {
+    var remainingTags = removeProductStoreTag_(staleRows[i].tags, storeTag);
+    // ilikeの部分一致だけで拾った行に対象タグがなければ変更しない
+    if (remainingTags === staleRows[i].tags) continue;
+    var groupKey = remainingTags || '__NO_TAGS__';
+    if (!updateGroups[groupKey]) updateGroups[groupKey] = [];
+    updateGroups[groupKey].push(staleRows[i].id);
+  }
+
+  var updatedCount = 0;
+  var groupKeys = Object.keys(updateGroups);
+  for (var groupIndex = 0; groupIndex < groupKeys.length; groupIndex++) {
+    var groupKey = groupKeys[groupIndex];
+    var ids = updateGroups[groupKey];
+    for (var idIndex = 0; idIndex < ids.length; idIndex += 100) {
+      var idChunk = ids.slice(idIndex, idIndex + 100);
+      var remainingTags = groupKey === '__NO_TAGS__' ? null : groupKey;
+      var patchUrl = supabaseUrl + '/rest/v1/products?id=in.(' + idChunk.join(',') + ')';
+      var patchResponse = UrlFetchApp.fetch(patchUrl, {
+        method: 'patch',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          tags: remainingTags,
+          is_active: Boolean(remainingTags),
+        }),
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': 'Bearer ' + supabaseKey,
+          'Prefer': 'return=minimal',
+        },
+        muteHttpExceptions: true,
+      });
+      var patchCode = patchResponse.getResponseCode();
+      if (patchCode !== 200 && patchCode !== 204) {
+        throw new Error('旧商品所属更新エラー: Status ' + patchCode + ', ' +
+          patchResponse.getContentText().substring(0, 500));
+      }
+      updatedCount += idChunk.length;
+    }
+  }
+  Logger.log('旧商品所属の整理完了: 店舗=' + storeTag + ', 更新=' + updatedCount + '件, 基準時刻=' + syncStartedAt);
 }

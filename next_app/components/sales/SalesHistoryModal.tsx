@@ -46,11 +46,11 @@ export function SalesHistoryModal() {
         method: 'GET',
       })
 
+      const json = await res.json().catch(() => null)
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
+        throw new Error(json?.message || `HTTP error! status: ${res.status}`)
       }
 
-      const json = await res.json()
       if (json.success && Array.isArray(json.data)) {
         setData(json.data)
         if (json.targetStore) {

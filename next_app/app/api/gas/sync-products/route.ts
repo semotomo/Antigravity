@@ -3,11 +3,32 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreContext } from '@/lib/storeAuth'
 
+export const maxDuration = 300
+
+type ProductMasterStore = {
+  name: '本店' | 'わんわん'
+  tenpoGroupId: '11098' | '11099'
+  tenpoGroupName: 'からつケンネル本店' | 'わんわんペットセンター'
+}
+
+const PRODUCT_MASTER_STORES: Record<'main' | 'wanwan', ProductMasterStore> = {
+  main: {
+    name: '本店',
+    tenpoGroupId: '11098',
+    tenpoGroupName: 'からつケンネル本店',
+  },
+  wanwan: {
+    name: 'わんわん',
+    tenpoGroupId: '11099',
+    tenpoGroupName: 'わんわんペットセンター',
+  },
+}
+
 // 商品マスタ同期用APIルート
 // GAS Web App を mode=master で呼び出す
 export async function POST() {
   try {
-    const supabase = await createClient() as any
+    const supabase = await createClient()
     const {
       data: { user },
       error,
@@ -30,18 +51,14 @@ export async function POST() {
     }
 
     const storeContext = await getStoreContext()
-    let targetStores: Array<{ name: string; pos_group_id: string | null; pos_group_name: string | null }> = []
+    let targetStores: ProductMasterStore[] = []
 
     if (storeContext.currentView === 'wanwan') {
-      targetStores = [{ name: 'わんわん', pos_group_id: '11054', pos_group_name: 'わんわん' }]
+      targetStores = [PRODUCT_MASTER_STORES.wanwan]
     } else if (storeContext.currentView === 'main') {
-      targetStores = [{ name: '本店', pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
+      targetStores = [PRODUCT_MASTER_STORES.main]
     } else {
-      const { data: dbStores } = await supabase
-        .from('stores')
-        .select('name, pos_group_id, pos_group_name')
-        .not('pos_group_id', 'is', null)
-      targetStores = dbStores && dbStores.length > 0 ? dbStores : [{ name: '本店', pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
+      targetStores = [PRODUCT_MASTER_STORES.main, PRODUCT_MASTER_STORES.wanwan]
     }
 
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -54,17 +71,18 @@ export async function POST() {
       }
 
       const url = new URL(gasWebAppUrl)
-      url.searchParams.set('mode', 'master')
-      if (store.pos_group_id) {
-        url.searchParams.set('tenpoGroupId', store.pos_group_id)
-      }
-      if (store.pos_group_name) {
-        url.searchParams.set('tenpoGroupName', store.pos_group_name)
+      const bodyPayload = {
+        mode: 'master',
+        tenpoGroupId: store.tenpoGroupId,
+        tenpoGroupName: store.tenpoGroupName,
+        targetStoreName: store.name,
       }
 
       const response = await fetch(url.toString(), {
-        method: 'GET',
+        method: 'POST',
         cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyPayload)
       })
 
       if (!response.ok) {
@@ -119,33 +137,11 @@ export async function POST() {
     revalidatePath('/sales/abc')
     revalidatePath('/products')
 
-    // -----------------------------------------------------------
-    // 3. (w)識別子付き商品の店舗タグ自動クリーンアップ
-    // -----------------------------------------------------------
-    try {
-      // (w), (W), （ｗ）, （Ｗ）, わんわん が名前に含まれる商品は tags = 'わんわん' に強制統一
-      await supabase
-        .from('products')
-        .update({ tags: 'わんわん' })
-        .or('product_name.ilike.%(w)%,product_name.ilike.%（ｗ）%,product_name.ilike.%(W)%,product_name.ilike.%（Ｗ）%,product_name.ilike.%わんわん%')
-
-      // tags = '本店' で、かつ名前に (w) などが含まれている残存不要レコードを削除
-      await supabase
-        .from('products')
-        .delete()
-        .eq('tags', '本店')
-        .or('product_name.ilike.%(w)%,product_name.ilike.%（ｗ）%,product_name.ilike.%(W)%,product_name.ilike.%（Ｗ）%')
-        
-      console.log('商品マスタ同期後の店舗タグクリーンアップが成功しました。')
-    } catch (cleanErr) {
-      console.error('店舗タグクリーンアップエラー:', cleanErr)
-    }
-
     // 同期履歴の更新
     await supabase.from('sync_history').upsert({
       sync_type: 'products_sync',
       last_synced_at: new Date().toISOString(),
-    })
+    } as never)
 
     const totalSyncCount = syncResults.reduce((sum, r) => sum + r.syncCount, 0)
     const totalCsvCount = syncResults.reduce((sum, r) => sum + r.csvCount, 0)

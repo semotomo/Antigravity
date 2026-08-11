@@ -467,7 +467,8 @@ function downloadFromPOS_(posConfig, year, month) {
   }
 
   return {
-    success: true,
+    success: Boolean(syncResult && syncResult.success !== false),
+    message: syncResult && syncResult.message ? syncResult.message : '',
     fileName: fileName,
     importResult: importResult,
   };
@@ -907,7 +908,7 @@ function setupPOSConnection() {
 // ===================================================================
 // ScriptPropertiesから接続情報を取得
 // ===================================================================
-function getPOSConfig_() {
+function getPOSConfig_(e) {
   var props = PropertiesService.getScriptProperties();
   var baseUrl = props.getProperty('POS_BASE_URL');
 
@@ -1087,7 +1088,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
   var getLoginResponse = UrlFetchApp.fetch(loginUrl, { method: 'get', followRedirects: true, muteHttpExceptions: true });
   var cookies = extractCookies_(getLoginResponse) || '';
   var loginPageHtml = getLoginResponse.getContentText();
-  
+
   var formNameMatch = loginPageHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
   var formName = formNameMatch ? formNameMatch[1] : 'hmma00000Form';
   var loginPayload = extractAllFormFields_(loginPageHtml, formName);
@@ -1122,11 +1123,11 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
     var dashResponse = fetchWithCookies_(redirectUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, dashResponse);
     Logger.log('ダッシュボード: Status=' + dashResponse.getResponseCode() + ', Size=' + dashResponse.getContentText().length);
-    
+
     // ダッシュボードからエクスポートページ(hmma02115)へのリンクを探す（セッション確立のため）
     var dashHtml = dashResponse.getContentText();
     var exportLink = findLinkInHtml_(dashHtml, 'hmma02115'); // .htmlを除去して部分一致を拡張
-    
+
     if (exportLink) {
       exportPageUrl = resolveUrl_(posConfig.baseUrl, exportLink);
       Logger.log('動的エクスポートURL抽出成功: ' + exportPageUrl);
@@ -1140,7 +1141,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
         if (match[1].indexOf('hmma') !== -1) allLinks.push(match[1]);
       }
       Logger.log('ダッシュボード内のhmmaリンク一覧: ' + allLinks.join('\n'));
-      
+
       // 商品別売上というテキストが含まれるaタグを探す
       var textMatch = dashHtml.match(/<a[^>]*href="([^"]*)"[^>]*>[^<]*商品別売上[^<]*<\/a>/i);
       if (textMatch) {
@@ -1160,7 +1161,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
 
   // STEP 2: 商品別売上ページ(hmma02115)にアクセス
   Logger.log('STEP 2: 商品別売上ページにアクセス中... URL: ' + exportPageUrl);
-  
+
   var exportResponse = fetchWithCookies_(exportPageUrl, 'get', null, cookies);
   cookies = mergeCookies_(cookies, exportResponse);
 
@@ -1213,7 +1214,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
   // STEP 4: エクスポート (doExport)
   var reloadedHtml = monthResponse.getContentText();
   Logger.log('月切替後ページ POST: Status=' + monthResponse.getResponseCode() + ', Size=' + reloadedHtml.length);
-  
+
   var exportPayload = extractAllFormFields_(reloadedHtml, formName);
   for (var k in exportPayload) {
     if (k.match(/:do[A-Z]/) && k.indexOf('doExport') === -1) delete exportPayload[k];
@@ -1226,7 +1227,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
   if (csvResponse.getResponseCode() !== 200) {
      return { success: false, message: 'CSVが正しく取得できませんでした。Status: ' + csvResponse.getResponseCode() };
   }
-  
+
   // CSVかどうかのチェック（HTMLが返ってきていないか）
   var contentType = csvResponse.getHeaders()['Content-Type'] || csvResponse.getHeaders()['content-type'] || '';
   if (contentType.indexOf('text/html') !== -1) {
@@ -1257,7 +1258,7 @@ function downloadProductSalesFromPOS_(posConfig, year, month) {
       Logger.log('既存ファイルのゴミ箱移動をスキップします（権限等のエラー）: ' + e.message);
     }
   }
-  
+
   var savedFile = folder.createFile(csvResponse.getBlob().setName(fileName));
   Logger.log('Googleドライブに保存完了: ' + savedFile.getName());
 
@@ -1324,6 +1325,7 @@ function downloadAndSyncProductMasterMenu() {
     return;
   }
 
+  var storeName = posConfig.tenpoGroupName || '本店';
   var response = ui.alert('🏷️ 商品マスタ同期',
     'POSポータルから商品マスタCSVをダウンロードし、\n' +
     'Supabaseの商品データベースを最新の状態に同期します。\n\n' +
@@ -1340,7 +1342,7 @@ function downloadAndSyncProductMasterMenu() {
   if (response !== ui.Button.YES) return;
 
   try {
-    var result = downloadProductMasterFromPOS_(posConfig);
+    var result = downloadProductMasterFromPOS_(posConfig, storeName);
 
     if (result.success) {
       ui.alert('✅ 商品マスタ同期 完了',
@@ -1365,29 +1367,141 @@ function downloadAndSyncProductMasterMenu() {
 
 
 // ===================================================================
-// 【商品マスタ】POSポータル (hmma02405) から商品マスタCSVをダウンロード
-// フロー: ログイン → 商品検索 → エクスポート → ダウンロード
-// ===================================================================
-function downloadProductMasterFromPOS_(posConfig) {
-  Logger.log('========== 商品マスタCSVダウンロード開始 ==========');
+// 【商品マスタ診断】CSVをDBへ送信せず、件数と先頭サンプルだけを確認する
+function inspectProductMasterCSV_(csvBlob) {
+  var csvContent = csvBlob.getDataAsString(CONFIG.CSV_ENCODING);
+  if (csvContent.charCodeAt(0) === 0xFEFF) {
+    csvContent = csvContent.substring(1);
+  }
 
-  // === STEP 1: ログイン ===
-  Logger.log('STEP 1: POSポータルにログイン中...');
+  var rows = Utilities.parseCsv(csvContent).filter(function(row) {
+    return row.some(function(cell) { return cell.trim() !== ''; });
+  });
+  var janColumn = 3;
+  var productGroupColumn = 5;
+  var productNameColumn = 6;
+  var seen = {};
+  var storeCounts = {};
+  var validCount = 0;
+  var skippedCount = 0;
+  var sample = [];
+  var rowShapeSample = rows.slice(0, 3).map(function(row) {
+    return {
+      columnCount: row.length,
+      cells: row.slice(0, 12).map(function(cell) {
+        return (cell || '').toString().substring(0, 80);
+      }),
+    };
+  });
+  var maxColumns = rows.reduce(function(max, row) {
+    return Math.max(max, row.length);
+  }, 0);
+  var columnStats = [];
+  for (var columnIndex = 0; columnIndex < maxColumns; columnIndex++) {
+    var uniqueValues = {};
+    var nonEmptyCount = 0;
+    var janLikeCount = 0;
+    var examples = [];
+    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      var normalizedValue = normalizeProductMasterJanCode_(rows[rowIndex][columnIndex]);
+      if (!normalizedValue) continue;
+      nonEmptyCount++;
+      uniqueValues[normalizedValue] = true;
+      if (/^(\d{8}|\d{12}|\d{13})$/.test(normalizedValue)) {
+        janLikeCount++;
+      }
+      if (examples.length < 3 && examples.indexOf(normalizedValue) === -1) {
+        examples.push(normalizedValue.substring(0, 80));
+      }
+    }
+    columnStats.push({
+      columnIndex: columnIndex,
+      nonEmptyCount: nonEmptyCount,
+      uniqueCount: Object.keys(uniqueValues).length,
+      janLikeCount: janLikeCount,
+      examples: examples,
+    });
+  }
+
+  for (var storeRowIndex = 0; storeRowIndex < rows.length; storeRowIndex++) {
+    var storeCode = (rows[storeRowIndex][0] || '').toString().trim();
+    var storeName = (rows[storeRowIndex][1] || '').toString().trim();
+    var storeKey = storeCode + '\t' + storeName;
+    if (!storeCode && !storeName) continue;
+    storeCounts[storeKey] = (storeCounts[storeKey] || 0) + 1;
+  }
+  var storeSummary = Object.keys(storeCounts).map(function(storeKey) {
+    var parts = storeKey.split('\t');
+    return {
+      storeCode: parts[0],
+      storeName: parts[1],
+      rowCount: storeCounts[storeKey],
+    };
+  });
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row.length <= productNameColumn) {
+      skippedCount++;
+      continue;
+    }
+
+    var janCode = normalizeProductMasterJanCode_(row[janColumn]);
+    var productName = (row[productNameColumn] || '').trim();
+    if (!janCode || !productName || seen[janCode]) {
+      skippedCount++;
+      continue;
+    }
+
+    seen[janCode] = true;
+    validCount++;
+    if (sample.length < 5) {
+      sample.push({
+        janCode: janCode,
+        productName: productName,
+        productGroup: (row[productGroupColumn] || '').trim(),
+      });
+    }
+  }
+
+  return {
+    rawRowCount: rows.length,
+    validRowCount: validCount,
+    skippedRowCount: skippedCount,
+    sample: sample,
+    rowShapeSample: rowShapeSample,
+    columnStats: columnStats,
+    storeSummary: storeSummary,
+  };
+}
+
+
+function isExpectedProductMasterStore_(storeSummary, targetStoreName) {
+  if (!targetStoreName) return true;
+  if (!storeSummary || storeSummary.length === 0) return false;
+
+  var expectedNamePart = targetStoreName.indexOf('わんわん') !== -1 ? 'わんわん' : '本店';
+  return storeSummary.every(function(store) {
+    return store.storeName.indexOf(expectedNamePart) !== -1;
+  });
+}
+
+
+// 【商品マスタ】POSポータル (hmma02405) から全件CSVをダウンロードし、JSONで返す
+// ===================================================================
+function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
+  Logger.log('========== 商品マスタCSV取得開始 ==========');
 
   var loginUrl = posConfig.baseUrl + POS_PATHS.LOGIN;
-  var getLoginResponse = UrlFetchApp.fetch(loginUrl, {
-    method: 'get', followRedirects: true, muteHttpExceptions: true
-  });
+  var getLoginResponse = UrlFetchApp.fetch(loginUrl, { method: 'get', followRedirects: true, muteHttpExceptions: true });
   var cookies = extractCookies_(getLoginResponse) || '';
   var loginPageHtml = getLoginResponse.getContentText();
 
-  // フォーム名を自動検出
   var formNameMatch = loginPageHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
   var formName = formNameMatch ? formNameMatch[1] : 'hmma00000Form';
   var loginPayload = extractAllFormFields_(loginPageHtml, formName);
   var formAction = extractFormAction_(loginPageHtml, formName);
 
-  // ログイン情報をセット
   loginPayload[formName + ':loginId'] = posConfig.loginId;
   loginPayload[formName + ':password'] = posConfig.password;
   loginPayload[formName + ':saveLoginStatFlg'] = 'true';
@@ -1398,34 +1512,28 @@ function downloadProductMasterFromPOS_(posConfig) {
 
   var postUrl = formAction ? resolveUrl_(posConfig.baseUrl, formAction) : loginUrl;
   var loginResponse = UrlFetchApp.fetch(postUrl, {
-    method: 'post', payload: loginPayload,
-    headers: { 'Cookie': cookies },
+    method: 'post', payload: loginPayload, headers: { 'Cookie': cookies },
     followRedirects: false, muteHttpExceptions: true,
   });
+
   cookies = mergeCookies_(cookies, loginResponse);
 
-  // ログイン成功判定
-  var loginStatus = loginResponse.getResponseCode();
-  var loginHtml = loginResponse.getContentText();
-  if (loginStatus === 200 && loginHtml.indexOf('ログイン画面') !== -1) {
-    return { success: false, message: 'ログインに失敗しました。ID/パスワードを確認してください。' };
-  }
-  Logger.log('ログイン成功 (Status=' + loginStatus + ')');
-
-  // リダイレクト先をフォロー（ダッシュボード取得）
-  if (loginStatus === 302) {
-    var redirectUrl = resolveUrl_(posConfig.baseUrl, loginResponse.getHeaders()['Location']);
-    var dashResponse = fetchWithCookies_(redirectUrl, 'get', null, cookies);
-    cookies = mergeCookies_(cookies, dashResponse);
-    Logger.log('ダッシュボード: Status=' + dashResponse.getResponseCode());
+  // 302リダイレクト処理...
+  if (loginResponse.getResponseCode() === 302) {
+    var dashboardUrl = resolveUrl_(posConfig.baseUrl, loginResponse.getHeaders()['Location']);
+    Logger.log('ログイン成功、ダッシュボードへ遷移: ' + dashboardUrl);
+    var dashboardResponse = fetchWithCookies_(dashboardUrl, 'get', null, cookies);
+    cookies = mergeCookies_(cookies, dashboardResponse);
   }
 
+  // 商品検索条件だけでは店舗が切り替わらないため、先にPOSのセッション店舗を確定する
+  if (targetStoreName) {
+    cookies = switchStoreContext_(posConfig.baseUrl, cookies, targetStoreName);
+  }
 
-  // === STEP 2: 商品検索ページ (hmma02405) にアクセス ===
-  Logger.log('STEP 2: 商品検索ページにアクセス中...');
-
+  // === STEP 2: 商品マスタ検索画面 (hmma02405) へ遷移 ===
+  Logger.log('STEP 2: 商品マスタ検索画面へアクセス');
   var searchPageUrl = resolveUrl_(posConfig.baseUrl, POS_PATHS.PRODUCT_MASTER);
-  Logger.log('商品検索URL: ' + searchPageUrl);
 
   var searchResponse = fetchWithCookies_(searchPageUrl, 'get', null, cookies);
   cookies = mergeCookies_(cookies, searchResponse);
@@ -1471,8 +1579,7 @@ function downloadProductMasterFromPOS_(posConfig) {
   Logger.log('検索フォームボタン一覧(' + searchButtons.length + '): ' + searchButtons.join(', '));
 
   // 店舗グループを設定
-  searchPayload[searchPrefix + 'schTenpoGroup'] = posConfig.tenpoGroupId;
-  searchPayload[searchPrefix + 'selectTenpoGroupName'] = posConfig.tenpoGroupName;
+  applyTenpoParamsGlobal_(searchPayload, searchHtml, searchFormName, targetStoreName);
 
   // 検索ボタンを押す（doSearch を設定）
   // ボタン名が doSearch / doSchTenpoGroup 等の場合に対応
@@ -1499,9 +1606,9 @@ function downloadProductMasterFromPOS_(posConfig) {
     } else {
       searchPayload[doSearchKey] = '';
     }
-    Logger.log('検索ボタン: ' + doSearchKey);
+    Logger.log('検索実行ボタン: ' + doSearchKey);
   } else {
-    Logger.log('警告: doSearchボタンが見つかりません。ボタンなし送信を試みます。');
+    Logger.log('警告: doSearch ボタンが見つかりません。ボタン一覧: ' + searchButtons.join(', '));
   }
 
   var searchFormAction = extractFormAction_(searchHtml, searchFormName);
@@ -1509,12 +1616,10 @@ function downloadProductMasterFromPOS_(posConfig) {
     ? resolveUrl_(posConfig.baseUrl, searchFormAction)
     : searchPageUrl;
 
-  Logger.log('検索POST先: ' + searchPostUrl);
-
   var searchResult = fetchWithCookies_(searchPostUrl, 'post', searchPayload, cookies);
   cookies = mergeCookies_(cookies, searchResult);
 
-  // リダイレクトをフォロー
+  // 302リダイレクトをフォロー
   var searchResultUrl = searchPostUrl;
   if (searchResult.getResponseCode() === 302) {
     searchResultUrl = resolveUrl_(posConfig.baseUrl, searchResult.getHeaders()['Location']);
@@ -1563,8 +1668,7 @@ function downloadProductMasterFromPOS_(posConfig) {
   }
 
   // 店舗グループ情報を維持
-  exportPayload[searchPrefix + 'schTenpoGroup'] = posConfig.tenpoGroupId;
-  exportPayload[searchPrefix + 'selectTenpoGroupName'] = posConfig.tenpoGroupName;
+  applyTenpoParamsGlobal_(exportPayload, searchResultHtml, searchFormName, targetStoreName);
 
   var exportFormAction = extractFormAction_(searchResultHtml, searchFormName);
   var exportPostUrl = exportFormAction
@@ -1681,6 +1785,12 @@ function downloadProductMasterFromPOS_(posConfig) {
   var downloadPageUrl = expResultUrl;
   var maxRetries = 10;
 
+  // 前回のエクスポート完了表示を拾わないよう、新規処理の開始後に一度待って再読込する
+  Utilities.sleep(3000);
+  var initialReloadResponse = fetchWithCookies_(downloadPageUrl, 'get', null, cookies);
+  cookies = mergeCookies_(cookies, initialReloadResponse);
+  downloadHtml = initialReloadResponse.getContentText();
+
   for (var retry = 0; retry < maxRetries; retry++) {
     if (downloadHtml.indexOf('処理完了') !== -1 || downloadHtml.indexOf('ダウンロード') !== -1) {
       Logger.log('エクスポート処理完了を確認 (retry=' + retry + ')');
@@ -1764,6 +1874,43 @@ function downloadProductMasterFromPOS_(posConfig) {
     };
   }
 
+  var inspection = inspectProductMasterCSV_(csvResponse.getBlob());
+  if (!isExpectedProductMasterStore_(inspection.storeSummary, targetStoreName)) {
+    Logger.log('商品マスタ店舗不一致: target=' + targetStoreName +
+      ', actual=' + JSON.stringify(inspection.storeSummary));
+    return {
+      success: false,
+      message: '取得した商品マスタCSVの店舗が要求店舗と一致しないため、同期を中止しました。',
+      diagnostics: {
+        targetStoreName: targetStoreName || null,
+        storeSummary: inspection.storeSummary,
+      },
+    };
+  }
+
+  // 診断時は外部データを変更せず、CSVの内容確認だけで終了する
+  if (options && options.dryRun === true) {
+    Logger.log('商品マスタ診断完了: raw=' + inspection.rawRowCount +
+      ', valid=' + inspection.validRowCount + ', skipped=' + inspection.skippedRowCount);
+    return {
+      success: true,
+      dryRun: true,
+      csvRowCount: inspection.validRowCount,
+      syncResult: null,
+      diagnostics: {
+        targetStoreName: targetStoreName || null,
+        requestedTenpoGroupId: posConfig.tenpoGroupId || null,
+        requestedTenpoGroupName: posConfig.tenpoGroupName || null,
+        rawRowCount: inspection.rawRowCount,
+        skippedRowCount: inspection.skippedRowCount,
+        sample: inspection.sample,
+        rowShapeSample: inspection.rowShapeSample,
+        columnStats: inspection.columnStats,
+        storeSummary: inspection.storeSummary,
+      },
+    };
+  }
+
 
   // === STEP 7: Googleドライブに保存 ===
   Logger.log('STEP 7: Googleドライブに保存中...');
@@ -1780,8 +1927,7 @@ function downloadProductMasterFromPOS_(posConfig) {
     return { success: false, message: 'CSVフォルダにアクセスできません: ' + e.message };
   }
 
-  var storePrefix = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1)
-    ? 'わんわん' : '本店';
+  var storePrefix = targetStoreName || '本店';
   var today = new Date();
   var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyyMMdd');
   var fileName = storePrefix + '_商品マスタ_' + dateStr + '.csv';
@@ -1813,7 +1959,8 @@ function downloadProductMasterFromPOS_(posConfig) {
   Logger.log('========== 商品マスタCSVダウンロード完了 ==========');
 
   return {
-    success: true,
+    success: Boolean(syncResult && syncResult.success !== false),
+    message: syncResult && syncResult.message ? syncResult.message : '',
     fileName: fileName,
     csvRowCount: csvRowCount,
     syncResult: syncResult,
@@ -1824,6 +1971,110 @@ function downloadProductMasterFromPOS_(posConfig) {
 // ===================================================================
 // 【入出庫履歴】POSポータル (hmma0244A) から入出庫履歴CSVをダウンロードし、JSONで返す
 // ===================================================================
+function findFormFieldKeyBySuffix_(fields, suffix) {
+  var keys = Object.keys(fields || {});
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i] === suffix || keys[i].slice(-(suffix.length + 1)) === ':' + suffix) {
+      return keys[i];
+    }
+  }
+  return null;
+}
+
+
+function buildHistoryStoreSelectionPayload_(fields, tenpoGroupId) {
+  var payload = JSON.parse(JSON.stringify(fields || {}));
+  var groupField = findFormFieldKeyBySuffix_(payload, 'schTenpoGroup');
+  var selectButton = findFormFieldKeyBySuffix_(payload, 'doSelectTenpoGroup');
+  if (!groupField || !selectButton || !tenpoGroupId) return null;
+
+  payload[groupField] = tenpoGroupId;
+  payload[selectButton] = payload[selectButton] || '店舗グループ選択';
+
+  var keys = Object.keys(payload);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].match(/:do[A-Z]/) && keys[i] !== selectButton) {
+      delete payload[keys[i]];
+    }
+  }
+
+  return {
+    payload: payload,
+    groupField: groupField,
+    selectButton: selectButton,
+  };
+}
+
+
+function removeUncheckedCheckboxFields_(html, payload) {
+  var checkboxRegex = /<input[^>]*type\s*=\s*["']checkbox["'][^>]*>/gi;
+  var checkboxMatch;
+  while ((checkboxMatch = checkboxRegex.exec(html)) !== null) {
+    var checkboxTag = checkboxMatch[0];
+    var nameMatch = checkboxTag.match(/name\s*=\s*["']([^"']+)["']/i);
+    if (nameMatch && checkboxTag.indexOf('checked') === -1) {
+      delete payload[nameMatch[1]];
+    }
+  }
+  return payload;
+}
+
+
+function selectHistoryStoreGroup_(baseUrl, historyUrl, historyHtml, formName, cookies, tenpoGroupId) {
+  var fields = removeUncheckedCheckboxFields_(
+    historyHtml,
+    extractAllFormFields_(historyHtml, formName)
+  );
+  var selection = buildHistoryStoreSelectionPayload_(fields, tenpoGroupId);
+  if (!selection) {
+    return {
+      success: false,
+      message: '履歴画面の店舗グループ選択フィールドが見つかりませんでした。',
+      cookies: cookies,
+      html: historyHtml,
+      formName: formName,
+    };
+  }
+
+  var formAction = extractFormAction_(historyHtml, formName);
+  var postUrl = formAction ? resolveUrl_(baseUrl, formAction) : historyUrl;
+  Logger.log('【履歴店舗選択】' + selection.groupField + '=' + tenpoGroupId +
+    ', button=' + selection.selectButton);
+
+  var response = fetchWithCookies_(postUrl, 'post', selection.payload, cookies);
+  var responseCookies = mergeCookies_(cookies, response);
+  var status = response.getResponseCode();
+  if (status === 302) {
+    var location = response.getHeaders()['Location'];
+    if (!location) {
+      return {
+        success: false,
+        message: '履歴画面の店舗選択後リダイレクト先を取得できませんでした。',
+        cookies: responseCookies,
+        html: response.getContentText(),
+        formName: formName,
+      };
+    }
+    response = fetchWithCookies_(resolveUrl_(baseUrl, location), 'get', null, responseCookies);
+    responseCookies = mergeCookies_(responseCookies, response);
+    status = response.getResponseCode();
+  }
+
+  var responseHtml = response.getContentText();
+  var responseFormMatch = responseHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
+  var responseFormName = responseFormMatch ? responseFormMatch[1] : formName;
+  Logger.log('【履歴店舗選択】応答Status=' + status + ', form=' + responseFormName);
+
+  return {
+    success: status === 200,
+    message: status === 200 ? '' : '履歴画面の店舗選択に失敗しました（Status ' + status + '）。',
+    cookies: responseCookies,
+    html: responseHtml,
+    formName: responseFormName,
+  };
+}
+
+
 function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   Logger.log('========== 入出庫履歴CSV取得開始 ==========');
 
@@ -1858,10 +2109,6 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     cookies = mergeCookies_(cookies, dashResponse);
   }
 
-  // ログイン成功後、対象店舗へ「セッション店舗の切り替え」を実行
-  var storeNameTarget = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1) ? 'わんわん' : 'からつケンネル';
-  cookies = switchStoreContext_(posConfig.baseUrl, cookies, storeNameTarget);
-
   var historyUrl = resolveUrl_(posConfig.baseUrl, POS_PATHS.SALES_HISTORY);
   var historyResponse = fetchWithCookies_(historyUrl, 'get', null, cookies);
   cookies = mergeCookies_(cookies, historyResponse);
@@ -1870,80 +2117,42 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     historyResponse = fetchWithCookies_(resolveUrl_(posConfig.baseUrl, historyResponse.getHeaders()['Location']), 'get', null, cookies);
     cookies = mergeCookies_(cookies, historyResponse);
   }
+
+
+
   var historyHtml = historyResponse.getContentText();
+
+
+
+
 
   var hFormMatch = historyHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
   var hFormName = hFormMatch ? hFormMatch[1] : 'hmma0244AForm';
-  var hPayload = extractAllFormFields_(historyHtml, hFormName);
-
-  // 入出庫履歴フォーム(hmma0244AForm)内のチェックされていないチェックボックスをペイロードから除去する
-  var checkboxRegex = /<input[^>]*type\s*=\s*["']checkbox["'][^>]*>/gi;
-  var cbMatch;
-  while ((cbMatch = checkboxRegex.exec(historyHtml)) !== null) {
-    var cbTag = cbMatch[0];
-    var cbNameMatch = cbTag.match(/name\s*=\s*["']([^"']+)["']/i);
-    if (cbNameMatch) {
-      var cbName = cbNameMatch[1];
-      if (cbTag.indexOf('checked') === -1 && hPayload[cbName] !== undefined) {
-        delete hPayload[cbName];
-      }
-    }
+  var storeSelection = selectHistoryStoreGroup_(
+    posConfig.baseUrl,
+    historyUrl,
+    historyHtml,
+    hFormName,
+    cookies,
+    posConfig.tenpoGroupId
+  );
+  if (!storeSelection.success) {
+    return { success: false, message: storeSelection.message, data: [] };
   }
+  cookies = storeSelection.cookies;
+  historyHtml = storeSelection.html;
+  hFormName = storeSelection.formName;
+  var hPayload = removeUncheckedCheckboxFields_(
+    historyHtml,
+    extractAllFormFields_(historyHtml, hFormName)
+  );
 
 
-  // 店舗グループIDおよび店舗グループ名を検索条件に動的セットするヘルパー
-  var applyTenpoParams_ = function(targetPayload) {
-    var storeNameTarget = (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1) ? 'わんわん' : 'からつケンネル';
-    var foundValue = null;
 
-    // HTML内のすべての<select>タグからoptionをスキャン
-    var selectRegex = /<select[^>]*name\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
-    var sMatch;
-    while ((sMatch = selectRegex.exec(historyHtml)) !== null) {
-      var selectName = sMatch[1];
-      var optionsHtml = sMatch[2];
-      
-      // 店舗関連、または shop/Store/Group/Tenpo にマッチするセレクトボックスである場合
-      if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i) || selectName.match(/shop/i)) {
-        var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
-        var optMatch;
-        while ((optMatch = optionRegex.exec(optionsHtml)) !== null) {
-          var optVal = optMatch[1];
-          var optText = optMatch[2].replace(/<[^>]+>/g, '').trim();
-          if (optText.indexOf(storeNameTarget) !== -1 && optVal) {
-            foundValue = optVal;
-            Logger.log('動的検出された店舗ID: ' + selectName + ' = ' + optVal + ' (' + optText + ')');
-            targetPayload[selectName] = optVal;
-          }
-        }
-      }
-    }
+  var targetStoreStr = posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1 ? 'わんわん' : 'からつケンネル';
 
-    var finalValue = foundValue || posConfig.tenpoGroupId;
-    if (finalValue) {
-      var tenpoFields = Object.keys(targetPayload).filter(function(k) { 
-        return k.match(/Tenpo/i) || k.match(/Group/i) || k.match(/shop/i) || k.match(/Store/i); 
-      });
-      for (var i = 0; i < tenpoFields.length; i++) {
-        if (!tenpoFields[i].match(/Name/i)) {
-          targetPayload[tenpoFields[i]] = finalValue;
-        }
-      }
-      targetPayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = finalValue;
-      targetPayload[hFormName + ':schTenpoGroup'] = finalValue;
-      targetPayload['includeChildBody:' + hFormName + ':schTenpo'] = finalValue;
-      targetPayload[hFormName + ':schTenpo'] = finalValue;
-      targetPayload['includeChildBody:' + hFormName + ':shopName'] = finalValue;
-      targetPayload[hFormName + ':shopName'] = finalValue;
-    }
-
-    if (posConfig.tenpoGroupName) {
-      targetPayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
-      targetPayload[hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
-    }
-  };
-
-  applyTenpoParams_(hPayload);
+  // 1. セレクトボックス等の動的適用
+  applyTenpoParamsGlobal_(hPayload, historyHtml, hFormName, targetStoreStr);
 
   var dateFields = Object.keys(hPayload).filter(function(k) { return k.match(/Date/i) || k.match(/sagyo/i); });
   var fromField = null;
@@ -1954,11 +2163,11 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   }
   if (fromField && startDate) hPayload[fromField] = startDate;
   if (toField && endDate) hPayload[toField] = endDate;
-  
+
   var buttons = Object.keys(hPayload).filter(function(k) { return k.match(/:do[A-Z]/); });
   var searchBtn = null;
   for (var i = 0; i < buttons.length; i++) {
-    if (buttons[i].match(/Search/i)) searchBtn = buttons[i];
+    if (buttons[i].match(/Search|Serch/i)) searchBtn = buttons[i];
   }
 
   if (searchBtn) {
@@ -1968,12 +2177,29 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
     var sResp = fetchWithCookies_(historyUrl, 'post', sPayload, cookies);
     cookies = mergeCookies_(cookies, sResp);
     historyHtml = sResp.getContentText();
-    hPayload = extractAllFormFields_(historyHtml, hFormName);
-    applyTenpoParams_(hPayload); // 検索応答後も再度店舗パラメータを適用
+    hPayload = removeUncheckedCheckboxFields_(
+      historyHtml,
+      extractAllFormFields_(historyHtml, hFormName)
+    );
+    applyTenpoParamsGlobal_(hPayload, historyHtml, hFormName, targetStoreStr); // 検索応答後も再度店舗パラメータを適用
   }
 
   var ePayload = JSON.parse(JSON.stringify(hPayload));
-  applyTenpoParams_(ePayload); // CSV出力用ペイロードにも適用
+
+  applyTenpoParamsGlobal_(ePayload, historyHtml, hFormName, targetStoreStr);
+
+  for (var key in ePayload) {
+    if (key.match(/schTenpoGroup/i) && !key.match(/Name/i)) {
+      ePayload[key] = posConfig.tenpoGroupId;
+      Logger.log('【店舗切替(Export)】左上コンテキスト強制セット: ' + key + ' = ' + posConfig.tenpoGroupId);
+    }
+    if (key.match(/selectTenpoGroupName/i)) {
+      ePayload[key] = posConfig.tenpoGroupName;
+    }
+  }
+  ePayload['includeChildBody:' + hFormName + ':schTenpoGroup'] = posConfig.tenpoGroupId;
+  ePayload['includeChildBody:' + hFormName + ':selectTenpoGroupName'] = posConfig.tenpoGroupName;
+
 
   buttons = Object.keys(hPayload).filter(function(k) { return k.match(/:do[A-Z]/); });
   var csvBtn = null;
@@ -1985,20 +2211,26 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   } else {
     ePayload[hFormName + ':doCsvExport'] = 'CSV';
   }
-  
+
   for (var i = 0; i < buttons.length; i++) { if (buttons[i] !== csvBtn) delete ePayload[buttons[i]]; }
-  
+
+  Logger.log('【履歴ボタン一覧】' + buttons.join(', ') + ' | 採択ボタン=' + (csvBtn || (hFormName + ':doCsvExport')));
   var csvResponse = fetchWithCookies_(historyUrl, 'post', ePayload, cookies);
   var csvBlob = csvResponse.getBlob();
   var csvText = csvBlob.getDataAsString('Shift_JIS');
-  
+
+  Logger.log('【入出庫レスポンス情報】Status=' + csvResponse.getResponseCode() + ' | Content-Type=' + JSON.stringify(csvResponse.getHeaders()['Content-Type']));
+  Logger.log('【入出庫応答テキスト先頭400字】:\n' + csvText.slice(0, 400));
+
   if (!csvText || csvText.indexOf('ログイン') !== -1) {
     return { success: false, message: 'CSVの取得に失敗しました。', data: [] };
   }
 
   var lines = Utilities.parseCsv(csvText);
+  Logger.log('【パース結果行数】=' + lines.length);
+  if (lines.length > 0) Logger.log('【1行目】=' + JSON.stringify(lines[0]));
   if (lines.length === 0) return { success: true, data: [] };
-  
+
   var header = lines[0];
   var results = [];
   var isHeader = header.join('').indexOf('商品名') !== -1 || header.join('').indexOf('コード') !== -1;
@@ -2042,31 +2274,90 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 //   year  = 対象年（省略時は今年）
 //   startDate, endDate = historyモード時の期間指定 (yyyy/MM/dd)
 // ===================================================================
-function doGet(e) {
-  var mode = (e.parameter.mode || 'sales');
-  
-  if (mode === 'debug_properties') {
-    var props = PropertiesService.getScriptProperties().getProperties();
-    var safeProps = {};
-    for (var k in props) {
-      if (k.indexOf('PASSWORD') === -1 && k.indexOf('KEY') === -1) {
-        safeProps[k] = props[k];
+
+// ===================================================================
+// 【Web App】外部からの POST リクエスト受け取り（セキュアな通信用）
+// ===================================================================
+function doPost(e) {
+  var results = {};
+
+  try {
+    var params = {};
+    if (e.postData && e.postData.contents) {
+      try {
+        params = JSON.parse(e.postData.contents);
+      } catch(ex) {
+        Logger.log('POSTデータのJSONパースエラー: ' + ex.message);
       }
     }
-    return ContentService.createTextOutput(JSON.stringify(safeProps)).setMimeType(ContentService.MimeType.JSON);
+
+    // ベース設定をプロパティから取得
+    var posConfig = getPOSConfig_();
+    if (!posConfig) {
+      return ContentService.createTextOutput(
+        JSON.stringify({ success: false, message: 'POS接続設定が未完了です。' })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // POSTされた動的パラメータで上書き（わんわん等）
+    if (params.lid) posConfig.loginId = params.lid;
+    if (params.lpw) posConfig.password = params.lpw;
+    if (params.lcd) posConfig.companyCd = params.lcd;
+    // 別店舗アカウントでは本店用companyKeyを引き継がないよう、空文字も上書き対象にする
+    if (params.lkey !== undefined) posConfig.companyKey = params.lkey;
+    if (params.companyKey !== undefined) posConfig.companyKey = params.companyKey;
+    if (params.tenpoGroupId) posConfig.tenpoGroupId = params.tenpoGroupId;
+    if (params.tenpoGroupName) posConfig.tenpoGroupName = params.tenpoGroupName;
+    var targetStoreName = params.targetStoreName || (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1 ? 'わんわん' : '本店');
+
+    var mode = params.mode || 'history';
+    var targetYear = params.year ? parseInt(params.year, 10) : new Date().getFullYear();
+    var targetMonth = params.month ? parseInt(params.month, 10) : new Date().getMonth();
+    if (targetMonth === 0) { targetMonth = 12; targetYear--; }
+    var now = new Date();
+
+    // 商品マスタ同期
+    if (mode === 'master' || mode === 'full') {
+      Logger.log('Web App(POST): 商品マスタ同期を実行 (mode=' + mode + ')');
+      var dryRun = params.dryRun === true || params.dryRun === 'true';
+      results.master = downloadProductMasterFromPOS_(posConfig, targetStoreName, { dryRun: dryRun });
+    }
+
+    // 商品別売上取込
+    if (mode === 'sales' || mode === 'full') {
+      Logger.log('Web App(POST): 商品別売上取込を実行 (mode=' + mode + ')');
+      results.sales = downloadProductSalesFromPOS_(posConfig, targetYear, targetMonth);
+    }
+
+    // 入出庫履歴取得
+    if (mode === 'history') {
+      var startDate = params.startDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
+      var endDate = params.endDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
+      Logger.log('Web App(POST): 入出庫履歴取得を実行 (' + startDate + ' - ' + endDate + ')');
+      results.history = downloadSalesHistoryFromPOS_(posConfig, startDate, endDate);
+    }
+
+    results.success = ['master', 'sales', 'history'].every(function(resultName) {
+      return !results[resultName] || results[resultName].success !== false;
+    });
+    results.mode = mode;
+
+  } catch (err) {
+    Logger.log('Web App(POST) 実行エラー: ' + err.message);
+    results.success = false;
+    results.message = 'エラー: ' + err.message;
   }
 
-  var now = new Date();
-  var targetMonth = e.parameter.month ? parseInt(e.parameter.month, 10) : now.getMonth();
-  var targetYear = e.parameter.year ? parseInt(e.parameter.year, 10) : now.getFullYear();
+  results.logs = Logger.getLog();
 
-  // getMonth() は 0-indexed なので、0月 = 前年12月
-  if (targetMonth === 0) {
-    targetMonth = 12;
-    targetYear -= 1;
-  }
+  return ContentService.createTextOutput(
+    JSON.stringify(results)
+  ).setMimeType(ContentService.MimeType.JSON);
+}
 
-  var posConfig = getPOSConfig_();
+function doGet(e) {
+  // 外部からのパラメータ受け取り用
+  var posConfig = getPOSConfig_(e);
   if (posConfig) {
     if (e.parameter.tenpoGroupId) {
       posConfig.tenpoGroupId = e.parameter.tenpoGroupId;
@@ -2081,6 +2372,12 @@ function doGet(e) {
       JSON.stringify({ success: false, message: 'POS接続設定が未完了です。Sheetsのメニューから設定してください。' })
     ).setMimeType(ContentService.MimeType.JSON);
   }
+
+  var mode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : 'history';
+  var targetYear = (e && e.parameter && e.parameter.year) ? parseInt(e.parameter.year, 10) : new Date().getFullYear();
+  var targetMonth = (e && e.parameter && e.parameter.month) ? parseInt(e.parameter.month, 10) : new Date().getMonth();
+  if (targetMonth === 0) { targetMonth = 12; targetYear--; }
+  var now = new Date();
 
   var results = {};
 
@@ -2098,6 +2395,10 @@ function doGet(e) {
     }
 
     // 入出庫履歴取得
+
+    if (mode === 'testJS') {
+      return testGetTenpoDialogJS();
+    }
     if (mode === 'history') {
       var startDate = e.parameter.startDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
       var endDate = e.parameter.endDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
@@ -2126,29 +2427,29 @@ function doGet(e) {
 // ===================================================================
 function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
   Logger.log('【店舗切替】セッション店舗の切り替えを開始します。対象: ' + storeNameTarget);
-  
+
   try {
     var tcUrl = resolveUrl_(baseUrl, '/hm-hmma/view/hmma/hmma000/hmma00002.html');
     var tcResp = fetchWithCookies_(tcUrl, 'get', null, cookies);
     var tcCookies = mergeCookies_(cookies, tcResp);
     var tcHtml = tcResp.getContentText();
-    
+
     if (tcHtml.indexOf('店舗切替') === -1 && tcHtml.indexOf('店舗選択') === -1) {
       Logger.log('店舗切替画面にアクセスできませんでした（ダッシュボードか別画面とみなしてスキップ）');
       return cookies;
     }
-    
+
     var tcFormMatch = tcHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
     var tcFormName = tcFormMatch ? tcFormMatch[1] : 'hmma00002Form';
     var tcFields = extractAllFormFields_(tcHtml, tcFormName);
-    
+
     var targetTenpoValue = null;
     var selectRegex = /<select[^>]*name\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
     var sMatch;
     while ((sMatch = selectRegex.exec(tcHtml)) !== null) {
       var selectName = sMatch[1];
       var optionsHtml = sMatch[2];
-      
+
       if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i)) {
         var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
         var optMatch;
@@ -2163,12 +2464,12 @@ function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
         }
       }
     }
-    
+
     if (!targetTenpoValue) {
       Logger.log('店舗切替画面に「' + storeNameTarget + '」に一致する店舗が見つかりませんでした。切り替えを行わずに現在のクッキーを返します。');
       return cookies;
     }
-    
+
     var buttons = Object.keys(tcFields).filter(function(k) { return k.match(/:do[A-Z]/); });
     var decisionBtn = null;
     for (var i = 0; i < buttons.length; i++) {
@@ -2179,25 +2480,128 @@ function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
     if (!decisionBtn) {
       decisionBtn = 'includeChildBody:' + tcFormName + ':doDecision';
     }
-    
+
     var postPayload = JSON.parse(JSON.stringify(tcFields));
     postPayload[decisionBtn] = '決定';
     for (var i = 0; i < buttons.length; i++) {
       if (buttons[i] !== decisionBtn) delete postPayload[buttons[i]];
     }
-    
+
     var tcFormAction = extractFormAction_(tcHtml, tcFormName);
     var postUrl = tcFormAction ? resolveUrl_(baseUrl, tcFormAction) : tcUrl;
-    
+
     Logger.log('店舗切替の決定をPOST送信します。URL=' + postUrl);
     var postResp = fetchWithCookies_(postUrl, 'post', postPayload, tcCookies);
     var finalCookies = mergeCookies_(tcCookies, postResp);
-    
+
     Logger.log('【店舗切替】セッション店舗の切り替え完了。店舗名: ' + storeNameTarget + ', Status=' + postResp.getResponseCode());
     return finalCookies;
-    
+
   } catch (err) {
     Logger.log('【店舗切替エラー】処理中に予期しないエラーが発生しました: ' + err.message);
     return cookies;
   }
+}
+
+
+// ===================================================================
+// 【共通】画面のHTMLからセレクトボックスを読み、対象店舗のコードを安全に適用
+// ===================================================================
+function applyTenpoParamsGlobal_(targetPayload, htmlText, formName, storeNameTarget) {
+  var selectRegex = /<select[^>]*name\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
+  var sMatch;
+  while ((sMatch = selectRegex.exec(htmlText)) !== null) {
+    var selectName = sMatch[1];
+    var optionsHtml = sMatch[2];
+    if (selectName.match(/Tenpo/i) || selectName.match(/Store/i) || selectName.match(/Group/i) || selectName.match(/shop/i)) {
+      var optionRegex = /<option[^>]*value\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/option>/gi;
+      var optMatch;
+      while ((optMatch = optionRegex.exec(optionsHtml)) !== null) {
+        var optVal = optMatch[1];
+        var optText = optMatch[2].replace(/<[^>]+>/g, '').trim();
+        if (optText.indexOf(storeNameTarget) !== -1 && optVal) {
+          if (targetPayload[selectName] !== undefined || selectName.indexOf(formName) !== -1) {
+            targetPayload[selectName] = optVal;
+            Logger.log('安全・正規店パラメータ設定 (' + formName + '): ' + selectName + ' = ' + optVal + ' (' + optText + ')');
+          }
+        }
+      }
+    }
+  }
+}
+
+
+// ===================================================================
+// テスト: JS構造を直接返却する
+// ===================================================================
+
+
+
+
+
+function testGetTenpoDialogJS() {
+  var posConfig = getPOSConfig_();
+  var loginUrl = posConfig.baseUrl + '/';
+  var getLoginResponse = UrlFetchApp.fetch(loginUrl, { method: 'get', followRedirects: true, muteHttpExceptions: true });
+  var cookies = extractCookies_(getLoginResponse) || '';
+  var loginPageHtml = getLoginResponse.getContentText();
+
+  var formNameMatch = loginPageHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
+  var formName = formNameMatch ? formNameMatch[1] : 'hmma00000Form';
+  var loginPayload = extractAllFormFields_(loginPageHtml, formName);
+  var formAction = extractFormAction_(loginPageHtml, formName);
+
+  loginPayload[formName + ':loginId'] = posConfig.loginId;
+  loginPayload[formName + ':password'] = posConfig.password;
+  loginPayload[formName + ':saveLoginStatFlg'] = 'true';
+  loginPayload[formName + ':doLogin'] = '送信';
+  loginPayload[formName + ':companyCd'] = posConfig.companyCd;
+  loginPayload[formName + ':loginMissCnt'] = '0';
+  loginPayload[formName + ':companyKey'] = posConfig.companyKey;
+
+  var postUrl = formAction ? resolveUrl_(posConfig.baseUrl, formAction) : loginUrl;
+  var loginResponse = UrlFetchApp.fetch(postUrl, {
+    method: 'post', payload: loginPayload,
+    headers: { 'Cookie': cookies }, followRedirects: false, muteHttpExceptions: true,
+  });
+  cookies = mergeCookies_(cookies, loginResponse);
+
+  // ダッシュボード等、ログイン直後の画面を取得 (おそらく hmma00001.html)
+  var dashUrl = resolveUrl_(posConfig.baseUrl, '/hm-hmma/view/hmma/hmma000/hmma00001.html');
+  var dashRes = fetchWithCookies_(dashUrl, 'get', null, cookies);
+  var dashHtml = dashRes.getContentText();
+
+  // ダッシュボード内のフォームを抽出
+  var formRegex = /<form[\s\S]*?<\/form>/gi;
+  var forms = dashHtml.match(formRegex) || [];
+
+  var result = "=== ダッシュボード フォーム解析 ===\n";
+  result += "フォーム数: " + forms.length + "\n\n";
+
+  for(var i=0; i<forms.length; i++) {
+    var f = forms[i];
+    var idMatch = f.match(/id=["']([^"']+)["']/);
+    var actionMatch = f.match(/action=["']([^"']+)["']/);
+    result += "【Form " + i + "】 ID=" + (idMatch?idMatch[1]:"") + ", Action=" + (actionMatch?actionMatch[1]:"") + "\n";
+
+    // input hidden を抽出
+    var inputRegex = /<input[^>]+type=["']hidden["'][^>]*>/gi;
+    var inputs = f.match(inputRegex) || [];
+    for(var j=0; j<inputs.length; j++) {
+      var nameMatch = inputs[j].match(/name=["']([^"']+)["']/);
+      var valueMatch = inputs[j].match(/value=["']([^"']+)["']/);
+      result += "  - hidden: " + (nameMatch?nameMatch[1]:"") + " = " + (valueMatch?valueMatch[1]:"") + "\n";
+    }
+
+    // aタグのonclickも抽出（店舗切替関連）
+    var aRegex = /<a[^>]+onclick=["']([^"']+)["'][^>]*>/gi;
+    var as = f.match(aRegex) || [];
+    for(var j=0; j<as.length; j++) {
+      if(as[j].indexOf('enpo') !== -1) {
+        result += "  - a onclick: " + as[j] + "\n";
+      }
+    }
+  }
+
+  return ContentService.createTextOutput(result);
 }

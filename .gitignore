@@ -55,3 +55,4 @@ local_exports/
 next_app/.next/
 next_app/node_modules/
 next_app/.env.local
+next_app/pos_credentials.json

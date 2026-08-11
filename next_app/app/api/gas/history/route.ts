@@ -2,7 +2,52 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreContext } from '@/lib/storeAuth'
 
-// 入出庫履歴取得用APIルート
+export const maxDuration = 300
+
+type HistoryRow = {
+  productCode: string
+  productName: string
+  taskContent: string
+  storeName: string
+  taskDateTime: string
+  quantity: number
+  cost: number
+  totalCost: number
+}
+
+type HistoryTargetStore = {
+  name: '本店' | 'わんわん'
+  displayStoreId: '11053' | '11054'
+  tenpoGroupId: '11098' | '11099'
+  tenpoGroupName: 'からつケンネル本店' | 'わんわんペットセンター'
+}
+
+type GasHistoryResponse = {
+  success?: boolean
+  message?: string
+  history?: {
+    success?: boolean
+    message?: string
+    data?: HistoryRow[]
+  }
+  logs?: string
+}
+
+const HISTORY_STORES: Record<'main' | 'wanwan', HistoryTargetStore> = {
+  main: {
+    name: '本店',
+    displayStoreId: '11053',
+    tenpoGroupId: '11098',
+    tenpoGroupName: 'からつケンネル本店',
+  },
+  wanwan: {
+    name: 'わんわん',
+    displayStoreId: '11054',
+    tenpoGroupId: '11099',
+    tenpoGroupName: 'わんわんペットセンター',
+  },
+}
+
 // GAS（販売）とSupabase（店舗間移動・物品使用）を統合して返す
 export async function GET(request: Request) {
   try {
@@ -23,67 +68,77 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('startDate') || ''
     const endDate = searchParams.get('endDate') || ''
-
-    // -----------------------------------------------------------
-    // 1. GAS経由でPOSポータルから「販売」データを取得
-    // -----------------------------------------------------------
     const gasWebAppUrl = process.env.GAS_WEBAPP_URL
-    let gasRows: HistoryRow[] = []
 
-    if (gasWebAppUrl) {
-      try {
-        let targetStores: Array<{ pos_group_id: string | null; pos_group_name: string | null }> = []
-
-        if (storeContext.currentView === 'wanwan') {
-          targetStores = [{ pos_group_id: '11054', pos_group_name: 'わんわん' }]
-        } else if (storeContext.currentView === 'main') {
-          targetStores = [{ pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
-        } else {
-          const { data: dbStores } = await (supabase as any)
-            .from('stores')
-            .select('pos_group_id, pos_group_name')
-            .not('pos_group_id', 'is', null)
-          targetStores = dbStores && dbStores.length > 0 ? dbStores : [{ pos_group_id: '11098', pos_group_name: 'からつケンネル本店' }]
-        }
-
-        for (const store of targetStores) {
-          const gasUrl = new URL(gasWebAppUrl)
-          gasUrl.searchParams.set('mode', 'history')
-          if (startDate) gasUrl.searchParams.set('startDate', startDate)
-          if (endDate) gasUrl.searchParams.set('endDate', endDate)
-          if (store.pos_group_id) gasUrl.searchParams.set('tenpoGroupId', store.pos_group_id)
-          if (store.pos_group_name) gasUrl.searchParams.set('tenpoGroupName', store.pos_group_name)
-
-          const gasRes = await fetch(gasUrl.toString(), { method: 'GET', cache: 'no-store' })
-          if (gasRes.ok) {
-            const gasResult = await gasRes.json().catch(() => null)
-            if (gasResult?.history) {
-              if (gasResult.history.success === false) {
-                return NextResponse.json({
-                  success: false,
-                  message: gasResult.history.message || 'GAS実行エラーが発生しました。',
-                })
-              }
-              if (Array.isArray(gasResult.history.data)) {
-                gasRows.push(...gasResult.history.data)
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error('GAS履歴取得エラー:', e)
-      }
+    if (!gasWebAppUrl) {
+      return NextResponse.json(
+        { message: 'GAS_WEBAPP_URL が設定されていません。' },
+        { status: 500 }
+      )
     }
 
-    // -----------------------------------------------------------
-    // 2. Supabaseから「店舗間移動」「物品使用」データを取得
-    // -----------------------------------------------------------
+    let targetStores: HistoryTargetStore[]
+    if (storeContext.currentView === 'wanwan') {
+      targetStores = [HISTORY_STORES.wanwan]
+    } else if (storeContext.currentView === 'main') {
+      targetStores = [HISTORY_STORES.main]
+    } else {
+      targetStores = [HISTORY_STORES.main, HISTORY_STORES.wanwan]
+    }
+
+    const gasRows: HistoryRow[] = []
+    for (const store of targetStores) {
+      const gasResponse = await fetch(gasWebAppUrl, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'history',
+          startDate,
+          endDate,
+          targetStoreName: store.name,
+          tenpoGroupId: store.tenpoGroupId,
+          tenpoGroupName: store.tenpoGroupName,
+        }),
+      })
+
+      const responseText = await gasResponse.text()
+      let gasResult: GasHistoryResponse | null = null
+      try {
+        gasResult = JSON.parse(responseText) as GasHistoryResponse
+      } catch {
+        // 下の共通エラーでレスポンス先頭を返す
+      }
+
+      if (!gasResponse.ok || !gasResult || gasResult.success === false) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `[${store.name}] GAS履歴取得に失敗しました: ${gasResult?.message || responseText.slice(0, 300)}`,
+          },
+          { status: 502 }
+        )
+      }
+
+      if (gasResult.history?.success === false || !Array.isArray(gasResult.history?.data)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `[${store.name}] ${gasResult.history?.message || 'GASから履歴データが返されませんでした。'}`,
+            logs: gasResult.logs || '',
+          },
+          { status: 502 }
+        )
+      }
+
+      gasRows.push(...gasResult.history.data)
+    }
+
     let transferRows: HistoryRow[] = []
-
     if (startDate || endDate) {
-      const toDbDate = (d: string) => d.replace(/\//g, '-')
+      const toDbDate = (date: string) => date.replace(/\//g, '-')
 
-      let query = (supabase as any)
+      let query = supabase
         .from('transfers')
         .select(`
           transfer_date,
@@ -108,51 +163,42 @@ export async function GET(request: Request) {
       if (startDate) query = query.gte('transfer_date', toDbDate(startDate))
       if (endDate) query = query.lte('transfer_date', toDbDate(endDate))
 
-      const { data: tData, error: tErr } = await query
-
-      if (tErr) {
-        console.error('Supabase transfers取得エラー:', tErr)
-      } else if (tData) {
+      const { data: transferData, error: transferError } = await query
+      if (transferError) {
+        console.error('Supabase transfers取得エラー:', transferError)
+      } else if (transferData) {
         const entryTypeLabel: Record<string, string> = {
           transfer: '店舗間移動',
           usage: '物品使用',
         }
-        transferRows = (tData as any[]).map((row) => ({
-          taskDateTime: row.transfer_date ?? '',
-          storeName: (row.stores as unknown as { name: string } | null)?.name ?? '',
-          taskContent: entryTypeLabel[row.entry_type ?? ''] ?? row.entry_type ?? '',
-          productName: row.product_name ?? '',
-          productCode: row.jan_code ?? '',
-          quantity: row.quantity ?? 0,
-          cost: row.cost_price ?? 0,
-          totalCost: row.total_cost ?? 0,
+        transferRows = (transferData as Array<Record<string, unknown>>).map((row) => ({
+          taskDateTime: String(row.transfer_date ?? ''),
+          storeName: (row.stores as { name?: string } | null)?.name ?? '',
+          taskContent: entryTypeLabel[String(row.entry_type ?? '')] ?? String(row.entry_type ?? ''),
+          productName: String(row.product_name ?? ''),
+          productCode: String(row.jan_code ?? ''),
+          quantity: Number(row.quantity ?? 0),
+          cost: Number(row.cost_price ?? 0),
+          totalCost: Number(row.total_cost ?? 0),
         }))
       }
     }
 
-    // -----------------------------------------------------------
-    // 3. マージして日時降順でソート
-    // -----------------------------------------------------------
-    const merged: HistoryRow[] = [...gasRows, ...transferRows].sort((a, b) => {
-      // 文字列比較（"yyyy/MM/dd HH:mm" と "yyyy-MM-dd" が混在するため正規化）
-      const normalize = (s: string) => s.replace(/\//g, '-')
-      return normalize(b.taskDateTime).localeCompare(normalize(a.taskDateTime))
+    const merged = [...gasRows, ...transferRows].sort((left, right) => {
+      const normalize = (value: string) => value.replace(/\//g, '-')
+      return normalize(right.taskDateTime).localeCompare(normalize(left.taskDateTime))
     })
 
-    const storeInfo =
-      storeContext.currentView === 'wanwan'
-        ? { name: 'わんわん', id: '11054' }
-        : storeContext.currentView === 'main'
-        ? { name: '本店', id: '11098' }
-        : { name: '全店舗', id: '全店舗' }
-
+    const selectedStore = targetStores.length === 1 ? targetStores[0] : null
     return NextResponse.json({
       success: true,
       data: merged,
       count: merged.length,
       gasCount: gasRows.length,
       transferCount: transferRows.length,
-      targetStore: storeInfo,
+      targetStore: selectedStore
+        ? { name: selectedStore.name, id: selectedStore.displayStoreId }
+        : { name: '全店舗', id: '全店舗' },
     })
   } catch (error) {
     console.error('Unexpected error in history API:', error)
@@ -161,16 +207,4 @@ export async function GET(request: Request) {
       { status: 500 }
     )
   }
-}
-
-// HistoryRow型定義
-type HistoryRow = {
-  productCode: string
-  productName: string
-  taskContent: string
-  storeName: string
-  taskDateTime: string
-  quantity: number
-  cost: number
-  totalCost: number
 }
