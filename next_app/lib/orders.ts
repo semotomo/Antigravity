@@ -76,7 +76,7 @@ export type ProductRow = Database['public']['Tables']['products']['Row']
 export type OrderStoreOption = Pick<StoreRow, 'id' | 'name'>
 export type OrderProductOption = Pick<
   ProductRow,
-  'id' | 'product_name' | 'jan_code' | 'category'
+  'id' | 'store_id' | 'product_name' | 'jan_code' | 'category'
 >
 
 export type OrderListRow = CustomerOrderRow & {

@@ -6,7 +6,14 @@ export type TransferUpdate = Database['public']['Tables']['transfers']['Update']
 export type TransferStoreOption = Pick<Database['public']['Tables']['stores']['Row'], 'id' | 'name'>
 export type TransferProductOption = Pick<
   Database['public']['Tables']['products']['Row'],
-  'id' | 'jan_code' | 'product_name' | 'cost_price' | 'selling_price' | 'category' | 'is_active'
+  | 'id'
+  | 'store_id'
+  | 'jan_code'
+  | 'product_name'
+  | 'cost_price'
+  | 'selling_price'
+  | 'category'
+  | 'is_active'
 >
 
 export type TransferEntryType = 'transfer' | 'usage'

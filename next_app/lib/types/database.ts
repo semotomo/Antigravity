@@ -149,6 +149,7 @@ export interface Database {
           id: number
           alias_name: string
           product_id: number
+          store_id: number
           source_system: string
           is_active: boolean
           created_at: string
@@ -158,6 +159,7 @@ export interface Database {
           id?: number
           alias_name: string
           product_id: number
+          store_id: number
           source_system?: string
           is_active?: boolean
           created_at?: string
@@ -167,6 +169,7 @@ export interface Database {
           id?: number
           alias_name?: string
           product_id?: number
+          store_id?: number
           source_system?: string
           is_active?: boolean
           created_at?: string
@@ -177,6 +180,7 @@ export interface Database {
       products: {
         Row: {
           id: number
+          store_id: number
           jan_code: string | null
           product_name: string | null
           cost_price: number | null
@@ -192,6 +196,7 @@ export interface Database {
         }
         Insert: {
           id?: number
+          store_id: number
           jan_code?: string | null
           product_name?: string | null
           cost_price?: number | null
@@ -207,6 +212,7 @@ export interface Database {
         }
         Update: {
           id?: number
+          store_id?: number
           jan_code?: string | null
           product_name?: string | null
           cost_price?: number | null

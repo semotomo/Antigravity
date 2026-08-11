@@ -1,7 +1,9 @@
 'use server'
 
 import { revalidatePath, refresh } from 'next/cache'
+import { getProductStoreName, PRODUCT_STORE } from '@/lib/productStores'
 import { searchProductByJan } from '@/lib/queries/transfers'
+import { getStoreContext } from '@/lib/storeAuth'
 import { createClient } from '@/lib/supabase/server'
 import {
   isValidTransferEntryType,
@@ -208,22 +210,49 @@ export async function createTransfersAction(
     }
 
     const supabase = await requireAuthenticatedClient()
+    const storeContext = await getStoreContext()
+
+    if (
+      storeContext.storeType === 'wanwan' &&
+      items.some((item) => item.from_store_id !== PRODUCT_STORE.wanwan.id)
+    ) {
+      return {
+        status: 'error',
+        message: 'わんわん用アカウントでは、わんわんの商品だけ登録できます。',
+        fieldErrors: { from_store_id: 'わんわんを選択してください。' },
+      }
+    }
+
     const now = new Date().toISOString()
 
-    // 登録対象の全 JAN のうち、products テーブルに存在しないものを自動仮登録する
+    // 同じJANでも店舗別の商品として存在確認し、不足分だけ仮登録する
     const uniqueJanCodes = Array.from(new Set(items.map((item) => item.jan_code)))
     const { data: existingProducts, error: checkError } = await supabase
       .from('products')
-      .select('jan_code')
+      .select('store_id, jan_code')
       .in('jan_code', uniqueJanCodes)
 
     if (!checkError) {
-      const existingJans = new Set(((existingProducts as any[]) ?? []).map((p) => p.jan_code))
+      const existingProductKeys = new Set(
+        ((existingProducts as any[]) ?? []).map(
+          (product) => `${product.store_id}:${product.jan_code}`
+        )
+      )
       const missingProducts = items
-        .filter((item) => !existingJans.has(item.jan_code))
-        // 重複 JAN の排除
-        .filter((item, index, self) => self.findIndex((t) => t.jan_code === item.jan_code) === index)
+        .filter(
+          (item) => !existingProductKeys.has(`${item.from_store_id}:${item.jan_code}`)
+        )
+        // 店舗ID + JAN の組み合わせで重複を排除
+        .filter(
+          (item, index, self) =>
+            self.findIndex(
+              (candidate) =>
+                candidate.from_store_id === item.from_store_id &&
+                candidate.jan_code === item.jan_code
+            ) === index
+        )
         .map((item) => ({
+          store_id: item.from_store_id,
           jan_code: item.jan_code,
           product_name: item.product_name || `[仮] 未登録商品 (${item.jan_code})`,
           cost_price: item.cost_price || 0,
@@ -231,7 +260,7 @@ export async function createTransfersAction(
           category: '[仮] 未登録',
           product_group: '[仮] 未登録',
           is_active: true,
-          created_at: now,
+          tags: getProductStoreName(item.from_store_id),
           updated_at: now,
         }))
 
@@ -295,7 +324,8 @@ export async function createTransfersAction(
 }
 
 export async function lookupTransferProductByJanAction(
-  rawJanCode: string
+  rawJanCode: string,
+  storeId: number
 ): Promise<TransferProductLookupResult> {
   try {
     const janCode = normalizeJanCode(rawJanCode)
@@ -308,8 +338,25 @@ export async function lookupTransferProductByJanAction(
       }
     }
 
+    if (storeId !== PRODUCT_STORE.main.id && storeId !== PRODUCT_STORE.wanwan.id) {
+      return {
+        status: 'error',
+        message: '検索する店舗を選択してください。',
+        product: null,
+      }
+    }
+
     await requireAuthenticatedClient()
-    const product = await searchProductByJan(janCode)
+    const storeContext = await getStoreContext()
+    if (storeContext.storeType === 'wanwan' && storeId !== PRODUCT_STORE.wanwan.id) {
+      return {
+        status: 'error',
+        message: 'わんわん用アカウントでは本店の商品を検索できません。',
+        product: null,
+      }
+    }
+
+    const product = await searchProductByJan(janCode, storeId)
 
     return {
       status: 'success',

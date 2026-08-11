@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
+import { getProductStoreId } from '@/lib/productStores'
+import { getStoreContext } from '@/lib/storeAuth'
 import {
   buildUnmatchedProductSummaries,
   type ProductAliasListRow,
@@ -55,12 +57,19 @@ async function fetchAllRows<T>(
 
 export async function fetchUnmatchedProducts(limit = 2000): Promise<UnmatchedProductSummary[]> {
   const supabase = await createClient()
-  const { data, error } = await supabase
+  const storeContext = await getStoreContext()
+  let query = supabase
     .from('sales_enriched_v')
     .select('product_name, sale_date, store_name, quantity, sales_amount, category')
     .eq('unmatched_master', true)
     .order('sale_date', { ascending: false })
     .limit(limit)
+
+  if (storeContext.filterStoreName) {
+    query = query.eq('store_name', storeContext.filterStoreName)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.error('Error fetching unmatched products:', error)
@@ -72,15 +81,24 @@ export async function fetchUnmatchedProducts(limit = 2000): Promise<UnmatchedPro
 
 export async function fetchActiveProducts(limit?: number): Promise<ProductOption[]> {
   const supabase = await createClient()
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
   const products = await fetchAllRows<ProductOption>(
-    async (from, to) =>
-      await supabase
+    async (from, to) => {
+      let query = supabase
         .from('products')
-        .select('id, product_name, jan_code, category, selling_price, cost_price, is_active')
+        .select('id, store_id, product_name, jan_code, category, selling_price, cost_price, is_active')
         .eq('is_active', true)
+
+      if (storeId !== null) {
+        query = query.eq('store_id', storeId)
+      }
+
+      return await query
         .order('product_name', { ascending: true })
         .order('id', { ascending: true })
-        .range(from, to),
+        .range(from, to)
+    },
     'active products',
     limit
   )
@@ -90,17 +108,26 @@ export async function fetchActiveProducts(limit?: number): Promise<ProductOption
 
 export async function fetchProducts(limit?: number): Promise<ProductListRow[]> {
   const supabase = await createClient()
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
 
   return fetchAllRows<ProductListRow>(
-    async (from, to) =>
-      await supabase
+    async (from, to) => {
+      let query = supabase
         .from('products')
         .select(
-          'id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at'
+          'id, store_id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, supplier_name, is_active, updated_at, tags'
         )
+
+      if (storeId !== null) {
+        query = query.eq('store_id', storeId)
+      }
+
+      return await query
         .order('product_name', { ascending: true })
         .order('id', { ascending: true })
-        .range(from, to),
+        .range(from, to)
+    },
     'products',
     limit
   )
@@ -108,26 +135,42 @@ export async function fetchProducts(limit?: number): Promise<ProductListRow[]> {
 
 export async function fetchProductAliases(limit?: number): Promise<ProductAliasListRow[]> {
   const supabase = await createClient()
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
   const [aliases, products] = await Promise.all([
     fetchAllRows<ProductAliasRow>(
-      async (from, to) =>
-        await supabase
+      async (from, to) => {
+        let query = supabase
           .from('product_aliases')
-          .select('id, alias_name, product_id, source_system, is_active, created_at, updated_at')
+          .select('id, alias_name, product_id, store_id, source_system, is_active, created_at, updated_at')
+
+        if (storeId !== null) {
+          query = query.eq('store_id', storeId)
+        }
+
+        return await query
           .order('updated_at', { ascending: false })
           .order('id', { ascending: false })
-          .range(from, to),
+          .range(from, to)
+      },
       'product aliases',
       limit
     ),
     fetchAllRows<ProductOption>(
-      async (from, to) =>
-        await supabase
+      async (from, to) => {
+        let query = supabase
           .from('products')
-          .select('id, product_name, jan_code, category, selling_price, cost_price, is_active')
+          .select('id, store_id, product_name, jan_code, category, selling_price, cost_price, is_active')
+
+        if (storeId !== null) {
+          query = query.eq('store_id', storeId)
+        }
+
+        return await query
           .order('product_name', { ascending: true })
           .order('id', { ascending: true })
-          .range(from, to),
+          .range(from, to)
+      },
       'products for aliases'
     ),
   ])

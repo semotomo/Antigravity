@@ -34,11 +34,14 @@ export function OrderFormFields({
   fieldErrors,
 }: OrderFormFieldsProps) {
   const mainStore = stores.find((store) => store.name === '本店')
+  const availableProductStoreIds = Array.from(new Set(products.map((product) => product.store_id)))
+  const defaultProductStoreId =
+    availableProductStoreIds.length === 1 ? availableProductStoreIds[0] : mainStore?.id
   const defaultStoreId =
     order?.store_id !== null && order?.store_id !== undefined
       ? String(order.store_id)
-      : mode === 'create' && mainStore
-        ? String(mainStore.id)
+      : mode === 'create' && defaultProductStoreId
+        ? String(defaultProductStoreId)
         : ''
   const defaultJanCode = order?.jan_code ?? order?.product?.jan_code ?? ''
   const defaultOrderDate = order?.order_date ?? (mode === 'create' ? getTodayDateInputValue() : '')
@@ -47,10 +50,15 @@ export function OrderFormFields({
   const [selectedProductId, setSelectedProductId] = useState(
     order?.product_id ? String(order.product_id) : ''
   )
+  const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId)
+  const storeProducts = useMemo(
+    () => products.filter((product) => String(product.store_id) === selectedStoreId),
+    [products, selectedStoreId]
+  )
   const productsByJanCode = useMemo(() => {
     const productMap = new Map<string, OrderProductOption>()
 
-    products.forEach((product) => {
+    storeProducts.forEach((product) => {
       const normalizedJanCode = normalizeJanCode(product.jan_code ?? '')
 
       if (normalizedJanCode && !productMap.has(normalizedJanCode)) {
@@ -59,7 +67,7 @@ export function OrderFormFields({
     })
 
     return productMap
-  }, [products])
+  }, [storeProducts])
   const normalizedJanCode = normalizeJanCode(janCode)
   const matchedProduct = normalizedJanCode ? productsByJanCode.get(normalizedJanCode) : null
 
@@ -200,7 +208,11 @@ export function OrderFormFields({
         <span className="text-sm font-medium text-gray-700">受付店舗</span>
         <select
           name="store_id"
-          defaultValue={defaultStoreId}
+          value={selectedStoreId}
+          onChange={(event) => {
+            setSelectedStoreId(event.target.value)
+            setSelectedProductId('')
+          }}
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         >
           <option value="">未設定</option>
@@ -221,7 +233,7 @@ export function OrderFormFields({
           className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
         >
           <option value="">未設定</option>
-          {products.map((product) => (
+          {storeProducts.map((product) => (
             <option key={product.id} value={product.id}>
               {product.product_name}
               {product.category ? ` / ${product.category}` : ''}

@@ -88,7 +88,10 @@ export async function fetchTransferProducts(): Promise<TransferProductOption[]> 
   return []
 }
 
-export async function searchProductByJan(janCode: string): Promise<TransferProductOption | null> {
+export async function searchProductByJan(
+  janCode: string,
+  storeId: number
+): Promise<TransferProductOption | null> {
   const supabase = await createClient()
   const candidates = buildJanCodeCandidates(janCode)
 
@@ -98,7 +101,8 @@ export async function searchProductByJan(janCode: string): Promise<TransferProdu
 
   const { data, error } = await supabase
     .from('products')
-    .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
+    .select('id, store_id, jan_code, product_name, cost_price, selling_price, category, is_active')
+    .eq('store_id', storeId)
     .in('jan_code', candidates)
 
   if (error) {
@@ -116,7 +120,8 @@ export async function searchProductByJan(janCode: string): Promise<TransferProdu
     async (from, to) =>
       await supabase
         .from('products')
-        .select('id, jan_code, product_name, cost_price, selling_price, category, is_active')
+        .select('id, store_id, jan_code, product_name, cost_price, selling_price, category, is_active')
+        .eq('store_id', storeId)
         .order('is_active', { ascending: false })
         .order('product_name', { ascending: true })
         .order('id', { ascending: true })
@@ -193,7 +198,7 @@ export async function fetchTransferHistory(
     if (janCodes.length > 0) {
       const { data: products, error: productsError } = await supabase
         .from('products')
-        .select('jan_code, product_name, cost_price, selling_price')
+        .select('store_id, jan_code, product_name, cost_price, selling_price')
         .in('jan_code', janCodes)
 
       if (!productsError && products && products.length > 0) {
@@ -201,7 +206,7 @@ export async function fetchTransferHistory(
         const productMap = new Map<string, { product_name: string; cost_price: number; selling_price: number }>()
         productList.forEach((p) => {
           if (p.jan_code && p.product_name) {
-            productMap.set(p.jan_code, {
+            productMap.set(`${p.store_id}:${p.jan_code}`, {
               product_name: p.product_name,
               cost_price: Number(p.cost_price ?? 0),
               selling_price: Number(p.selling_price ?? 0),
@@ -210,7 +215,7 @@ export async function fetchTransferHistory(
         })
 
         return transfers.map((t) => {
-          const match = t.jan_code ? productMap.get(t.jan_code) : null
+          const match = t.jan_code ? productMap.get(`${t.from_store_id}:${t.jan_code}`) : null
           if (match) {
             const cost = match.cost_price ?? t.cost_price
             return {

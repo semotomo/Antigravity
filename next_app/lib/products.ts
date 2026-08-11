@@ -9,13 +9,20 @@ export type SalesEnrichedRow = Database['public']['Views']['sales_enriched_v']['
 
 export type ProductOption = Pick<
   ProductRow,
-  'id' | 'product_name' | 'jan_code' | 'category' | 'selling_price' | 'cost_price' | 'is_active'
+  | 'id'
+  | 'store_id'
+  | 'product_name'
+  | 'jan_code'
+  | 'category'
+  | 'selling_price'
+  | 'cost_price'
+  | 'is_active'
 >
 
 export type ProductListRow = ProductRow
 
 export type ProductAliasListRow = ProductAliasRow & {
-  product: Pick<ProductRow, 'id' | 'product_name' | 'jan_code' | 'category' | 'is_active'> | null
+  product: Pick<ProductRow, 'id' | 'store_id' | 'product_name' | 'jan_code' | 'category' | 'is_active'> | null
 }
 
 export type UnmatchedProductSummary = {
@@ -40,7 +47,6 @@ export type ProductActionField =
   | 'cost_price'
   | 'selling_price'
   | 'is_active'
-  | 'tags'
 
 export type ProductMutationState = {
   status: 'idle' | 'success' | 'error'
@@ -96,7 +102,8 @@ export function buildUnmatchedProductSummaries(rows: SalesEnrichedRow[]) {
       return
     }
 
-    const current = buckets.get(productName) ?? {
+    const bucketKey = `${row.store_name}:${productName}`
+    const current = buckets.get(bucketKey) ?? {
       posProductName: productName,
       occurrenceCount: 0,
       totalQuantity: 0,
@@ -122,7 +129,7 @@ export function buildUnmatchedProductSummaries(rows: SalesEnrichedRow[]) {
       current.categoryHints.push(row.category)
     }
 
-    buckets.set(productName, current)
+    buckets.set(bucketKey, current)
   })
 
   return Array.from(buckets.values()).sort((left, right) => {

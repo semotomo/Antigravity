@@ -1134,6 +1134,11 @@ function normalizeProductMasterJanCode_(value) {
 }
 
 
+function getProductStoreId_(storeTag) {
+  return storeTag && storeTag.indexOf('わんわん') !== -1 ? 6 : 7;
+}
+
+
 function splitProductStoreTags_(tags) {
   if (!tags) return [];
   return tags.toString().split(',').map(function(tag) {
@@ -1248,6 +1253,7 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
     }
 
     records.push({
+      store_id: getProductStoreId_(storeTag),
       jan_code: janCode,
       product_name: productName,
       category: category,
@@ -1303,7 +1309,7 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 
 // ===================================================================
 // 【商品マスタ同期】Supabaseの products テーブルへ upsert
-// jan_code のUNIQUE制約を利用して重複時は更新
+// store_id + jan_code の複合UNIQUE制約を利用して店舗別に重複時は更新
 // ===================================================================
 function upsertProductMasterToSupabase_(records, syncStartedAt, storeTag) {
   var props = PropertiesService.getScriptProperties();
@@ -1314,15 +1320,12 @@ function upsertProductMasterToSupabase_(records, syncStartedAt, storeTag) {
     throw new Error('Supabase設定が未完了です。');
   }
 
-  var url = supabaseUrl + '/rest/v1/products?on_conflict=jan_code';
-
-  // 同じJANが複数店舗に存在する場合は、既存店舗タグを失わないように統合する
-  var janCodes = records.map(function(record) { return record.jan_code; });
-  var existingTagsByJan = fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey);
+  var url = supabaseUrl + '/rest/v1/products?on_conflict=store_id,jan_code';
 
   // updated_at を現在時刻に設定
   for (var i = 0; i < records.length; i++) {
-    records[i].tags = mergeProductStoreTag_(existingTagsByJan[records[i].jan_code], storeTag);
+    records[i].store_id = getProductStoreId_(storeTag);
+    records[i].tags = storeTag;
     records[i].updated_at = syncStartedAt;
   }
 
@@ -1333,7 +1336,7 @@ function upsertProductMasterToSupabase_(records, syncStartedAt, storeTag) {
     headers: {
       'apikey': supabaseKey,
       'Authorization': 'Bearer ' + supabaseKey,
-      // jan_code のUNIQUE制約で重複時は更新（UPSERT）
+      // 店舗ID + JANコードの複合UNIQUE制約で重複時は更新（UPSERT）
       'Prefer': 'resolution=merge-duplicates'
     },
     muteHttpExceptions: true
@@ -1387,7 +1390,7 @@ function fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey) {
 
 
 // ===================================================================
-// 【商品マスタ同期】今回のCSVに存在しなかった商品の店舗所属を外す
+// 【商品マスタ同期】今回のCSVに存在しなかった店舗別商品を無効化する
 // ===================================================================
 function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   var props = PropertiesService.getScriptProperties();
@@ -1398,9 +1401,10 @@ function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   }
 
   var staleRows = [];
+  var storeId = getProductStoreId_(storeTag);
   for (var offset = 0; ; offset += 1000) {
-    var selectUrl = supabaseUrl + '/rest/v1/products?select=id,tags' +
-      '&tags=ilike.' + encodeURIComponent('*' + storeTag + '*') +
+    var selectUrl = supabaseUrl + '/rest/v1/products?select=id' +
+      '&store_id=eq.' + storeId +
       '&or=(updated_at.lt.' + encodeURIComponent(syncStartedAt) + ',updated_at.is.null)' +
       '&limit=1000&offset=' + offset;
     var selectResponse = UrlFetchApp.fetch(selectUrl, {
@@ -1420,46 +1424,31 @@ function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
     if (page.length < 1000) break;
   }
 
-  var updateGroups = {};
-  for (var i = 0; i < staleRows.length; i++) {
-    var remainingTags = removeProductStoreTag_(staleRows[i].tags, storeTag);
-    // ilikeの部分一致だけで拾った行に対象タグがなければ変更しない
-    if (remainingTags === staleRows[i].tags) continue;
-    var groupKey = remainingTags || '__NO_TAGS__';
-    if (!updateGroups[groupKey]) updateGroups[groupKey] = [];
-    updateGroups[groupKey].push(staleRows[i].id);
-  }
-
   var updatedCount = 0;
-  var groupKeys = Object.keys(updateGroups);
-  for (var groupIndex = 0; groupIndex < groupKeys.length; groupIndex++) {
-    var groupKey = groupKeys[groupIndex];
-    var ids = updateGroups[groupKey];
-    for (var idIndex = 0; idIndex < ids.length; idIndex += 100) {
-      var idChunk = ids.slice(idIndex, idIndex + 100);
-      var remainingTags = groupKey === '__NO_TAGS__' ? null : groupKey;
-      var patchUrl = supabaseUrl + '/rest/v1/products?id=in.(' + idChunk.join(',') + ')';
-      var patchResponse = UrlFetchApp.fetch(patchUrl, {
-        method: 'patch',
-        contentType: 'application/json',
-        payload: JSON.stringify({
-          tags: remainingTags,
-          is_active: Boolean(remainingTags),
-        }),
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': 'Bearer ' + supabaseKey,
-          'Prefer': 'return=minimal',
-        },
-        muteHttpExceptions: true,
-      });
-      var patchCode = patchResponse.getResponseCode();
-      if (patchCode !== 200 && patchCode !== 204) {
-        throw new Error('旧商品所属更新エラー: Status ' + patchCode + ', ' +
-          patchResponse.getContentText().substring(0, 500));
-      }
-      updatedCount += idChunk.length;
+  var ids = staleRows.map(function(row) { return row.id; });
+  for (var idIndex = 0; idIndex < ids.length; idIndex += 100) {
+    var idChunk = ids.slice(idIndex, idIndex + 100);
+    var patchUrl = supabaseUrl + '/rest/v1/products?id=in.(' + idChunk.join(',') + ')';
+    var patchResponse = UrlFetchApp.fetch(patchUrl, {
+      method: 'patch',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        tags: storeTag,
+        is_active: false,
+      }),
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': 'Bearer ' + supabaseKey,
+        'Prefer': 'return=minimal',
+      },
+      muteHttpExceptions: true,
+    });
+    var patchCode = patchResponse.getResponseCode();
+    if (patchCode !== 200 && patchCode !== 204) {
+      throw new Error('旧商品無効化エラー: Status ' + patchCode + ', ' +
+        patchResponse.getContentText().substring(0, 500));
     }
+    updatedCount += idChunk.length;
   }
-  Logger.log('旧商品所属の整理完了: 店舗=' + storeTag + ', 更新=' + updatedCount + '件, 基準時刻=' + syncStartedAt);
+  Logger.log('旧商品の無効化完了: 店舗=' + storeTag + ', 更新=' + updatedCount + '件, 基準時刻=' + syncStartedAt);
 }

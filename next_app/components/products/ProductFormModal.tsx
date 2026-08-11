@@ -8,6 +8,7 @@ import {
   initialProductMutationState,
   type ProductListRow,
 } from '@/lib/products'
+import { getProductStoreName } from '@/lib/productStores'
 
 type ProductFormModalProps = {
   open: boolean
@@ -58,7 +59,7 @@ export function ProductFormModal({ open, product, onClose }: ProductFormModalPro
             </p>
             <h2 className="mt-2 text-2xl font-bold text-gray-900">商品マスタを編集</h2>
             <p className="mt-1 text-sm text-gray-500">
-              売上分析に反映される基本情報と有効状態を更新します。
+              {getProductStoreName(product.store_id)}専用の商品名・原価・売価を更新します。
             </p>
           </div>
           <button
@@ -180,15 +181,6 @@ export function ProductFormModal({ open, product, onClose }: ProductFormModalPro
               </select>
             </label>
 
-            <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-medium text-gray-700">タグ (カンマ区切りで複数設定可能)</span>
-              <input
-                name="tags"
-                defaultValue={product.tags ?? ''}
-                placeholder="例: わんわん, 本店"
-                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-              />
-            </label>
           </div>
 
           {state.message ? (

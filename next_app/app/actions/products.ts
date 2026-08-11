@@ -9,10 +9,13 @@ import {
   type ProductMutationState,
   type ProductUpdate,
 } from '@/lib/products'
+import { requireProductStore } from '@/lib/productStores'
+import { getStoreContext } from '@/lib/storeAuth'
 import { createClient } from '@/lib/supabase/server'
 
 const POS_SOURCE_SYSTEM = 'pos'
 const JAN_CODE_PATTERN = /^(\d{8}|\d{12}|\d{13})$/
+type ProductPayload = Omit<ProductInsert, 'store_id'>
 
 function getTrimmedValue(formData: FormData, key: string) {
   const value = formData.get(key)
@@ -119,13 +122,15 @@ async function requireAuthenticatedClient() {
 
 async function ensureAliasDoesNotExist(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  aliasName: string
+  aliasName: string,
+  storeId: number
 ) {
   const { data, error } = await supabase
     .from('product_aliases')
     .select('id, product_id')
     .eq('alias_name', aliasName)
     .eq('source_system', POS_SOURCE_SYSTEM)
+    .eq('store_id', storeId)
     .maybeSingle()
 
   if (error) {
@@ -134,6 +139,31 @@ async function ensureAliasDoesNotExist(
   }
 
   return data
+}
+
+async function getWritableProductStore() {
+  const storeContext = await getStoreContext()
+  return requireProductStore(storeContext.currentView)
+}
+
+async function productBelongsToStore(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  productId: number,
+  storeId: number
+) {
+  const { data, error } = await supabase
+    .from('products')
+    .select('id')
+    .eq('id', productId)
+    .eq('store_id', storeId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error checking product store:', error)
+    throw new Error('商品の店舗所属を確認できませんでした。')
+  }
+
+  return Boolean(data)
 }
 
 function revalidateProductPages() {
@@ -150,11 +180,13 @@ function revalidateProductPages() {
 function buildAliasInsertPayload(
   aliasName: string,
   productId: number,
+  storeId: number,
   now: string
 ): ProductAliasInsert {
   return {
     alias_name: aliasName,
     product_id: productId,
+    store_id: storeId,
     source_system: POS_SOURCE_SYSTEM,
     is_active: true,
     created_at: now,
@@ -182,7 +214,6 @@ function buildProductPayload(
   const supplierName = normalizeOptionalText(formData.get('supplier_name'))
   const costPrice = parseOptionalNonNegativeInteger(formData, 'cost_price', fieldErrors)
   const sellingPrice = parseOptionalNonNegativeInteger(formData, 'selling_price', fieldErrors)
-  const tags = normalizeOptionalText(formData.get('tags'))
 
   if (requireAliasName && !aliasName) {
     fieldErrors.alias_name = 'POS 側の商品名を取得できませんでした。'
@@ -200,7 +231,7 @@ function buildProductPayload(
     }
   }
 
-  const payload: ProductInsert = {
+  const payload: ProductPayload = {
     product_name: productName,
     jan_code: janCode,
     category,
@@ -211,7 +242,6 @@ function buildProductPayload(
     selling_price: sellingPrice,
     markup_rate: calculateMarkupRate(costPrice ?? 0, sellingPrice ?? 0),
     is_active: parseIsActive(formData, defaultIsActive),
-    tags,
   }
 
   return {
@@ -243,7 +273,17 @@ export async function matchToExistingProductAction(
     }
 
     const supabase = await requireAuthenticatedClient()
-    const existingAlias = await ensureAliasDoesNotExist(supabase, aliasName)
+    const store = await getWritableProductStore()
+
+    if (!(await productBelongsToStore(supabase, productId, store.id))) {
+      return {
+        status: 'error',
+        message: `${store.name}の商品を選択してください。`,
+        fieldErrors: { product_id: '選択中の店舗の商品ではありません。' },
+      }
+    }
+
+    const existingAlias = await ensureAliasDoesNotExist(supabase, aliasName, store.id)
 
     if (existingAlias) {
       return {
@@ -256,7 +296,7 @@ export async function matchToExistingProductAction(
     const now = new Date().toISOString()
     const { error } = await supabase
       .from('product_aliases')
-      .insert(buildAliasInsertPayload(aliasName, productId, now) as never)
+      .insert(buildAliasInsertPayload(aliasName, productId, store.id, now) as never)
 
     if (error) {
       console.error('Error creating alias:', error)
@@ -310,7 +350,8 @@ export async function createNewProductAndMatchAction(
     }
 
     const supabase = await requireAuthenticatedClient()
-    const existingAlias = await ensureAliasDoesNotExist(supabase, aliasName)
+    const store = await getWritableProductStore()
+    const existingAlias = await ensureAliasDoesNotExist(supabase, aliasName, store.id)
 
     if (existingAlias) {
       return {
@@ -323,6 +364,8 @@ export async function createNewProductAndMatchAction(
     const now = new Date().toISOString()
     const insertPayload: ProductInsert = {
       ...payload,
+      store_id: store.id,
+      tags: store.name,
       updated_at: now,
     }
 
@@ -349,7 +392,7 @@ export async function createNewProductAndMatchAction(
 
     const { error: aliasError } = await supabase
       .from('product_aliases')
-      .insert(buildAliasInsertPayload(aliasName, createdProduct.id, now) as never)
+      .insert(buildAliasInsertPayload(aliasName, createdProduct.id, store.id, now) as never)
 
     if (aliasError) {
       console.error('Error creating alias after product insert:', aliasError)
@@ -412,27 +455,33 @@ export async function updateProductAction(
     }
 
     const supabase = await requireAuthenticatedClient()
+    const store = await getWritableProductStore()
     const now = new Date().toISOString()
     const updatePayload: ProductUpdate = {
       ...payload,
       updated_at: now,
     }
 
-    const { error } = await supabase
+    const { data: updatedProduct, error } = await supabase
       .from('products')
       .update(updatePayload as never)
       .eq('id', productId)
+      .eq('store_id', store.id)
+      .select('id')
+      .maybeSingle()
 
-    if (error) {
+    if (error || !updatedProduct) {
       console.error('Error updating product:', error)
       return {
         status: 'error',
         message:
-          error.code === '23505'
+          error?.code === '23505'
             ? 'この JAN コードはすでに使われています。'
-            : '商品マスタの更新に失敗しました。',
+            : !updatedProduct
+              ? `${store.name}の商品ではないため更新できません。`
+              : '商品マスタの更新に失敗しました。',
         fieldErrors:
-          error.code === '23505' ? { jan_code: 'この JAN コードはすでに使われています。' } : {},
+          error?.code === '23505' ? { jan_code: 'この JAN コードはすでに使われています。' } : {},
       }
     }
 
@@ -480,6 +529,16 @@ export async function updateAliasTargetAction(
     }
 
     const supabase = await requireAuthenticatedClient()
+    const store = await getWritableProductStore()
+
+    if (!(await productBelongsToStore(supabase, productId, store.id))) {
+      return {
+        status: 'error',
+        message: `${store.name}の商品を選択してください。`,
+        fieldErrors: { product_id: '選択中の店舗の商品ではありません。' },
+      }
+    }
+
     const now = new Date().toISOString()
 
     const { error } = await supabase
@@ -489,6 +548,7 @@ export async function updateAliasTargetAction(
         updated_at: now,
       } as never)
       .eq('id', aliasId)
+      .eq('store_id', store.id)
 
     if (error) {
       console.error('Error updating alias target:', error)
@@ -530,7 +590,12 @@ export async function deleteAliasAction(formData: FormData) {
     }
 
     const supabase = await requireAuthenticatedClient()
-    const { error } = await supabase.from('product_aliases').delete().eq('id', aliasId)
+    const store = await getWritableProductStore()
+    const { error } = await supabase
+      .from('product_aliases')
+      .delete()
+      .eq('id', aliasId)
+      .eq('store_id', store.id)
 
     if (error) {
       console.error('Error deleting alias:', error)
@@ -563,6 +628,8 @@ export async function uploadProductMasterCsv(formData: FormData) {
     if (rows.length === 0) {
       return { success: false, message: 'CSVにデータがありません。' }
     }
+
+    const store = await getWritableProductStore()
 
     const COL = {
       JAN_CODE: 3,
@@ -609,6 +676,7 @@ export async function uploadProductMasterCsv(formData: FormData) {
       }
 
       records.push({
+        store_id: store.id,
         jan_code: janCode,
         product_name: productName,
         category: category,
@@ -618,6 +686,7 @@ export async function uploadProductMasterCsv(formData: FormData) {
         selling_price: sellingPrice,
         markup_rate: markupRate,
         is_active: true,
+        tags: store.name,
       })
     }
 
@@ -636,7 +705,7 @@ export async function uploadProductMasterCsv(formData: FormData) {
       const { error } = await supabase
         .from('products')
         .upsert(chunk as never[], {
-          onConflict: 'jan_code',
+          onConflict: 'store_id,jan_code',
           ignoreDuplicates: false,
         })
 
@@ -685,7 +754,14 @@ export async function uploadSupplierCsv(formData: FormData) {
       return { success: false, message: 'CSVにデータがありません。' }
     }
 
-    const records: Array<{ jan_code: string; supplier_name: string | null }> = []
+    const store = await getWritableProductStore()
+
+    const records: Array<{
+      store_id: number
+      jan_code: string
+      supplier_name: string | null
+      tags: string
+    }> = []
     const seen = new Set<string>()
     let skipped = 0
 
@@ -717,8 +793,10 @@ export async function uploadSupplierCsv(formData: FormData) {
       seen.add(janCode)
 
       records.push({
+        store_id: store.id,
         jan_code: janCode,
         supplier_name: supplierName || null,
+        tags: store.name,
       })
     }
 
@@ -737,7 +815,7 @@ export async function uploadSupplierCsv(formData: FormData) {
       const { error } = await supabase
         .from('products')
         .upsert(chunk as never[], {
-          onConflict: 'jan_code',
+          onConflict: 'store_id,jan_code',
           ignoreDuplicates: false, // 既存商品は仕入れ先情報を上書きする
         })
 

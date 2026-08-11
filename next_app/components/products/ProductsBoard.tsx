@@ -14,6 +14,7 @@ import {
   formatYen,
   type ProductListRow,
 } from '@/lib/products'
+import { getProductStoreName } from '@/lib/productStores'
 
 type ProductsBoardProps = {
   products: ProductListRow[]
@@ -104,20 +105,13 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       align: 'right',
     },
     {
-      key: 'tags',
-      header: 'タグ',
-      render: (product) => {
-        if (!product.tags) return <span className="text-gray-400 text-xs">-</span>
-        return (
-          <div className="flex flex-wrap gap-1">
-            {product.tags.split(',').map((tag) => (
-              <span key={tag} className="inline-flex items-center rounded-md bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 ring-1 ring-inset ring-sky-700/10">
-                {tag.trim()}
-              </span>
-            ))}
-          </div>
-        )
-      },
+      key: 'store_id',
+      header: '店舗',
+      render: (product) => (
+        <span className="inline-flex items-center rounded-md bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 ring-1 ring-inset ring-sky-700/10">
+          {getProductStoreName(product.store_id)}
+        </span>
+      ),
     },
     {
       key: 'status',
@@ -167,7 +161,7 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">商品マスタ</h1>
                 <p className="mt-2 max-w-2xl text-sm text-sky-50/90">
-                  売上分析やエイリアス解決で使う商品マスタをデータベースから高速検索し、編集します。
+                  本店・わんわんで分離された商品名、原価、売価を店舗ごとに検索・編集します。
                 </p>
               </div>
               <div className="rounded-3xl bg-white/10 px-4 py-3 backdrop-blur-sm">

@@ -14,6 +14,8 @@ import {
   type OrderStatus,
 } from '@/lib/orders'
 import { createClient } from '@/lib/supabase/server'
+import { PRODUCT_STORE } from '@/lib/productStores'
+import { getStoreContext } from '@/lib/storeAuth'
 
 const JAN_CODE_PATTERN = /^(\d{8}|\d{12}|\d{13})$/
 const ORDER_NO_BATCH_SIZE = 1000
@@ -256,6 +258,39 @@ export async function saveOrderAction(
         status: 'error',
         message: '入力内容を確認してください。',
         fieldErrors,
+      }
+    }
+
+    const storeContext = await getStoreContext()
+    if (
+      storeContext.storeType === 'wanwan' &&
+      payload.store_id !== PRODUCT_STORE.wanwan.id
+    ) {
+      return {
+        status: 'error',
+        message: 'わんわん用アカウントでは、わんわんの客注だけ登録できます。',
+        fieldErrors: { store_id: 'わんわんを選択してください。' },
+      }
+    }
+
+    if (payload.product_id !== null && payload.product_id !== undefined) {
+      const { data: selectedProduct, error: productError } = await supabase
+        .from('products')
+        .select('store_id')
+        .eq('id', payload.product_id)
+        .maybeSingle()
+      const selectedProductRow = selectedProduct as { store_id: number } | null
+
+      if (
+        productError ||
+        !selectedProductRow ||
+        selectedProductRow.store_id !== payload.store_id
+      ) {
+        return {
+          status: 'error',
+          message: '受付店舗と商品マスタの店舗が一致していません。',
+          fieldErrors: { product_id: '受付店舗の商品を選択してください。' },
+        }
       }
     }
 

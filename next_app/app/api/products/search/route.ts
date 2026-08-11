@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { getProductStoreId } from '@/lib/productStores'
+import { getStoreContext } from '@/lib/storeAuth'
 import { createClient } from '@/lib/supabase/server'
 
 // 商品高速検索用APIルート
@@ -7,6 +8,14 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET(request: Request) {
   try {
     const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json({ success: false, message: 'ログインが必要です。' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
     const q = searchParams.get('q')?.trim() || ''
 
@@ -14,29 +23,27 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: [] })
     }
 
-    const cookieStore = await cookies()
-    const storeView = cookieStore.get('current_store_view')?.value || 'main'
+    const storeContext = await getStoreContext()
+    const productStoreId = getProductStoreId(storeContext.currentView)
 
     // スペース区切りの複数キーワードに対応
     const keywords = q.split(/\s+/).filter(Boolean)
     let queryBuilder = supabase
       .from('products')
-      .select('id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name, tags')
+      .select('id, store_id, jan_code, product_name, cost_price, selling_price, category, markup_rate, product_group, brand, is_active, updated_at, supplier_name, tags')
 
-    // 表示店舗に応じたタグフィルタリング
-    if (storeView === 'main') {
-      queryBuilder = queryBuilder.or('tags.ilike.%本店%,tags.is.null')
-    } else if (storeView === 'wanwan') {
-      queryBuilder = queryBuilder.ilike('tags', '%わんわん%')
+    // 商品の所属はタグ文字列ではなく店舗IDで厳密に分離する
+    if (productStoreId !== null) {
+      queryBuilder = queryBuilder.eq('store_id', productStoreId)
     }
 
     // 各キーワードに対して、商品名・JAN・ブランド・カテゴリ・タグのいずれかに部分一致するAND条件をチェーンする
     keywords.forEach((kw) => {
       // JANコード（数字）の場合はJANに完全一致または前方一致、かつ他のテキストへの部分一致
       if (/^\d+$/.test(kw)) {
-        queryBuilder = queryBuilder.or(`jan_code.ilike.%${kw}%,product_name.ilike.%${kw}%,tags.ilike.%${kw}%`)
+        queryBuilder = queryBuilder.or(`jan_code.ilike.%${kw}%,product_name.ilike.%${kw}%`)
       } else {
-        queryBuilder = queryBuilder.or(`product_name.ilike.%${kw}%,brand.ilike.%${kw}%,category.ilike.%${kw}%,tags.ilike.%${kw}%`)
+        queryBuilder = queryBuilder.or(`product_name.ilike.%${kw}%,brand.ilike.%${kw}%,category.ilike.%${kw}%`)
       }
     })
 

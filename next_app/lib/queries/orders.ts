@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
+import { getProductStoreId } from '@/lib/productStores'
+import { getStoreContext } from '@/lib/storeAuth'
 import type {
   OrderListRow,
   OrderProductOption,
@@ -43,7 +45,9 @@ async function fetchAllRows<T>(
 
 export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
   const supabase = await createClient()
-  const { data: orders, error: ordersError } = await supabase
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
+  let query = supabase
     .from('customer_orders')
     .select(`
       id,
@@ -68,6 +72,11 @@ export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
       store:stores(id, name),
       product:products(id, product_name, jan_code, category)
     `)
+  if (storeId !== null) {
+    query = query.eq('store_id', storeId)
+  }
+
+  const { data: orders, error: ordersError } = await query
     .order('updated_at', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(limit)
@@ -82,7 +91,9 @@ export async function fetchOrders(limit = 500): Promise<OrderListRow[]> {
 
 export async function fetchOrderDetails(id: string): Promise<OrderListRow | null> {
   const supabase = await createClient()
-  const { data: order, error } = await supabase
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
+  let query = supabase
     .from('customer_orders')
     .select(`
       id,
@@ -108,6 +119,12 @@ export async function fetchOrderDetails(id: string): Promise<OrderListRow | null
       product:products(id, product_name, jan_code, category)
     `)
     .eq('id', id)
+
+  if (storeId !== null) {
+    query = query.eq('store_id', storeId)
+  }
+
+  const { data: order, error } = await query
     .maybeSingle()
 
   if (error) {
@@ -127,14 +144,22 @@ export async function fetchOrderFormOptions(): Promise<{
   products: OrderProductOption[]
 }> {
   const supabase = await createClient()
+  const storeContext = await getStoreContext()
+  const storeId = getProductStoreId(storeContext.currentView)
+
+  let productQuery = supabase
+    .from('products')
+    .select('id, store_id, product_name, jan_code, category')
+    .eq('is_active', true)
+
+  if (storeId !== null) {
+    productQuery = productQuery.eq('store_id', storeId)
+  }
 
   const [{ data: stores, error: storesError }, { data: products, error: productsError }] =
     await Promise.all([
       supabase.from('stores').select('id, name').order('id', { ascending: true }),
-      supabase
-        .from('products')
-        .select('id, product_name, jan_code, category')
-        .eq('is_active', true)
+      productQuery
         .order('product_name', { ascending: true })
         .limit(100), // 初期表示用に上位100件に制限してミリ秒で取得
     ])

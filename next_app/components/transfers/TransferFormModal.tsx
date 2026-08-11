@@ -145,10 +145,11 @@ export function TransferFormModal({
 
       for (const product of products) {
         for (const candidate of buildJanCodeCandidates(product.jan_code ?? '')) {
-          const existing = candidateMap.get(candidate)
+          const key = `${product.store_id}:${candidate}`
+          const existing = candidateMap.get(key)
 
           if (!existing || (!existing.is_active && product.is_active)) {
-            candidateMap.set(candidate, product)
+            candidateMap.set(key, product)
           }
         }
       }
@@ -307,10 +308,11 @@ export function TransferFormModal({
       let changed = false
 
       for (const candidate of buildJanCodeCandidates(product.jan_code ?? '')) {
-        const existing = next[candidate]
+        const key = `${product.store_id}:${candidate}`
+        const existing = next[key]
 
         if (!existing || existing.id !== product.id || existing.is_active !== product.is_active) {
-          next[candidate] = product
+          next[key] = product
           changed = true
         }
       }
@@ -346,7 +348,9 @@ export function TransferFormModal({
   }
 
   async function findProductByJanCode(janCode: string) {
-    const cachedProduct = productsByJan.get(janCode) ?? null
+    const cachedProduct = selectedFromStoreId
+      ? productsByJan.get(`${selectedFromStoreId}:${janCode}`) ?? null
+      : null
 
     if (cachedProduct) {
       return {
@@ -356,7 +360,7 @@ export function TransferFormModal({
       }
     }
 
-    const result = await lookupTransferProductByJanAction(janCode)
+    const result = await lookupTransferProductByJanAction(janCode, selectedFromStoreId ?? 0)
 
     if (result.status === 'error') {
       return {

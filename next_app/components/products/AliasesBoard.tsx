@@ -14,6 +14,7 @@ import {
   type ProductAliasListRow,
   type ProductOption,
 } from '@/lib/products'
+import { getProductStoreName } from '@/lib/productStores'
 
 type AliasesBoardProps = {
   aliases: ProductAliasListRow[]
@@ -168,6 +169,15 @@ export function AliasesBoard({ aliases, products }: AliasesBoardProps) {
   )
 
   const columns: DataTableColumn<ProductAliasListRow>[] = [
+    {
+      key: 'store_id',
+      header: '店舗',
+      render: (alias) => (
+        <span className="inline-flex rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">
+          {getProductStoreName(alias.store_id)}
+        </span>
+      ),
+    },
     {
       key: 'alias_name',
       header: '生 POS 名',

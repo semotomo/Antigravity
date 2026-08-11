@@ -76,6 +76,7 @@ test('商品マスタ同期は検証済み店舗タグを使い、成功後だ�
   assert.equal(result.count, 2)
   assert.equal(events[0].type, 'upsert')
   assert.equal(events[0].records[0].jan_code, '4901234567890')
+  assert.equal(events[0].records[0].store_id, 7)
   assert.equal(events[0].records[0].tags, '本店')
   assert.equal(events[0].storeTag, '本店')
   assert.equal(events[1].type, 'reconcile')
@@ -101,32 +102,23 @@ test('商品マスタUPSERT失敗時は旧商品を無効化しない', () => {
   assert.equal(reconciled, false)
 })
 
-test('共通JANの商品は複数店舗タグを重複なく保持できる', () => {
+test('商品マスタ同期は店舗タグを固定の店舗IDへ変換する', () => {
   const context = createGasContext()
 
-  assert.equal(context.mergeProductStoreTag_('わんわん', '本店'), '本店,わんわん')
-  assert.equal(context.mergeProductStoreTag_('本店,わんわん', '本店'), '本店,わんわん')
-  assert.equal(context.removeProductStoreTag_('本店,わんわん', '本店'), 'わんわん')
-  assert.equal(context.removeProductStoreTag_('本店', '本店'), '')
+  assert.equal(context.getProductStoreId_('本店'), 7)
+  assert.equal(context.getProductStoreId_('わんわん'), 6)
+  assert.equal(context.getProductStoreId_('わんわんペットセンター'), 6)
 })
 
-test('既存タグ取得のJANクエリはGASのURL長上限内に収まる', () => {
-  const context = createGasContext()
-  let requestedUrl = ''
-  context.UrlFetchApp = {
-    fetch(url) {
-      requestedUrl = url
-      return {
-        getResponseCode: () => 200,
-        getContentText: () => '[]',
-      }
-    },
-  }
-  const janCodes = Array.from({ length: 40 }, (_, index) => String(4900000000000 + index))
+test('商品マスタUPSERTは店舗IDとJANの複合キーを使う', () => {
+  const upsertSource = importCsvSource.slice(
+    importCsvSource.indexOf('function upsertProductMasterToSupabase_'),
+    importCsvSource.indexOf('function fetchExistingProductTags_'),
+  )
 
-  context.fetchExistingProductTags_(janCodes, 'https://example.supabase.co', 'test-key')
-
-  assert.ok(requestedUrl.length < 2082, `URL length was ${requestedUrl.length}`)
+  assert.match(upsertSource, /on_conflict=store_id,jan_code/)
+  assert.match(upsertSource, /records\[i\]\.store_id = getProductStoreId_\(storeTag\)/)
+  assert.doesNotMatch(upsertSource, /fetchExistingProductTags_\(/)
 })
 
 test('履歴店舗選択は店舗ID設定後に選択ボタンだけをPOSTする', () => {
