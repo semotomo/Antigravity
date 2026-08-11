@@ -26,6 +26,11 @@
 
 ## ✅ 完了済みのタスク
 
+- [x] 商品マスタの本店・わんわん完全分離 `cc:done`
+  - 対応内容: Supabaseの商品キーを`store_id + jan_code`へ変更し、GAS同期、商品検索、客注、店舗間移動、POS別名、売上紐付けを店舗IDで分離
+  - 完了確認: 2026-08-11（本店3,778件、わんわん2,754件、複合キー重複0件、不整合0件。GAS v55、`origin/main`: `7340f4e`、Vercelデプロイ成功）
+  - 対象: Supabase `products` / `product_aliases` / 売上ビュー、GAS商品同期、Next.js商品検索・関連フォーム
+
 - [x] POS商品マスタ本番反映・リアルタイム履歴店舗切替修復 `cc:done`
   - 対応内容: 履歴画面の`doSelectTenpoGroup`コールバックをGASで再現し、Next.jsの店舗ID対応・GASエラー表示・Vercel実行時間を修正。GAS v54とNext.js本番をデプロイ
   - 完了確認: 2026-08-11（本番画面の履歴: 本店2,532件、わんわん3,387件。商品同期: 本店3,778件、わんわん2,754件。`origin/main`: `0d7e375`、Vercelデプロイ成功）
