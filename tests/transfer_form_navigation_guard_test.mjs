@@ -31,6 +31,25 @@ test('再読み込みやタブを閉じる操作でもブラウザの離脱確�
   assert.match(guard, /window\.removeEventListener\('beforeunload', handleBeforeUnload\)/)
 })
 
+test('ブラウザや端末の戻る操作を確認し、キャンセル時は入力画面へ復帰する', () => {
+  const guard = source('next_app/lib/useUnsavedChangesGuard.ts')
+
+  assert.match(guard, /window\.history\.pushState\(/)
+  assert.match(guard, /window\.addEventListener\('popstate', handlePopState\)/)
+  assert.match(guard, /window\.confirm\(message\)/)
+  assert.match(guard, /window\.history\.forward\(\)/)
+  assert.match(guard, /window\.history\.back\(\)/)
+  assert.match(guard, /window\.removeEventListener\('popstate', handlePopState\)/)
+})
+
+test('リンク移動を続行するときは履歴保護を外してから目的URLへ移動する', () => {
+  const guard = source('next_app/lib/useUnsavedChangesGuard.ts')
+
+  assert.match(guard, /pendingNavigationHref = anchor\.href/)
+  assert.match(guard, /window\.location\.assign\(navigationHref\)/)
+  assert.match(guard, /event\.stopImmediatePropagation\(\)/)
+})
+
 test('新規商品は登録リストの先頭に追加する', () => {
   const form = source('next_app/components/transfers/TransferFormModal.tsx')
 
