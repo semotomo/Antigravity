@@ -950,25 +950,29 @@ export function TransferFormModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4"
+      className={
+        isScannerActive
+          ? "fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-0 sm:p-4"
+          : "fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4"
+      }
       onClick={requestClose}
     >
       <div
         className={
           isScannerActive
-            ? "h-[90vh] max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-950 shadow-2xl transition-colors duration-300 flex flex-col"
+            ? "flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden border-0 bg-slate-950 shadow-2xl transition-colors duration-300 sm:h-[90vh] sm:max-h-[90vh] sm:max-w-5xl sm:rounded-3xl sm:border sm:border-slate-800"
             : "max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-gray-200 bg-white shadow-2xl transition-colors duration-300"
         }
         onClick={(event) => event.stopPropagation()}
       >
         <div className={
           isScannerActive 
-            ? "flex items-center justify-between border-b border-slate-800 px-6 py-4 bg-slate-900 shrink-0" 
+            ? "flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900 px-2 py-1.5 sm:px-4 sm:py-2"
             : "flex items-start justify-between border-b border-gray-200 px-6 py-5"
         }>
           {isScannerActive ? (
             <div>
-              <h2 className="mt-1 text-xl font-bold text-white">バーコード連続読み取り中</h2>
+              <h2 className="text-sm font-bold text-white sm:text-base">バーコード連続読み取り中</h2>
             </div>
           ) : (
             <div>
@@ -983,15 +987,15 @@ export function TransferFormModal({
             onClick={isScannerActive ? () => setScannerNonce((c) => c + 1) : requestClose}
             className={
               isScannerActive
-                ? "inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 text-xs transition hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/20"
+                ? "inline-flex h-9 items-center gap-1 rounded-lg bg-emerald-500 px-2 text-[11px] font-bold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-95"
                 : "rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
             }
-            aria-label="閉じる"
+            aria-label={isScannerActive ? '読み取り完了' : '閉じる'}
           >
             {isScannerActive ? (
               <>
-                <X className="h-4 w-4 stroke-[2.5px]" />
-                読み取りを終了する (完了)
+                <X className="h-3.5 w-3.5 stroke-[2.5px]" />
+                読み取り完了
               </>
             ) : (
               <X className="h-5 w-5" />
@@ -1004,7 +1008,7 @@ export function TransferFormModal({
           onSubmit={handleSubmit}
           className={
             isScannerActive
-              ? "flex-1 min-h-0 flex flex-col p-4 md:p-6 space-y-4 overflow-hidden"
+              ? "flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0 sm:p-3"
               : "space-y-6 px-6 py-6"
           }
         >
@@ -1103,7 +1107,7 @@ export function TransferFormModal({
 
           <div className={
             isScannerActive
-              ? "flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-2 gap-4 bg-slate-950 text-white rounded-2xl p-4 border border-slate-800"
+              ? "flex min-h-0 flex-1 flex-col gap-0 overflow-hidden bg-slate-950 text-white sm:gap-3 sm:rounded-2xl sm:border sm:border-slate-800 sm:p-3 lg:grid lg:grid-cols-2"
               : "rounded-3xl border border-gray-200 bg-gray-50 p-5"
           }>
             <div className={isScannerActive ? "hidden" : "flex items-center justify-between gap-3"}>
@@ -1119,11 +1123,14 @@ export function TransferFormModal({
               </button>
             </div>
 
-            <div className={isScannerActive ? "flex flex-col min-h-0 shrink-0 lg:shrink" : "mt-5 space-y-4"}>
+            <div className={isScannerActive ? "contents" : "mt-5 space-y-4"}>
               <JanCodeScannerField
                 key={scannerNonce}
+                compactScanner={isScannerActive}
                 continuousScan
+                label={isScannerActive ? '' : 'JANコード'}
                 showInput={!isScannerActive}
+                wrapperClassName={isScannerActive ? 'shrink-0' : 'space-y-2 md:col-span-2'}
                 onScannerOpenChange={setIsScannerActive}
                 helpText="JANを入力してEnter、またはカメラで読み取ると登録リストへ追加します。未一致の商品は手入力待ちに退避します。"
                 inputRef={janInputRef}
@@ -1291,8 +1298,8 @@ export function TransferFormModal({
 
               {/* 右側カラム：スキャンステーション用の積み上げリスト */}
               {isScannerActive && (
-                <div className="h-[250px] md:h-[350px] lg:h-full flex-1 lg:flex-none flex flex-col min-h-0 bg-slate-900/60 rounded-xl border border-slate-800 p-4">
-                  <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800 shrink-0">
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-900/60 p-2 sm:rounded-xl sm:border sm:border-slate-800 sm:p-3 lg:h-full lg:flex-none">
+                  <div className="mb-2 flex shrink-0 items-center justify-between border-b border-slate-800 pb-1.5 sm:mb-3 sm:pb-2">
                     <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                       今回スキャンした商品
                     </h4>
@@ -1306,11 +1313,11 @@ export function TransferFormModal({
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+                  <div className="min-h-0 flex-1 touch-pan-y space-y-2 overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]">
                     {scanList.map((item, idx) => (
                       <div
                         key={`${item.jan_code}-${idx}`}
-                        className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition"
+                        className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-2 transition hover:border-slate-700 sm:p-3"
                       >
                         <div className="min-w-0 flex-1 pr-3">
                           <p className="font-bold text-white truncate text-xs">

@@ -16,6 +16,7 @@ import { DecodeHintType } from '@zxing/library'
 import { Camera, ImagePlus, ScanLine, X } from 'lucide-react'
 
 type JanCodeScannerFieldProps = {
+  compactScanner?: boolean
   continuousScan?: boolean
   defaultValue?: string
   error?: string
@@ -227,6 +228,7 @@ function dismissSoftKeyboard() {
 }
 
 export function JanCodeScannerField({
+  compactScanner = false,
   continuousScan = false,
   defaultValue = '',
   error,
@@ -729,44 +731,48 @@ export function JanCodeScannerField({
 
   return (
     <div className={wrapperClassName}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {showInput ? (
-          <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
-            {label}
-          </label>
-        ) : (
-          <span className="text-sm font-medium text-gray-700">{label}</span>
-        )}
-        {showInput && (
-          <div className="flex flex-wrap gap-2">
-            {shouldUsePhotoScannerOnly ? null : (
+      {label || showInput ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {label ? (
+            showInput ? (
+              <label htmlFor={inputId} className="text-sm font-medium text-gray-700">
+                {label}
+              </label>
+            ) : (
+              <span className="text-sm font-medium text-gray-700">{label}</span>
+            )
+          ) : null}
+          {showInput && (
+            <div className="flex flex-wrap gap-2">
+              {shouldUsePhotoScannerOnly ? null : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissSoftKeyboard()
+                    setScannerMessage('')
+                    setScannerOpen((current) => !current)
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                >
+                  {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
+                  {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   dismissSoftKeyboard()
-                  setScannerMessage('')
-                  setScannerOpen((current) => !current)
+                  fileInputRef.current?.click()
                 }}
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
               >
-                {scannerOpen ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}
-                {scannerOpen ? 'カメラを閉じる' : 'カメラで読取'}
+                <ImagePlus className="h-4 w-4" />
+                {shouldUsePhotoScannerOnly ? '写真で撮影して読取' : '写真から読取'}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                dismissSoftKeyboard()
-                fileInputRef.current?.click()
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 transition hover:bg-sky-100"
-            >
-              <ImagePlus className="h-4 w-4" />
-              {shouldUsePhotoScannerOnly ? '写真で撮影して読取' : '写真から読取'}
-            </button>
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {showInput ? (
         <input
@@ -791,8 +797,14 @@ export function JanCodeScannerField({
       />
 
       {scannerOpen ? (
-        <div className="space-y-3 rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4">
-          <div className="relative overflow-hidden rounded-2xl bg-gray-950">
+        <div
+          className={
+            compactScanner
+              ? "flex shrink-0 flex-col gap-1 border-b border-slate-800 bg-slate-950 pb-1"
+              : "space-y-3 rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4"
+          }
+        >
+          <div className={`relative overflow-hidden bg-gray-950 ${compactScanner ? '' : 'rounded-2xl'}`}>
             <video
               ref={videoRef}
               className="aspect-video w-full object-cover max-h-[140px] md:max-h-[240px]"
@@ -809,16 +821,30 @@ export function JanCodeScannerField({
 
             {/* クールダウン表示 */}
             {isCoolingDown && (
-              <div className="absolute inset-x-0 bottom-0 bg-gray-950/80 px-4 py-3 text-center text-sm font-semibold text-emerald-400 backdrop-blur-sm z-20">
+              <div
+                className={`absolute inset-x-0 bottom-0 z-20 bg-gray-950/80 text-center font-semibold text-emerald-400 backdrop-blur-sm ${
+                  compactScanner ? 'px-2 py-1.5 text-[11px]' : 'px-4 py-3 text-sm'
+                }`}
+              >
                 <p className="animate-pulse">次のスキャンまで一時停止中 (1.5秒)</p>
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-emerald-950/50">
+                <div
+                  className={`${compactScanner ? 'mt-1 h-1' : 'mt-2 h-1.5'} w-full overflow-hidden rounded-full bg-emerald-950/50`}
+                >
                   <div className="h-full bg-emerald-400 animate-cooldown-bar" />
                 </div>
               </div>
             )}
           </div>
-          <div className="flex items-start gap-2 text-sm text-gray-600">
-            <ScanLine className="mt-0.5 h-4 w-4 shrink-0 text-gray-500" />
+          <div
+            className={
+              compactScanner
+                ? "flex min-h-5 items-start gap-1 px-2 text-[11px] leading-tight text-slate-300"
+                : "flex items-start gap-2 text-sm text-gray-600"
+            }
+          >
+            <ScanLine
+              className={`${compactScanner ? 'h-3 w-3' : 'mt-0.5 h-4 w-4'} shrink-0 text-gray-500`}
+            />
             <p>{scannerMessage || unavailableScannerMessage || 'バーコードをカメラに映してください。'}</p>
           </div>
           <style>{`
