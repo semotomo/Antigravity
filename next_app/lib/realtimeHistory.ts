@@ -104,6 +104,93 @@ export function sortHistoryRows(rows: HistoryRow[]) {
   )
 }
 
+type SalesReturnGroup = {
+  sales: HistoryRow[]
+  returns: HistoryRow[]
+}
+
+function getSalesReturnGroupKey(row: HistoryRow) {
+  const productKey = row.productCode.trim()
+    ? `code:${row.productCode.trim()}`
+    : `name:${row.productName.trim()}`
+
+  return `${row.storeName.trim()}\u0000${productKey}`
+}
+
+function positiveQuantity(value: number) {
+  return Number.isFinite(value) ? Math.max(0, value) : 0
+}
+
+function absoluteAmount(value: number) {
+  return Number.isFinite(value) ? Math.abs(value) : 0
+}
+
+/**
+ * 同一店舗・同一商品の販売と返品を相殺する。
+ * 返品がない販売履歴は明細を維持し、返品がある商品だけ最新行へ集約する。
+ */
+export function netHistorySalesAndReturns(rows: HistoryRow[]) {
+  const groups = new Map<string, SalesReturnGroup>()
+  const result: HistoryRow[] = []
+
+  rows.forEach((row) => {
+    const taskContent = row.taskContent.trim()
+    if (taskContent !== '販売' && taskContent !== '返品') {
+      result.push(row)
+      return
+    }
+
+    const groupKey = getSalesReturnGroupKey(row)
+    const group = groups.get(groupKey) ?? { sales: [], returns: [] }
+    if (taskContent === '返品') {
+      group.returns.push(row)
+    } else {
+      group.sales.push(row)
+    }
+    groups.set(groupKey, group)
+  })
+
+  groups.forEach((group) => {
+    if (group.returns.length === 0) {
+      result.push(...group.sales)
+      return
+    }
+
+    const salesQuantity = group.sales.reduce(
+      (sum, row) => sum + positiveQuantity(row.quantity),
+      0,
+    )
+    const returnQuantity = group.returns.reduce(
+      (sum, row) => sum + absoluteAmount(row.quantity),
+      0,
+    )
+    const netQuantity = salesQuantity - returnQuantity
+
+    if (netQuantity <= 0) {
+      return
+    }
+
+    const latestRow = sortHistoryRows([...group.sales, ...group.returns])[0]
+    const salesTotalCost = group.sales.reduce(
+      (sum, row) => sum + absoluteAmount(row.totalCost),
+      0,
+    )
+    const returnTotalCost = group.returns.reduce(
+      (sum, row) => sum + absoluteAmount(row.totalCost),
+      0,
+    )
+
+    result.push({
+      ...latestRow,
+      taskContent: '販売',
+      quantity: netQuantity,
+      totalCost: salesTotalCost - returnTotalCost,
+    })
+  })
+
+  return sortHistoryRows(result)
+}
+
 function isHistoryRow(value: Json): value is HistoryRow & Json {
   if (!value || Array.isArray(value) || typeof value !== 'object') return false
   return (
@@ -302,18 +389,27 @@ export async function readHistorySnapshots(
 }
 
 export function combineHistorySnapshots(snapshots: HistorySnapshot[]) {
+  const displaySnapshots = snapshots.map((snapshot) => {
+    const rows = netHistorySalesAndReturns(snapshot.rows)
+    return {
+      ...snapshot,
+      rows,
+      count: rows.length,
+    }
+  })
+
   return {
-    data: sortHistoryRows(snapshots.flatMap((snapshot) => snapshot.rows)),
-    count: snapshots.reduce((sum, snapshot) => sum + snapshot.count, 0),
-    gasCount: snapshots.reduce((sum, snapshot) => sum + snapshot.gasCount, 0),
-    transferCount: snapshots.reduce((sum, snapshot) => sum + snapshot.transferCount, 0),
-    fetchedAt: snapshots
+    data: sortHistoryRows(displaySnapshots.flatMap((snapshot) => snapshot.rows)),
+    count: displaySnapshots.reduce((sum, snapshot) => sum + snapshot.count, 0),
+    gasCount: displaySnapshots.reduce((sum, snapshot) => sum + snapshot.gasCount, 0),
+    transferCount: displaySnapshots.reduce((sum, snapshot) => sum + snapshot.transferCount, 0),
+    fetchedAt: displaySnapshots
       .map((snapshot) => snapshot.fetchedAt)
       .sort()
       .at(0) ?? null,
-    startDate: snapshots.at(0)?.startDate ?? null,
-    endDate: snapshots.at(0)?.endDate ?? null,
-    cacheDetails: snapshots.map((snapshot) => ({
+    startDate: displaySnapshots.at(0)?.startDate ?? null,
+    endDate: displaySnapshots.at(0)?.endDate ?? null,
+    cacheDetails: displaySnapshots.map((snapshot) => ({
       storeId: snapshot.store.storeId,
       storeName: snapshot.store.name,
       count: snapshot.count,

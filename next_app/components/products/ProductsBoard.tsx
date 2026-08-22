@@ -9,8 +9,8 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { BarcodeToggle } from '@/components/ui/BarcodeToggle'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
+  calculateTaxIncludedPrice,
   formatProductDateTime,
-  formatProductMarkupRate,
   formatYen,
   type ProductListRow,
 } from '@/lib/products'
@@ -87,15 +87,6 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       ),
     },
     {
-      key: 'supplier_name',
-      header: '仕入れ先',
-      render: (product) => (
-        <span className="text-sm font-medium text-gray-700">
-          {product.supplier_name || '-'}
-        </span>
-      ),
-    },
-    {
       key: 'pricing',
       header: '価格',
       render: (product) => (
@@ -103,11 +94,20 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
           <p className="text-gray-700">原価 {formatYen(product.cost_price)}</p>
           <p className="font-semibold text-gray-900">売価 {formatYen(product.selling_price)}</p>
           <p className="text-xs text-gray-500">
-            粗利率 {formatProductMarkupRate(product.markup_rate)}
+            税込 {formatYen(calculateTaxIncludedPrice(product.selling_price))}
           </p>
         </div>
       ),
       align: 'right',
+    },
+    {
+      key: 'supplier_name',
+      header: '仕入れ先',
+      render: (product) => (
+        <span className="text-sm font-medium text-gray-700">
+          {product.supplier_name || '-'}
+        </span>
+      ),
     },
     {
       key: 'store_id',

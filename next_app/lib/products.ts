@@ -69,8 +69,9 @@ export function formatYen(value: number | null | undefined) {
   return `¥${(value ?? 0).toLocaleString('ja-JP')}`
 }
 
-export function formatProductMarkupRate(value: number | null | undefined) {
-  return `${(((value ?? 0) * 10000) / 100).toFixed(1)}%`
+export function calculateTaxIncludedPrice(value: number | null | undefined) {
+  const price = Number.isFinite(value) ? Math.max(0, Math.trunc(value ?? 0)) : 0
+  return price + Math.floor(price * 0.1)
 }
 
 export function formatProductDateTime(value: string | null | undefined) {
