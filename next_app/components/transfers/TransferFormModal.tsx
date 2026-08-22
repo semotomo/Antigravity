@@ -10,6 +10,7 @@ import {
 } from '@/app/actions/transfers'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { formatYen } from '@/lib/products'
+import { useUnsavedChangesGuard } from '@/lib/useUnsavedChangesGuard'
 import {
   TRANSFER_ENTRY_TYPE_OPTIONS,
   TRANSFER_USAGE_CATEGORY_OPTIONS,
@@ -244,6 +245,8 @@ export function TransferFormModal({
     lookupPending ||
     backgroundLookupCount > 0 ||
     resolvingUnmatchedId !== null
+
+  useUnsavedChangesGuard(open && hasDraftChanges)
 
   useEffect(() => {
     unmatchedItemsRef.current = unmatchedItems
@@ -531,7 +534,6 @@ export function TransferFormModal({
         }
 
         return [
-          ...current,
           {
             from_store_id: matchedItem.from_store_id,
             to_store_id: matchedItem.to_store_id,
@@ -544,6 +546,7 @@ export function TransferFormModal({
             usage_category: matchedItem.usage_category,
             memo: matchedItem.memo.trim() || null,
           },
+          ...current,
         ]
       })
       setLookupMessage(`JAN ${janCode} を商品マスタと照合し、「${productName}」を登録リストへ移しました。`)
@@ -633,7 +636,6 @@ export function TransferFormModal({
         }
 
         return [
-          ...current,
           createTransferDraftItem(
             context,
             janCode,
@@ -641,6 +643,7 @@ export function TransferFormModal({
             Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
             Number.isFinite(sellingPrice) && sellingPrice >= 0 ? sellingPrice : 0
           ),
+          ...current,
         ]
       })
       clearProductEntryArea(resetScanner)
@@ -676,7 +679,6 @@ export function TransferFormModal({
       }
 
       return [
-        ...current,
         {
           id: `${janCode}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
           from_store_id: context.from_store_id,
@@ -690,6 +692,7 @@ export function TransferFormModal({
           usage_category: itemUsageCategory,
           memo: context.memo ?? '',
         },
+        ...current,
       ]
     })
     clearProductEntryArea(resetScanner)
@@ -801,8 +804,8 @@ export function TransferFormModal({
     }
 
     setItems((current) => [
-      ...current,
       createTransferDraftItem(context, janCode, productName, costPrice, sellingPrice),
+      ...current,
     ])
     clearProductEntryArea(true)
     setLookupMessage(`${productName} を登録リストに追加しました。`)
@@ -894,7 +897,6 @@ export function TransferFormModal({
       }
 
       return [
-        ...current,
         {
           from_store_id: item.from_store_id,
           to_store_id: item.to_store_id,
@@ -907,6 +909,7 @@ export function TransferFormModal({
           usage_category: item.usage_category,
           memo: item.memo.trim() || null,
         },
+        ...current,
       ]
     })
     removeUnmatchedItem(item.id)
