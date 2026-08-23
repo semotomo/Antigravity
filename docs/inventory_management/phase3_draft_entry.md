@@ -1,11 +1,11 @@
 # 棚卸し・在庫管理 Phase 3 下書き・数量入力
 
 > 実施日: 2026-08-23
-> 状態: 本番DB適用・実DB検査完了（Git push・Vercel未反映）
+> 状態: 完了（本番DB・Git main・Vercel Production反映済み）
 
 ## 現在の表示状況
 
-現在のProductionアプリはPhase 2までのため、サイドメニューとスマホ「その他」には「棚卸し・在庫管理」がまだ表示されない。Phase 3の本番DBは適用済みだが、画面を使用するにはGit pushとNext.jsのデプロイが必要である。
+ProductionアプリへPhase 3を反映し、PCサイドメニューとスマホの「…」メニューに「棚卸し・在庫管理」が表示される。本店・わんわんの開始画面を店舗別に利用できる。
 
 ## 実装内容
 
@@ -54,7 +54,10 @@
 | 本番postapply | 3 RPCすべて`SECURITY DEFINER`・空search path・authenticated限定・anon拒否。棚卸しデータ0件 |
 | 本番実DB | 数量0、追加、置換、計数時刻、監査3行、`store_id + JAN`、store 6越境拒否を確認し全件ROLLBACK |
 | 本番DB lint | error 0件 |
-| スマホ実画面 | 本番アプリ未反映のため未実施。デプロイ後にメニュー配置、数量入力、dialogを実機確認する |
+| Git / Vercel | commit `b08e195`をmainへpush。Preview・Productionとも成功 |
+| PC実画面 | 本番で設定オプション直上の導線、本店/わんわん切替、本店開始画面、エラー0件を確認 |
+| スマホ実画面 | 390×844で下部主要タブが6個のまま、「…」メニュー内の設定オプション直上、本店/わんわん開始画面、エラー0件を確認 |
+| データ書込み | 本番データ保護のため画面の開始/数量保存は未実行。数量0・追加・置換・監査・越境拒否はrollback付き実DBテストで確認 |
 
 全体Lintの既存エラーは`app/api/sales/trends/route.ts`、`components/sales/BarcodeScannerModal.tsx`、`lib/actions/petsSync.ts`にあり、Phase 3差分へ混入させていない。
 
@@ -64,7 +67,7 @@
 2. [x] 読み取り専用preflightを再実行する。
 3. [x] 承認後にPhase 3 migrationだけを本番適用する。
 4. [x] postapplyとrollback付きruntime testを実行する。
-5. [ ] 結果を確認後、Git commit/pushとVercel Previewを行う。
-6. [ ] Preview確認後にProductionへ反映し、PC・スマホの実画面を確認する。
+5. [x] 結果を確認後、Git commit/pushとVercel Previewを行う。
+6. [x] Preview確認後にProductionへ反映し、PC・スマホの実画面を確認する。
 
-現段階では手順4まで完了し、Git push・Vercel反映前で停止している。
+Phase 3の本番反映と非破壊の受入確認まで完了した。棚卸し開始後の実入力は利用開始時に確認し、確定・修正履歴・現在庫画面はPhase 4で実装する。
