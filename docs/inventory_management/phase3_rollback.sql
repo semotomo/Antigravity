@@ -1,0 +1,7 @@
+BEGIN;
+
+DROP FUNCTION IF EXISTS public.save_inventory_count(UUID, INTEGER, TEXT, NUMERIC, TEXT, BIGINT);
+DROP FUNCTION IF EXISTS public.get_inventory_workspace(INTEGER, UUID, TEXT, TEXT, INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS public.start_inventory_session(INTEGER);
+
+COMMIT;

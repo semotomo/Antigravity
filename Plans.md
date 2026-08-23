@@ -23,7 +23,7 @@
 ## 🔴 進行中のタスク
 
 - [ ] Next.js版「棚卸し・在庫管理」 `cc:WIP` `[feature:security]` `[feature:tdd]` `[feature:a11y]`
-  - 状態: **Phase 2完了 / Phase 3開始待ち**
+  - 状態: **Phase 3実装中**
   - 詳細: `docs/inventory_management/implementation_plan.md`
   - 方針: 営業中の事前計数に対応し、商品ごとの計数時刻以降の販売・返品・移動・使用・調整を毎回再集計して現在庫を上書きする
   - 安全条件: `store_id + JAN` をUI・Server Action・API・DBで強制し、POSの在庫数は使用しない
@@ -44,7 +44,14 @@
     - [x] Phase 2 TDD 17/17、関連回帰59/59、型、対象Lint、本番build、linked dry-run、本番読み取りpreflightを確認
     - [x] 本番migration 2件、postapply、実DB店舗越境・再計算冪等性テスト、migration 16/16、DB lintを確認
     - [x] Git commit `b8bc1f9`をmainへpushし、Vercel Preview・Production成功を確認
-  - [ ] Phase 3: 下書き・数量入力・JAN読取・進捗UIを実装
+  - [ ] Phase 3: 下書き・数量入力・JAN読取・進捗UIを実装 `cc:WIP`
+    - [x] PCサイドメニューとスマホ「その他」の設定オプション直上へ導線を追加
+    - [x] 店舗別の棚卸し開始・下書き再開・商品snapshot・数量保存RPCを追加
+    - [x] 一覧数量入力、停止商品、カメラ/JANリーダー/手入力、再読取3択を実装
+    - [x] 棚卸し済み・未棚卸し・進捗率・保存状態と店舗越境拒否を実装
+    - [x] Phase 3 TDD 13/13、関連回帰72/72、型、対象Lint、本番build、linked dry-runを確認
+    - [x] 本番DBへmigration 1件を適用し、postapply、rollback付きruntime test、履歴17/17、DB lintを確認
+    - [ ] Git・Vercel反映とPC/スマホ実画面を確認（差分承認待ち）
   - [ ] Phase 4: 確定・修正履歴・手動調整・現在庫画面を実装
   - [ ] Phase 5: A4記入用/結果リストと差異表示を実装
   - [ ] Phase 6: 回帰・型・Lint・本番ビルド・スマホ・印刷・段階リリース検証

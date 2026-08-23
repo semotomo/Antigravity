@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, CalendarDays, MoreHorizontal, Settings } from 'lucide-react'
+import { BarChart3, CalendarDays, ClipboardCheck, MoreHorizontal, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { StoreViewSelector } from './StoreViewSelector'
 import { APP_VERSION, BUILD_TIMESTAMP } from '@/lib/version'
@@ -26,6 +26,7 @@ function isActivePath(pathname: string, href: string) {
 export function isSalesMorePath(pathname: string) {
   return (
     SALES_MORE_ITEMS.some((item) => isActivePath(pathname, item.href)) ||
+    pathname === '/inventory' ||
     pathname === '/options'
   )
 }
@@ -141,6 +142,20 @@ export function SalesMoreMenu({ variant }: SalesMoreMenuProps) {
                 </Link>
               )
             })}
+
+            <Link
+              href="/inventory"
+              onClick={() => setOpen(false)}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                pathname === '/inventory'
+                  ? 'bg-gray-900 text-white'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+              role="menuitem"
+            >
+              <ClipboardCheck className="h-4 w-4 shrink-0" />
+              <span>棚卸し・在庫管理</span>
+            </Link>
 
             {storeType === 'master' && (
               <Link

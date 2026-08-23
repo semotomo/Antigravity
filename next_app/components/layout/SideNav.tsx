@@ -6,6 +6,7 @@ import {
   ArrowRightLeft,
   BarChart3,
   CalendarDays,
+  ClipboardCheck,
   ClipboardList,
   ListOrdered,
   LogOut,
@@ -43,6 +44,7 @@ const navItems: NavItem[] = [
   { name: '日次集計', href: '/sales/daily', icon: CalendarDays, match: 'exact' },
   { name: 'ABC分析', href: '/sales/abc', icon: BarChart3, match: 'exact' },
   { name: '生体管理', href: '/pets', icon: Dog, match: 'exact' },
+  { name: '棚卸し・在庫管理', href: '/inventory', icon: ClipboardCheck, match: 'exact' },
 ]
 
 function isActivePath(pathname: string, item: NavItem) {
