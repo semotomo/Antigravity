@@ -1,7 +1,7 @@
 # 棚卸し・在庫管理 Phase 2 再計算コア
 
 > 実施日: 2026-08-23
-> 状態: 本番DB適用・実DB検証完了 / Git commit・push・Vercel反映中
+> 状態: 完了（本番DB・Git main・Vercel Production反映済み）
 
 ## 結論
 
@@ -92,5 +92,6 @@ POS在庫数や前回の計算結果へ差分を継ぎ足さず、各商品の`c
 | 本番postapply | 5 RPCすべて`SECURITY DEFINER`・空search path・authenticated限定。snapshot/run/balanceは0件 |
 | 本番実DBテスト | `authenticated`でstore 7商品を`store_id + JAN`照合し、実在庫10−販売2=8、同一再計算run再利用、store 6越境拒否、確定を確認後に全件rollback |
 | 本番DB lint | error 0件 |
+| Git / Vercel | commit `b8bc1f9`をmainへpush。Vercel Preview・Productionとも成功 |
 
-本番DB側のPhase 2受入条件は完了した。Next.js側のAPI/Actionは専用branchで検証済みで、Git commit/pushとVercel反映の承認を取得して反映中。
+本番DB側とNext.js側のPhase 2受入条件は完了した。Productionの個別deployment URLはVercel Authenticationで保護されているため、外部curlによるアプリ内E2Eは未実施。GitHub DeploymentとVercel commit statusでProduction成功を確認した。

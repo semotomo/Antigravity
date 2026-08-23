@@ -1,7 +1,7 @@
 # Next.js版「棚卸し・在庫管理」実装計画
 
 > 作成日: 2026-08-23
-> 状態: **Phase 2本番DB適用・実DB検証完了 / Git・Vercel反映中**
+> 状態: **Phase 2完了 / Phase 3開始承認待ち**
 > 対象店舗: 本店 `store_id=7`、わんわん `store_id=6`
 
 ## 1. 目的と前提
@@ -271,7 +271,7 @@
 
 ### Phase 2: 冪等な計算コアとAPI（4〜6人日）
 
-進捗: **本番DB適用・実DB検証完了 / Git・Vercel反映中（2026-08-23）**
+進捗: **完了（2026-08-23、本番DB・Git main・Vercel Production反映済み）**
 結果: `docs/inventory_management/phase2_recalculation.md`
 
 - [x] POS snapshot取得・正規化・保存、移動入出庫/使用/調整の符号化を実装。
@@ -282,8 +282,9 @@
 - [x] preflight/postapply/非破壊rollbackとTDDを追加し、linked dry-run・本番読み取りpreflightを確認。
 - [x] 機能migrationとDB lint修正forward migrationを本番適用し、履歴16/16とDB lint 0件を確認。
 - [x] rollback付き実DBテストで`authenticated`権限、`store_id + JAN`、store 6越境拒否、10−販売2=8、同一run再利用、確定を確認。
+- [x] commit `b8bc1f9`をmainへpushし、Vercel Preview・Production成功を確認。
 
-**承認ゲート:** 本番DB適用は2026-08-23に承認取得・完了。Git commit/pushとVercel反映も最終差分提示後に承認を取得し、実施中。
+**承認ゲート:** 2026-08-23完了。本番DB適用、Git commit/push、Vercel反映はいずれも対象差分提示後に承認を取得して実施した。
 
 ### Phase 3: 数量入力と下書きUI（4〜6人日）
 
@@ -327,4 +328,4 @@
 6. 実装は専用worktree/branchに分離し、Phase 0から段階的に進める。
 7. Phase 1の新規テーブルはauthenticated/anonの直接DMLを許可せず、書込みRPCはPhase 2で追加する。
 
-上記は2026-08-23に承認済み。Phase 1はSQL全文・対象・論理backup・ロールバック方針・初期権限差分を提示して別承認を取得し、本番migration、初期権限5行、実DB検証まで完了した。Phase 2も対象差分を提示して本番DB適用承認を取得し、2 migration、実DB店舗越境・冪等性テスト、DB lintまで完了した。Git commit/pushとVercel反映も別承認を取得して実施中。
+上記は2026-08-23に承認済み。Phase 1はSQL全文・対象・論理backup・ロールバック方針・初期権限差分を提示して別承認を取得し、本番migration、初期権限5行、実DB検証まで完了した。Phase 2も対象差分を提示して本番DB適用承認を取得し、2 migration、実DB店舗越境・冪等性テスト、DB lint、Git main、Vercel Production反映まで完了した。次の承認ゲートはPhase 3開始前とする。
