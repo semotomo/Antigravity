@@ -336,6 +336,36 @@ export interface Database {
         }
         Relationships: []
       }
+      user_store_access: {
+        Row: {
+          user_id: string
+          store_id: number
+          role: string
+          created_at: string
+          created_by: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          user_id: string
+          store_id: number
+          role?: string
+          created_at?: string
+          created_by?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          user_id?: string
+          store_id?: number
+          role?: string
+          created_at?: string
+          created_by?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       sales_daily_summary_v: {

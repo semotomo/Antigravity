@@ -2075,7 +2075,117 @@ function selectHistoryStoreGroup_(baseUrl, historyUrl, historyHtml, formName, co
 }
 
 
-function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
+function normalizeHistoryHeaderName_(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/^\uFEFF/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+
+function findStableHistoryIdCandidateHeaders_(headers) {
+  var patterns = [
+    /^(id|ｉｄ)$/i,
+    /(取引|トランザクション|伝票|レシート|会計|売上|入出庫).*(id|ｉｄ|番号|no\.?)/i,
+    /(transaction|receipt|event|record)[ _-]?(id|no|number)/i,
+  ];
+  var candidates = [];
+
+  for (var i = 0; i < headers.length; i++) {
+    var header = normalizeHistoryHeaderName_(headers[i]);
+    if (!header) continue;
+    for (var j = 0; j < patterns.length; j++) {
+      if (patterns[j].test(header)) {
+        candidates.push(header);
+        break;
+      }
+    }
+  }
+
+  return candidates;
+}
+
+
+function isHistorySchemaDiagnosticAuthorized_(providedToken) {
+  var expectedToken = PropertiesService.getScriptProperties()
+    .getProperty('HISTORY_SCHEMA_DIAGNOSTIC_TOKEN');
+  return Boolean(expectedToken) && String(providedToken || '') === expectedToken;
+}
+
+
+function buildHistorySchemaDiagnostic_(header, dataRows, headerDetected) {
+  var safeRows = Array.isArray(dataRows) ? dataRows : [];
+  var safeHeaders = headerDetected && Array.isArray(header)
+    ? header.map(normalizeHistoryHeaderName_)
+    : [];
+  var rowColumnCounts = {};
+  var columnCount = safeHeaders.length;
+
+  for (var i = 0; i < safeRows.length; i++) {
+    var width = Array.isArray(safeRows[i]) ? safeRows[i].length : 0;
+    rowColumnCounts[String(width)] = (rowColumnCounts[String(width)] || 0) + 1;
+    if (width > columnCount) columnCount = width;
+  }
+
+  var candidateHeaders = findStableHistoryIdCandidateHeaders_(safeHeaders);
+  return {
+    headerDetected: Boolean(headerDetected),
+    headers: safeHeaders,
+    columnCount: columnCount,
+    dataRowCount: safeRows.length,
+    rowColumnCounts: rowColumnCounts,
+    stableTransactionIdCandidateHeaders: candidateHeaders,
+    stableTransactionIdVerified: false,
+  };
+}
+
+
+function parseSalesHistoryCsv_(csvText, options) {
+  var parseOptions = options || {};
+  var lines = Utilities.parseCsv(csvText);
+  if (!lines || lines.length === 0) {
+    return {
+      success: true,
+      data: [],
+      count: 0,
+      schema: parseOptions.schemaOnly
+        ? buildHistorySchemaDiagnostic_([], [], false)
+        : undefined,
+    };
+  }
+
+  var header = lines[0];
+  var headerText = Array.isArray(header) ? header.join('') : '';
+  var isHeader = headerText.indexOf('商品名') !== -1 || headerText.indexOf('コード') !== -1;
+  var startIdx = isHeader ? 1 : 0;
+  var dataRows = lines.slice(startIdx);
+  var schema = buildHistorySchemaDiagnostic_(header, dataRows, isHeader);
+
+  if (parseOptions.schemaOnly) {
+    return { success: true, data: [], count: 0, schema: schema };
+  }
+
+  var results = [];
+  for (var i = 0; i < dataRows.length; i++) {
+    if (!Array.isArray(dataRows[i]) || dataRows[i].length < 5) continue;
+    results.push({
+      productCode: dataRows[i][0] || '',
+      productName: dataRows[i][1] || '',
+      taskContent: dataRows[i][2] || '',
+      storeName: dataRows[i][3] || '',
+      taskDateTime: dataRows[i][4] || '',
+      quantity: parseInt(dataRows[i][5], 10) || 0,
+      cost: parseInt(dataRows[i][6], 10) || 0,
+      totalCost: parseInt(dataRows[i][7], 10) || 0,
+    });
+  }
+
+  return { success: true, data: results, count: results.length };
+}
+
+
+function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate, options) {
+  var downloadOptions = options || {};
   Logger.log('========== 入出庫履歴CSV取得開始 ==========');
 
   var loginUrl = posConfig.baseUrl + POS_PATHS.LOGIN;
@@ -2220,7 +2330,6 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
   var csvText = csvBlob.getDataAsString('Shift_JIS');
 
   Logger.log('【入出庫レスポンス情報】Status=' + csvResponse.getResponseCode() + ' | Content-Type=' + JSON.stringify(csvResponse.getHeaders()['Content-Type']));
-  Logger.log('【入出庫応答テキスト先頭400字】:\n' + csvText.slice(0, 400));
 
   if (!csvText || csvText.indexOf('ログイン') !== -1) {
     return { success: false, message: 'CSVの取得に失敗しました。', data: [] };
@@ -2228,32 +2337,20 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 
   var lines = Utilities.parseCsv(csvText);
   Logger.log('【パース結果行数】=' + lines.length);
-  if (lines.length > 0) Logger.log('【1行目】=' + JSON.stringify(lines[0]));
-  if (lines.length === 0) return { success: true, data: [] };
-
-  var header = lines[0];
-  var results = [];
-  var isHeader = header.join('').indexOf('商品名') !== -1 || header.join('').indexOf('コード') !== -1;
-  var startIdx = isHeader ? 1 : 0;
-
-  for (var i = startIdx; i < lines.length; i++) {
-    if (lines[i].length < 5) continue;
-    results.push({
-      productCode: lines[i][0] || '',
-      productName: lines[i][1] || '',
-      taskContent: lines[i][2] || '',
-      storeName: lines[i][3] || '',
-      taskDateTime: lines[i][4] || '',
-      quantity: parseInt(lines[i][5], 10) || 0,
-      cost: parseInt(lines[i][6], 10) || 0,
-      totalCost: parseInt(lines[i][7], 10) || 0,
-    });
+  if (lines.length > 0) {
+    var firstRowText = Array.isArray(lines[0]) ? lines[0].join('') : '';
+    var headerDetected = firstRowText.indexOf('商品名') !== -1 || firstRowText.indexOf('コード') !== -1;
+    // 通常取得でも商品名・JAN・取引値をGASログへ残さない。
+    Logger.log('【履歴CSV構造】headerDetected=' + headerDetected +
+      ' | columnCount=' + (Array.isArray(lines[0]) ? lines[0].length : 0));
   }
+  var parsed = parseSalesHistoryCsv_(csvText, downloadOptions);
 
   return {
-    success: true,
-    data: results,
-    count: results.length,
+    success: parsed.success,
+    data: parsed.data,
+    count: parsed.count,
+    schema: parsed.schema,
     targetStore: {
       id: posConfig ? posConfig.tenpoGroupId : null,
       name: posConfig ? posConfig.tenpoGroupName : null,
@@ -2270,6 +2367,7 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate) {
 //           'sales'  : 商品別売上取込のみ（既存）
 //           'full'   : 商品マスタ同期 → 商品別売上取込
 //           'history': 当日等の入出庫履歴取得
+//           'history_schema': 入出庫履歴CSVのヘッダー診断（行データは返さない）
 //   month = 対象月（省略時は前月）
 //   year  = 対象年（省略時は今年）
 //   startDate, endDate = historyモード時の期間指定 (yyyy/MM/dd)
@@ -2289,6 +2387,15 @@ function doPost(e) {
       } catch(ex) {
         Logger.log('POSTデータのJSONパースエラー: ' + ex.message);
       }
+    }
+    var mode = params.mode || 'history';
+    results.mode = mode;
+    if (mode === 'history_schema' && !isHistorySchemaDiagnosticAuthorized_(params.diagnosticToken)) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        mode: mode,
+        message: '履歴スキーマ診断の認証に失敗しました。',
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     // ベース設定をプロパティから取得
@@ -2310,7 +2417,6 @@ function doPost(e) {
     if (params.tenpoGroupName) posConfig.tenpoGroupName = params.tenpoGroupName;
     var targetStoreName = params.targetStoreName || (posConfig.tenpoGroupName && posConfig.tenpoGroupName.indexOf('わんわん') !== -1 ? 'わんわん' : '本店');
 
-    var mode = params.mode || 'history';
     var targetYear = params.year ? parseInt(params.year, 10) : new Date().getFullYear();
     var targetMonth = params.month ? parseInt(params.month, 10) : new Date().getMonth();
     if (targetMonth === 0) { targetMonth = 12; targetYear--; }
@@ -2330,11 +2436,12 @@ function doPost(e) {
     }
 
     // 入出庫履歴取得
-    if (mode === 'history') {
+    if (mode === 'history' || mode === 'history_schema') {
       var startDate = params.startDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
       var endDate = params.endDate || Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy/MM/dd');
-      Logger.log('Web App(POST): 入出庫履歴取得を実行 (' + startDate + ' - ' + endDate + ')');
-      results.history = downloadSalesHistoryFromPOS_(posConfig, startDate, endDate);
+      var schemaOnly = mode === 'history_schema';
+      Logger.log('Web App(POST): 入出庫履歴取得を実行 (' + startDate + ' - ' + endDate + ', schemaOnly=' + schemaOnly + ')');
+      results.history = downloadSalesHistoryFromPOS_(posConfig, startDate, endDate, { schemaOnly: schemaOnly });
     }
 
     results.success = ['master', 'sales', 'history'].every(function(resultName) {
@@ -2348,7 +2455,8 @@ function doPost(e) {
     results.message = 'エラー: ' + err.message;
   }
 
-  results.logs = Logger.getLog();
+  // ヘッダー診断は行データやログ断片を外部へ返さない。
+  results.logs = results.mode === 'history_schema' ? '' : Logger.getLog();
 
   return ContentService.createTextOutput(
     JSON.stringify(results)
@@ -2356,6 +2464,15 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  var mode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : 'history';
+  if (mode === 'history_schema') {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      mode: mode,
+      message: '履歴スキーマ診断は認証付きPOSTだけを許可しています。',
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
   // 外部からのパラメータ受け取り用
   var posConfig = getPOSConfig_(e);
   if (posConfig) {
@@ -2373,13 +2490,12 @@ function doGet(e) {
     ).setMimeType(ContentService.MimeType.JSON);
   }
 
-  var mode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : 'history';
   var targetYear = (e && e.parameter && e.parameter.year) ? parseInt(e.parameter.year, 10) : new Date().getFullYear();
   var targetMonth = (e && e.parameter && e.parameter.month) ? parseInt(e.parameter.month, 10) : new Date().getMonth();
   if (targetMonth === 0) { targetMonth = 12; targetYear--; }
   var now = new Date();
 
-  var results = {};
+  var results = { mode: mode };
 
   try {
     // 商品マスタ同期
@@ -2415,7 +2531,8 @@ function doGet(e) {
     results.message = 'エラー: ' + err.message;
   }
 
-  results.logs = Logger.getLog();
+  // ヘッダー診断は行データやログ断片を外部へ返さない。
+  results.logs = results.mode === 'history_schema' ? '' : Logger.getLog();
 
   return ContentService.createTextOutput(
     JSON.stringify(results)

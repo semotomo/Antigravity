@@ -22,7 +22,32 @@
 
 ## 🔴 進行中のタスク
 
-- なし
+- [ ] Next.js版「棚卸し・在庫管理」 `cc:WIP` `[feature:security]` `[feature:tdd]` `[feature:a11y]`
+  - 状態: **Phase 2本番DB適用・実DB検証完了 / Git・Vercel反映中**
+  - 詳細: `docs/inventory_management/implementation_plan.md`
+  - 方針: 営業中の事前計数に対応し、商品ごとの計数時刻以降の販売・返品・移動・使用・調整を毎回再集計して現在庫を上書きする
+  - 安全条件: `store_id + JAN` をUI・Server Action・API・DBで強制し、POSの在庫数は使用しない
+  - [x] Phase 0: POS履歴のデータ契約・安定取引ID・認証経路を確定 `cc:done`
+    - 完了確認: GAS version 56へ認証付きヘッダー診断を反映。両店舗とも元CSVに安定取引ID候補0件、行データ/ログ返却0件。通常履歴の本店858件・わんわん2,199件も回帰成功
+  - [x] Phase 1: 店舗権限基盤と棚卸しDBスキーマをテスト先行で追加 `cc:done`
+    - [x] ローカルmigration: 10テーブル、private権限helper、複合FK/CHECK/RLS/append-only監査を追加
+    - [x] 検証: schema/preflight/rollback test 9/9、Phase 1を含む関連回帰35/35、Supabase linked dry-run、remote DB lint、型検査、本番build成功
+    - [x] 本番前: 対象データbackup、schema snapshot、読み取り専用preflight、空テーブル限定rollbackを作成
+    - [x] 初期権限確定: 本店専用1アカウントはstore 7、指定2アカウントはstore 6・7、すべてmanager
+    - [x] 本番適用: 論理backupで進める承認後、preflight PASS、migration 1件、初期権限5行を適用
+    - [x] 本番確認: migration 14/14一致、10テーブルRLS/FORCE RLS、権限helper、複合制約、DB lint、3アカウントの店舗分離を確認
+  - [ ] Phase 2: 冪等な在庫再計算・同期・監査ロジックを実装 `cc:WIP`
+    - [x] 商品別`counted_at`以降のPOS/移動/使用/調整を全量再集計し、balanceを上書き
+    - [x] POS snapshot、未照合、同分曖昧、重複ordinal、source fingerprint、run再利用を実装
+    - [x] API/Action/RPCの認証・店舗再認可と、`store_id + JAN`のDB商品解決を実装
+    - [x] 楽観ロック付き確定RPC、preflight/postapply/非破壊rollbackを実装
+    - [x] Phase 2 TDD 17/17、関連回帰59/59、型、対象Lint、本番build、linked dry-run、本番読み取りpreflightを確認
+    - [x] 本番migration 2件、postapply、実DB店舗越境・再計算冪等性テスト、migration 16/16、DB lintを確認
+    - [ ] Git commit/push、Vercel反映を実施中
+  - [ ] Phase 3: 下書き・数量入力・JAN読取・進捗UIを実装
+  - [ ] Phase 4: 確定・修正履歴・手動調整・現在庫画面を実装
+  - [ ] Phase 5: A4記入用/結果リストと差異表示を実装
+  - [ ] Phase 6: 回帰・型・Lint・本番ビルド・スマホ・印刷・段階リリース検証
 
 ## ✅ 完了済みのタスク
 

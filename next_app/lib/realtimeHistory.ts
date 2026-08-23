@@ -205,7 +205,7 @@ function isHistoryRow(value: Json): value is HistoryRow & Json {
   )
 }
 
-async function fetchGasRows(
+export async function fetchGasHistoryRows(
   gasWebAppUrl: string,
   store: HistoryTargetStore,
   startDate: string,
@@ -304,7 +304,7 @@ export async function refreshHistorySnapshot(
   startDate: string,
   endDate: string,
 ): Promise<HistorySnapshot> {
-  const gasRows = await fetchGasRows(gasWebAppUrl, store, startDate, endDate)
+  const gasRows = await fetchGasHistoryRows(gasWebAppUrl, store, startDate, endDate)
   const transferRows = await fetchTransferRows(supabase, store, startDate, endDate)
   const rows = sortHistoryRows([...gasRows, ...transferRows])
   const fetchedAt = new Date().toISOString()

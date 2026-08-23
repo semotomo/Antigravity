@@ -1,0 +1,87 @@
+{
+  "fixtureVersion": 1,
+  "capturedAt": "2026-08-23",
+  "description": "現行GAS履歴レスポンスの匿名化済みデータ契約fixture。値はテスト専用で実データではない。",
+  "success": true,
+  "mode": "history",
+  "history": {
+    "success": true,
+    "count": 7,
+    "targetStore": {
+      "id": "fixture-store-6",
+      "name": "fixture-store"
+    },
+    "data": [
+      {
+        "productCode": "4900000000001",
+        "productName": "fixture-product-a",
+        "taskContent": "販売",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:15",
+        "quantity": 1,
+        "cost": 100,
+        "totalCost": 100
+      },
+      {
+        "productCode": "4900000000001",
+        "productName": "fixture-product-a",
+        "taskContent": "販売",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:15",
+        "quantity": 1,
+        "cost": 100,
+        "totalCost": 100
+      },
+      {
+        "productCode": "4900000000001",
+        "productName": "fixture-product-a",
+        "taskContent": "返品",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:18",
+        "quantity": 1,
+        "cost": 100,
+        "totalCost": 100
+      },
+      {
+        "productCode": "",
+        "productName": "fixture-unmatched-sale",
+        "taskContent": "販売",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:20",
+        "quantity": 1,
+        "cost": 0,
+        "totalCost": 0
+      },
+      {
+        "productCode": "4900000000002",
+        "productName": "fixture-product-b",
+        "taskContent": "注文",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:22",
+        "quantity": 2,
+        "cost": 200,
+        "totalCost": 400
+      },
+      {
+        "productCode": "4900000000003",
+        "productName": "fixture-product-c",
+        "taskContent": "販売",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:25",
+        "quantity": 0,
+        "cost": 0,
+        "totalCost": 0
+      },
+      {
+        "productCode": "",
+        "productName": "fixture-adjustment",
+        "taskContent": "調整",
+        "storeName": "fixture-store",
+        "taskDateTime": "2026/08/22 10:28",
+        "quantity": 1,
+        "cost": 0,
+        "totalCost": 0
+      }
+    ]
+  }
+}
