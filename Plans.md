@@ -24,7 +24,7 @@
 ## 🔴 進行中のタスク
 
 - [ ] Next.js版「棚卸し・在庫管理」 `cc:WIP` `[feature:security]` `[feature:tdd]` `[feature:a11y]`
-  - 状態: **Phase 5.1ローカル実装・自動検証完了。Git/Vercel反映と実機確認待ち**
+  - 状態: **Phase 5.1本番反映・実データ確認完了。実機カメラ/JANリーダー/物理プリンター確認待ち**
   - 詳細: `docs/inventory_management/implementation_plan.md`
   - 方針: 営業中の事前計数に対応し、商品ごとの計数時刻以降の販売・返品・移動・使用・調整を毎回再集計して現在庫を上書きする
   - 安全条件: `store_id + JAN` をUI・Server Action・API・DBで強制し、POSの在庫数は使用しない
@@ -70,14 +70,14 @@
     - [x] 数量非表示の記入用と計算済み結果用、4種類の並び替え、A4印刷CSSをローカル実装
     - [x] Vercel Preview/Productionでスマホ表示、印刷画面、記入用88ページ・入力結果用67ページのA4 PDFを全ページ視覚確認
     - [x] 計算済み結果の全内訳列、マイナス赤表示、差異大の警告色がA4横へ収まることをQA fixtureで確認
-  - [ ] Phase 5.1: 印刷項目整理とGoogleスプレッドシート向けCSV出力 `cc:WIP`
+  - [x] Phase 5.1: 印刷項目整理とGoogleスプレッドシート向けCSV出力 `cc:完了` (2026-08-24)
     - [x] 記入用タイトルを簡潔化し、仕入れ先・棚番号を印刷UIから外してカテゴリ幅を96pxへ縮小
     - [x] 店舗認証済みのUTF-8 CSV出力を追加し、記入用空欄・入力結果・計算結果をGoogleスプレッドシート向けに整形
     - [x] BOM/CRLF/引用符/改行/数式注入、店舗分離、関連回帰88/88、型、対象Lint、本番buildを確認
-    - [ ] Git/Vercel反映後、認証済み実データで印刷表示とCSVダウンロードを確認
+    - [x] commit `7382cbb`をGitHub mainへfast-forwardし、Vercel Production Readyと認証済み実データ2,764件の記入用/結果用表示、CSVボタンを確認
   - [ ] Phase 6: 回帰・型・Lint・本番ビルド・スマホ・印刷・段階リリース検証
-    - [x] 静的回帰84/84、型検査、Phase 4対象Lint、本番build成功を本番反映後に再確認
-    - [x] 本番DB履歴18/18、Git main `b082cfe`、Vercel Production Ready、公開認証済み画面を確認
+    - [x] 静的回帰88/88、型検査、棚卸し対象Lint、本番build成功を本番反映前に確認
+    - [x] 本番DB履歴18/18、Git main `7382cbb`、Vercel Production Ready、公開認証済み画面を確認
     - [x] スマホ導線、店舗分離、下書き再開、停止理由、A4全ページと計算結果警告色を確認
     - [ ] 実機カメラ/JANリーダー読取と物理プリンターでのA4出力を確認
     - [ ] 既存全体Lint 4 errors / 4 warningsは今回差分外として残存
