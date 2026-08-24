@@ -5,18 +5,26 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import {
   AlertTriangle,
+  Ban,
+  Boxes,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   Loader2,
   PackageSearch,
+  Printer,
+  RotateCcw,
   Save,
   Search,
 } from 'lucide-react'
 
 import {
+  finalizeInventorySessionAction,
+  prepareInventoryFinalizationAction,
   saveInventoryCountAction,
+  setInventoryItemExclusionAction,
+  setInventoryProductStatusAction,
   startInventorySessionAction,
 } from '@/app/actions/inventory'
 import { cn, StatusBadge } from '@/components/ui/StatusBadge'
@@ -25,8 +33,13 @@ import type {
   InventoryWorkspace,
   InventoryWorkspaceItem,
 } from '@/lib/inventory/workspace'
+import type { InventoryOverview as InventoryOverviewData } from '@/lib/inventory/management'
+import type { InventoryFinalizationReview } from '@/lib/inventory/recalculationService'
 import { getProductStoreName } from '@/lib/productStores'
 import { InventoryCountDialog } from './InventoryCountDialog'
+import { InventoryFinalizeDialog } from './InventoryFinalizeDialog'
+import { InventoryOverview } from './InventoryOverview'
+import { InventoryReasonDialog } from './InventoryReasonDialog'
 
 const JanCodeScannerField = dynamic(
   () => import('@/components/orders/JanCodeScannerField').then((module) => module.JanCodeScannerField),
@@ -40,6 +53,8 @@ type CountStatus = 'all' | 'counted' | 'uncounted'
 
 type InventoryBoardProps = {
   allowedStores: Array<6 | 7>
+  managerStores: Array<6 | 7>
+  initialOverview: InventoryOverviewData
   initialWorkspace: InventoryWorkspace
   storeId: 6 | 7
 }
@@ -83,13 +98,19 @@ async function fetchWorkspace(input: {
 }
 
 function InventoryItemCard({
+  canManage,
   item,
   saving,
+  onExclusion,
   onSave,
+  onStatus,
 }: {
+  canManage: boolean
   item: InventoryWorkspaceItem
   saving: boolean
+  onExclusion: (item: InventoryWorkspaceItem) => void
   onSave: (item: InventoryWorkspaceItem, quantity: number, mode: InventoryCountMode) => Promise<boolean>
+  onStatus: (item: InventoryWorkspaceItem) => void
 }) {
   const [quantity, setQuantity] = useState(
     item.countedQuantity === null ? '' : String(item.countedQuantity),
@@ -134,7 +155,13 @@ function InventoryItemCard({
           ) : null}
         </div>
 
-        <div className="w-full lg:w-64">
+        <div className="w-full lg:w-72">
+          {item.excludedAt ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <strong>理由付き除外</strong>
+              <p className="mt-1 text-xs">{item.exclusionReason}</p>
+            </div>
+          ) : (
           <label className="block space-y-1.5">
             <span className="text-xs font-semibold text-gray-700">実在庫数</span>
             <div className="flex gap-2">
@@ -164,15 +191,51 @@ function InventoryItemCard({
               </button>
             </div>
           </label>
+          )}
           {error ? <p className="mt-1 text-xs font-medium text-red-700">{error}</p> : null}
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => onExclusion(item)}
+              disabled={saving}
+              className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-bold text-gray-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50"
+            >
+              {item.excludedAt ? '除外を解除' : '棚卸し対象から除外'}
+            </button>
+            {canManage ? (
+              <button
+                type="button"
+                onClick={() => onStatus(item)}
+                disabled={saving}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 disabled:opacity-50',
+                  item.isActive
+                    ? 'border-red-200 text-red-700 hover:bg-red-50'
+                    : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50',
+                )}
+              >
+                {item.isActive ? <Ban className="size-3.5" aria-hidden="true" /> : <RotateCcw className="size-3.5" aria-hidden="true" />}
+                {item.isActive ? '商品を停止' : '停止を解除'}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>
   )
 }
 
-export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: InventoryBoardProps) {
+export function InventoryBoard({
+  allowedStores,
+  managerStores,
+  initialOverview,
+  initialWorkspace,
+  storeId,
+}: InventoryBoardProps) {
   const [workspace, setWorkspace] = useState(initialWorkspace)
+  const [view, setView] = useState<'count' | 'overview'>(
+    initialWorkspace.session ? 'count' : initialOverview.session ? 'overview' : 'count',
+  )
   const [query, setQuery] = useState('')
   const [countStatus, setCountStatus] = useState<CountStatus>('uncounted')
   const [offset, setOffset] = useState(0)
@@ -182,8 +245,13 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
   const [savingItemId, setSavingItemId] = useState<string | null>(null)
   const [dialogItem, setDialogItem] = useState<InventoryWorkspaceItem | null>(null)
   const [dialogError, setDialogError] = useState('')
+  const [reasonItem, setReasonItem] = useState<{ kind: 'status' | 'exclusion'; item: InventoryWorkspaceItem } | null>(null)
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
+  const [finalizationReview, setFinalizationReview] = useState<InventoryFinalizationReview | null>(null)
+  const [finalizing, setFinalizing] = useState(false)
   const [starting, startTransition] = useTransition()
   const activeSessionId = workspace.session?.id ?? null
+  const canManage = managerStores.includes(storeId)
 
   const loadWorkspace = useCallback(async (options?: {
     countStatus?: CountStatus
@@ -231,8 +299,84 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
         return
       }
       const next = await loadWorkspace({ sessionId: null, countStatus: 'uncounted', offset: 0 })
-      if (next?.session) setMessage('棚卸しの下書きを開始しました。')
+      if (next?.session) {
+        setMessage('棚卸しの下書きを開始しました。')
+        setView('count')
+      }
     })
+  }
+
+  const handleReasonAction = async (reason: string) => {
+    if (!reasonItem || !workspace.session) return false
+    setSavingItemId(reasonItem.item.id)
+    setDialogError('')
+    const { item, kind } = reasonItem
+    const result = kind === 'status'
+      ? await setInventoryProductStatusAction({
+          storeId,
+          janCode: item.janSnapshot,
+          active: !item.isActive,
+          reason,
+        })
+      : await setInventoryItemExclusionAction({
+          storeId,
+          sessionId: workspace.session.id,
+          janCode: item.janSnapshot,
+          excluded: item.excludedAt === null,
+          reason,
+          expectedRowVersion: item.rowVersion,
+        })
+    if (!result.success) {
+      setDialogError(result.message)
+      setError(result.message)
+      if (result.conflict) await loadWorkspace()
+      setSavingItemId(null)
+      return false
+    }
+    setReasonItem(null)
+    setMessage(kind === 'status'
+      ? item.isActive ? '商品を停止しました。停止後もこの棚卸しの数量は入力できます。' : '商品の停止を解除しました。'
+      : item.excludedAt ? '棚卸し対象へ戻しました。' : '理由付きで棚卸し対象から除外しました。')
+    await loadWorkspace()
+    setSavingItemId(null)
+    return true
+  }
+
+  const runFinalizationReview = async () => {
+    if (!workspace.session) return
+    setFinalizing(true)
+    setDialogError('')
+    const result = await prepareInventoryFinalizationAction({ storeId, sessionId: workspace.session.id })
+    if (!result.success) {
+      setDialogError(result.message)
+      setFinalizing(false)
+      return
+    }
+    setFinalizationReview(result.data)
+    setFinalizing(false)
+  }
+
+  const finalizeSession = async () => {
+    if (!workspace.session || !finalizationReview?.canFinalize) return
+    setFinalizing(true)
+    setDialogError('')
+    const result = await finalizeInventorySessionAction({
+      storeId,
+      sessionId: workspace.session.id,
+      snapshotId: finalizationReview.snapshotId,
+      calculatedAsOf: finalizationReview.calculatedAsOf,
+      expectedRowVersion: workspace.session.rowVersion,
+    })
+    if (!result.success) {
+      setDialogError(result.message)
+      setFinalizing(false)
+      if (result.conflict) await loadWorkspace()
+      return
+    }
+    setFinalizeOpen(false)
+    setFinalizationReview(null)
+    setFinalizing(false)
+    window.location.reload()
   }
 
   const handleSave = async (
@@ -357,6 +501,19 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
             ))}
           </div>
         </div>
+        <div className="mt-5 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-2" aria-label="棚卸し画面の切り替え">
+            <button type="button" onClick={() => setView('count')} className={cn('rounded-xl border px-4 py-2 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600', view === 'count' ? 'border-sky-700 bg-sky-700 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50')}>棚卸し入力</button>
+            <button type="button" onClick={() => setView('overview')} className={cn('inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600', view === 'overview' ? 'border-sky-700 bg-sky-700 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50')}><Boxes className="size-4" aria-hidden="true" />現在庫</button>
+          </div>
+          {view === 'count' && workspace.session ? (
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/inventory/print?store=${storeId}&session=${workspace.session.id}&mode=blank&sort=category`} target="_blank" className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600"><Printer className="size-4" aria-hidden="true" />記入用を印刷</Link>
+              <Link href={`/inventory/print?store=${storeId}&session=${workspace.session.id}&mode=result&sort=category`} target="_blank" className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600"><Printer className="size-4" aria-hidden="true" />入力結果を印刷</Link>
+              <button type="button" onClick={() => { setDialogError(''); setFinalizationReview(null); setFinalizeOpen(true) }} className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2">確定前チェック</button>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {message ? (
@@ -372,7 +529,14 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
         </div>
       ) : null}
 
-      {!workspace.session ? (
+      {view === 'overview' ? (
+        <InventoryOverview
+          key={`${storeId}:${initialOverview.session?.id ?? 'none'}`}
+          canManage={canManage}
+          initialOverview={initialOverview}
+          storeId={storeId}
+        />
+      ) : !workspace.session ? (
         <section className="rounded-3xl border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-10">
           <PackageSearch className="mx-auto size-12 text-sky-700" aria-hidden="true" />
           <h2 className="mt-4 text-balance text-xl font-bold text-gray-950">
@@ -492,8 +656,11 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
                 <InventoryItemCard
                   key={`${item.id}:${item.rowVersion}`}
                   item={item}
+                  canManage={canManage}
                   saving={savingItemId === item.id}
+                  onExclusion={(target) => { setDialogError(''); setReasonItem({ kind: 'exclusion', item: target }) }}
                   onSave={handleSave}
+                  onStatus={(target) => { setDialogError(''); setReasonItem({ kind: 'status', item: target }) }}
                 />
               ))
             )}
@@ -531,6 +698,38 @@ export function InventoryBoard({ allowedStores, initialWorkspace, storeId }: Inv
             if (!savingItemId) setDialogItem(null)
           }}
           onSave={(mode, quantity) => handleSave(dialogItem, quantity, mode)}
+        />
+      ) : null}
+      {reasonItem ? (
+        <InventoryReasonDialog
+          title={reasonItem.kind === 'status'
+            ? reasonItem.item.isActive ? '商品を停止' : '停止を解除'
+            : reasonItem.item.excludedAt ? '棚卸し対象へ戻す' : '棚卸し対象から除外'}
+          description={reasonItem.kind === 'status'
+            ? reasonItem.item.isActive
+              ? `${reasonItem.item.productNameSnapshot}を停止します。現在の棚卸し数量と履歴は削除されません。`
+              : `${reasonItem.item.productNameSnapshot}を有効へ戻します。`
+            : reasonItem.item.excludedAt
+              ? `${reasonItem.item.productNameSnapshot}を未棚卸しへ戻します。`
+              : `${reasonItem.item.productNameSnapshot}を今回の確定対象から除外します。`}
+          confirmLabel={reasonItem.kind === 'status'
+            ? reasonItem.item.isActive ? '商品を停止' : '停止を解除'
+            : reasonItem.item.excludedAt ? '対象へ戻す' : '理由付きで除外'}
+          destructive={reasonItem.kind === 'status' && reasonItem.item.isActive}
+          error={dialogError}
+          pending={savingItemId === reasonItem.item.id}
+          onClose={() => { if (!savingItemId) setReasonItem(null) }}
+          onConfirm={handleReasonAction}
+        />
+      ) : null}
+      {finalizeOpen ? (
+        <InventoryFinalizeDialog
+          error={dialogError}
+          pending={finalizing}
+          review={finalizationReview}
+          onClose={() => { if (!finalizing) setFinalizeOpen(false) }}
+          onReview={runFinalizationReview}
+          onFinalize={finalizeSession}
         />
       ) : null}
     </div>

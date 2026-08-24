@@ -1,7 +1,8 @@
 import { cookies } from 'next/headers'
 
 import { InventoryBoard } from '@/components/inventory/InventoryBoard'
-import { getInventoryAllowedStores } from '@/lib/inventory/auth'
+import { getInventoryStorePermissions } from '@/lib/inventory/auth'
+import { getInventoryOverview } from '@/lib/inventory/management'
 import { getInventoryWorkspace } from '@/lib/inventory/workspace'
 import { createClient } from '@/lib/supabase/server'
 
@@ -26,7 +27,8 @@ export default async function InventoryPage({
     cookies(),
     createClient(),
   ])
-  const allowedStores = await getInventoryAllowedStores(supabase)
+  const permissions = await getInventoryStorePermissions(supabase)
+  const allowedStores = permissions.map((permission) => permission.storeId)
 
   if (allowedStores.length === 0) {
     return (
@@ -48,18 +50,31 @@ export default async function InventoryPage({
       ? cookieStoreId
       : allowedStores[0]
 
-  const initialWorkspace = await getInventoryWorkspace(supabase, {
-    storeId: selectedStoreId,
-    sessionId: null,
-    query: '',
-    countStatus: 'uncounted',
-    limit: 100,
-    offset: 0,
-  })
+  const [initialWorkspace, initialOverview] = await Promise.all([
+    getInventoryWorkspace(supabase, {
+      storeId: selectedStoreId,
+      sessionId: null,
+      query: '',
+      countStatus: 'uncounted',
+      limit: 100,
+      offset: 0,
+    }),
+    getInventoryOverview(supabase, {
+      storeId: selectedStoreId,
+      query: '',
+      stockStatus: 'all',
+      limit: 100,
+      offset: 0,
+    }),
+  ])
 
   return (
     <InventoryBoard
       allowedStores={allowedStores}
+      managerStores={permissions
+        .filter((permission) => permission.role === 'manager')
+        .map((permission) => permission.storeId)}
+      initialOverview={initialOverview}
       initialWorkspace={initialWorkspace}
       storeId={selectedStoreId}
     />

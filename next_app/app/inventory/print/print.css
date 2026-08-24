@@ -1,0 +1,76 @@
+@page {
+  size: A4 landscape;
+  margin: 8mm;
+}
+
+.print-page {
+  min-height: 100dvh;
+  background: white;
+  color: #111827;
+  padding: 20px;
+  font-family: "Yu Gothic", "Meiryo", sans-serif;
+}
+
+.print-toolbar,
+.sort-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.print-toolbar button,
+.sort-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #111827;
+  color: white;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.print-toolbar button svg { width: 16px; height: 16px; }
+.print-toolbar button.secondary,
+.sort-links a { background: white; color: #374151; }
+.sort-links a.active { border-color: #0369a1; background: #e0f2fe; color: #075985; }
+.sort-links span { font-size: 12px; font-weight: 700; }
+
+.print-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  border-bottom: 2px solid #111827;
+  padding-bottom: 6px;
+}
+
+.print-header h1 { margin: 0; font-size: 18px; line-height: 1.2; }
+.print-header p, .print-header .summary { margin: 3px 0 0; font-size: 10px; }
+.print-header .summary { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.print-page table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.print-page thead { display: table-header-group; }
+.print-page tr { break-inside: avoid; page-break-inside: avoid; }
+.print-page th, .print-page td { border: 1px solid #9ca3af; padding: 3px 4px; font-size: 8px; line-height: 1.2; vertical-align: middle; overflow-wrap: anywhere; }
+.print-page th { background: #f3f4f6; font-weight: 700; }
+.print-page .jan { width: 82px; white-space: nowrap; font-family: monospace; }
+.print-page .product { width: 22%; font-weight: 600; }
+.print-page .shelf { width: 42px; }
+.print-page .entry { width: 72px; height: 22px; }
+.print-page .number { width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+.print-page .current { font-weight: 800; }
+.print-page .status { display: inline-block; margin-left: 3px; border: 1px solid #9ca3af; border-radius: 3px; padding: 0 2px; color: #4b5563; font-size: 7px; }
+.print-page tr.negative td { background: #fee2e2; color: #991b1b; }
+.print-page tr.large-difference:not(.negative) td { background: #fef3c7; }
+
+@media print {
+  .print-page { min-height: auto; padding: 0; }
+  .print-toolbar, .sort-links { display: none; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

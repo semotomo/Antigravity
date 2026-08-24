@@ -169,17 +169,15 @@ export function ProductFormModal({ open, product, onClose }: ProductFormModalPro
               ) : null}
             </label>
 
-            <label className="space-y-2">
+            <div className="space-y-2">
               <span className="text-sm font-medium text-gray-700">ステータス</span>
-              <select
-                name="is_active"
-                defaultValue={product.is_active ? 'true' : 'false'}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-gray-900"
-              >
-                <option value="true">有効</option>
-                <option value="false">停止</option>
-              </select>
-            </label>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                <strong>{product.is_active ? '有効' : '停止'}</strong>
+                <p className="mt-1 text-pretty text-xs text-gray-500">
+                  停止・解除は「棚卸し・在庫管理」で理由を記録して変更してください。
+                </p>
+              </div>
+            </div>
 
           </div>
 

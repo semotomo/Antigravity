@@ -461,6 +461,8 @@ export async function updateProductAction(
       ...payload,
       updated_at: now,
     }
+    // 商品の停止・解除は理由付き棚卸しRPCだけに限定し、改ざんされたform値も無視する。
+    delete updatePayload.is_active
 
     const { data: updatedProduct, error } = await supabase
       .from('products')

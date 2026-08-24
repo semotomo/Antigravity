@@ -42,6 +42,15 @@ type InventoryRpcDefinitions = {
     }
     result: Array<Record<string, unknown>>
   }
+  preview_inventory_finalization: {
+    args: {
+      p_calculated_as_of: string
+      p_session_id: string
+      p_snapshot_id: string
+      p_store_id: 6 | 7
+    }
+    result: unknown
+  }
   record_inventory_pos_snapshot_failure: {
     args: {
       p_failure_message: string
@@ -53,6 +62,31 @@ type InventoryRpcDefinitions = {
     }
     result: string
   }
+}
+
+export type InventoryFinalizationIssue = {
+  kind: 'unmatched' | 'same_minute'
+  rowNo: number
+  janCode: string | null
+  productName: string
+  eventKind: string
+  eventAt: string
+  quantity: number
+  matchStatus: string
+}
+
+export type InventoryFinalizationReview = {
+  snapshotId: string
+  calculatedAsOf: string
+  pendingCount: number
+  unmatchedCount: number
+  ambiguousCount: number
+  duplicateCount: number
+  negativeCount: number
+  largeAdjustmentCount: number
+  balanceCount: number
+  canFinalize: boolean
+  issues: InventoryFinalizationIssue[]
 }
 
 type InventoryRpcClient = {
@@ -102,7 +136,51 @@ function snapshotRowsToJson(rows: ReturnType<typeof normalizePosSnapshot>['rows'
   }))
 }
 
-export async function recalculateInventorySession(
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || Array.isArray(value) || typeof value !== 'object') {
+    throw new Error(`${label}の応答が不正です。`)
+  }
+  return value as Record<string, unknown>
+}
+
+function finiteNumber(value: unknown, label: string) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${label}の応答が不正です。`)
+  }
+  return value
+}
+
+function parseFinalizationReview(value: unknown): InventoryFinalizationReview {
+  const source = record(value, '確定前チェック')
+  if (!Array.isArray(source.issues)) throw new Error('確定前問題一覧の応答が不正です。')
+  return {
+    snapshotId: String(source.snapshotId ?? ''),
+    calculatedAsOf: String(source.calculatedAsOf ?? ''),
+    pendingCount: finiteNumber(source.pendingCount, '未棚卸し数'),
+    unmatchedCount: finiteNumber(source.unmatchedCount, '未照合数'),
+    ambiguousCount: finiteNumber(source.ambiguousCount, '同分時刻件数'),
+    duplicateCount: finiteNumber(source.duplicateCount, '重複候補数'),
+    negativeCount: finiteNumber(source.negativeCount, 'マイナス在庫数'),
+    largeAdjustmentCount: finiteNumber(source.largeAdjustmentCount, '差異警告数'),
+    balanceCount: finiteNumber(source.balanceCount, '計算商品数'),
+    canFinalize: source.canFinalize === true,
+    issues: source.issues.map((value) => {
+      const issue = record(value, '確定前問題')
+      return {
+        kind: issue.kind === 'same_minute' ? 'same_minute' : 'unmatched',
+        rowNo: finiteNumber(issue.rowNo, 'POS行番号'),
+        janCode: typeof issue.janCode === 'string' ? issue.janCode : null,
+        productName: String(issue.productName ?? ''),
+        eventKind: String(issue.eventKind ?? ''),
+        eventAt: String(issue.eventAt ?? ''),
+        quantity: finiteNumber(issue.quantity, 'POS数量'),
+        matchStatus: String(issue.matchStatus ?? ''),
+      }
+    }),
+  }
+}
+
+async function createInventoryPosSnapshot(
   supabase: SupabaseClient<Database>,
   input: { storeId: 6 | 7; sessionId: string },
 ) {
@@ -123,7 +201,6 @@ export async function recalculateInventorySession(
 
   let payloadSha256 = '0'.repeat(64)
   try {
-    // 表示用キャッシュは参照せず、POS履歴だけを同じ期間で直接取得する。
     const sourceRows = await fetchGasHistoryRows(
       gasWebAppUrl,
       store,
@@ -151,28 +228,9 @@ export async function recalculateInventorySession(
 
     const snapshotId = savedRows?.[0]?.snapshot_id
     if (!snapshotId) throw new Error('保存したPOS snapshot IDを取得できませんでした。')
-
-    const { data: calculationRows, error: calculationError } = await rpcClient.rpc(
-      'recalculate_inventory_session',
-      {
-        p_calculated_as_of: calculatedAsOf,
-        p_session_id: input.sessionId,
-        p_snapshot_id: snapshotId,
-        p_store_id: input.storeId,
-      },
-    )
-    if (calculationError) {
-      throw new Error(`在庫の再計算に失敗しました: ${calculationError.message}`)
-    }
-
-    return {
-      snapshotId,
-      calculatedAsOf,
-      result: calculationRows?.[0] ?? null,
-    }
+    return { snapshotId, calculatedAsOf }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'POS同期に失敗しました。'
-    // 失敗監査の保存に失敗しても、元のエラーを優先して返す。
     await rpcClient.rpc('record_inventory_pos_snapshot_failure', {
       p_failure_message: message.slice(0, 1_000),
       p_fetched_at: calculatedAsOf,
@@ -183,4 +241,38 @@ export async function recalculateInventorySession(
     })
     throw error
   }
+}
+
+export async function recalculateInventorySession(
+  supabase: SupabaseClient<Database>,
+  input: { storeId: 6 | 7; sessionId: string },
+) {
+  const rpcClient = inventoryRpc(supabase)
+  const { snapshotId, calculatedAsOf } = await createInventoryPosSnapshot(supabase, input)
+  const { data: calculationRows, error: calculationError } = await rpcClient.rpc(
+    'recalculate_inventory_session',
+    {
+      p_calculated_as_of: calculatedAsOf,
+      p_session_id: input.sessionId,
+      p_snapshot_id: snapshotId,
+      p_store_id: input.storeId,
+    },
+  )
+  if (calculationError) throw new Error(`在庫の再計算に失敗しました: ${calculationError.message}`)
+  return { snapshotId, calculatedAsOf, result: calculationRows?.[0] ?? null }
+}
+
+export async function prepareInventoryFinalization(
+  supabase: SupabaseClient<Database>,
+  input: { storeId: 6 | 7; sessionId: string },
+) {
+  const { snapshotId, calculatedAsOf } = await createInventoryPosSnapshot(supabase, input)
+  const { data, error } = await inventoryRpc(supabase).rpc('preview_inventory_finalization', {
+    p_calculated_as_of: calculatedAsOf,
+    p_session_id: input.sessionId,
+    p_snapshot_id: snapshotId,
+    p_store_id: input.storeId,
+  })
+  if (error) throw new Error(`確定前チェックに失敗しました: ${error.message}`)
+  return parseFinalizationReview(data)
 }
