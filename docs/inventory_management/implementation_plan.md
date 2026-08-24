@@ -1,7 +1,7 @@
 # Next.js版「棚卸し・在庫管理」実装計画
 
 > 作成日: 2026-08-23
-> 状態: **Phase 2完了 / Phase 3開始承認待ち**
+> 状態: **Phase 5.1ローカル実装・自動検証完了 / Git・Vercel反映と実機確認待ち**
 > 対象店舗: 本店 `store_id=7`、わんわん `store_id=6`
 
 ## 1. 目的と前提
@@ -303,7 +303,7 @@
 - 確定後訂正と手動調整を理由必須・append-only監査で実装。
 - マイナス在庫、差異大、同期未完了を明確に表示。
 
-2026-08-24時点でローカル実装、Phase 4 TDD 12/12、関連回帰84/84、型検査、対象Lint、本番build、Supabase linked dry-runまで完了。未適用migrationは`20260824090000_inventory_phase4_management.sql`の1件だけで、seed・role差分は0件。本番DB適用、Git push、Vercel deployは差分提示後の承認待ち。
+2026-08-24にmigration `20260824090000_inventory_phase4_management.sql`を本番適用し、履歴18/18、postapply、rollback付きruntime test、DB lint、runtime痕跡0件を確認した。commit `b082cfe`をmainへ反映し、Vercel Preview・Production Readyと本番認証済み画面まで確認済み。
 
 ### Phase 5: A4印刷（1〜2人日）
 
@@ -312,7 +312,9 @@
 - カテゴリ/仕入れ先/棚番号ソート、A4改ページ、警告色を実装。
 - ブラウザ印刷プレビューとPDF出力で視覚確認する。
 
-記入用・結果用レイアウト、4種類の並び替え、A4印刷CSSはPhase 4と同時にローカル実装済み。ブラウザ印刷プレビューとPDFの視覚確認は、DB migrationとVercel Preview反映後に行う。
+記入用・結果用レイアウト、4種類の並び替え、A4印刷CSSはPhase 4と同時に実装済み。2026-08-24に本番2,764商品からA4横PDFを生成し、記入用88ページ・入力結果用67ページの全ページで見出し繰り返し、行分断、文字切れ、最終商品まで確認した。計算済み結果はQA fixtureで全内訳列、マイナス赤表示、差異大の警告色を確認した。
+
+2026-08-24の追加要望により、記入用タイトルを「棚卸し記入用リスト」へ簡潔化し、仕入れ先・棚番号の列と並び替えを印刷UIから除去、カテゴリ幅を96pxへ縮小した。さらに店舗権限を再検証する`/api/inventory/export`から、UTF-8 BOM/CRLF、CSV引用符、改行、数式注入対策を備えたGoogleスプレッドシート向けCSVを出力する。記入用は数量空欄、下書き結果は入力数量、確定結果は計算内訳を出力し、仕入れ先・棚番号は含めない。DB migrationは不要。関連回帰88/88、型、対象Lint、本番buildまでローカル確認済みで、Git/Vercel反映後の認証済み実データ確認を残す。
 
 ### Phase 6: 回帰・段階リリース（2〜4人日）
 
@@ -323,6 +325,8 @@
 - GAS差分確認 → 必要時のみデプロイ。
 - Git diff/statusを確認し、既存未コミットファイルを除外したコミットだけ作成。
 - Git push前にコミット内容を提示。Vercel Production成功と公開HTTP、可能なら認証済みE2Eを確認。
+
+2026-08-24に関連回帰84/84、`npx tsc --noEmit`、棚卸し対象Lint、本番build、Vercel Production Ready、本番認証済み棚卸し/印刷画面を再確認した。全体Lintの既存4 errors / 4 warningsは今回差分外のまま残る。実機カメラ/JANリーダーと物理プリンターでの確認を最終手動ゲートとする。
 
 総規模の目安は16〜25人日。POS安定IDの有無、既存products RLSの安全な閉鎖方法、営業中の同分時刻曖昧件数で変動する。
 
@@ -336,4 +340,4 @@
 6. 実装は専用worktree/branchに分離し、Phase 0から段階的に進める。
 7. Phase 1の新規テーブルはauthenticated/anonの直接DMLを許可せず、書込みRPCはPhase 2で追加する。
 
-上記は2026-08-23に承認済み。Phase 1はSQL全文・対象・論理backup・ロールバック方針・初期権限差分を提示して別承認を取得し、本番migration、初期権限5行、実DB検証まで完了した。Phase 2も対象差分を提示して本番DB適用承認を取得し、2 migration、実DB店舗越境・冪等性テスト、DB lint、Git main、Vercel Production反映まで完了した。次の承認ゲートはPhase 3開始前とする。
+上記は2026-08-23に承認済み。Phase 1〜5は各承認ゲートを経て、本番DB、実DB検証、Git main、Vercel Production、A4 PDF全ページ確認まで完了した。次のゲートはPhase 6の実機カメラ/JANリーダーと物理プリンター確認とする。

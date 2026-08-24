@@ -21,6 +21,7 @@
 }
 
 .print-toolbar button,
+.print-toolbar a,
 .sort-links a {
   display: inline-flex;
   align-items: center;
@@ -32,10 +33,13 @@
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 700;
+  text-decoration: none;
 }
 
-.print-toolbar button svg { width: 16px; height: 16px; }
+.print-toolbar button svg,
+.print-toolbar a svg { width: 16px; height: 16px; }
 .print-toolbar button.secondary,
+.print-toolbar a,
 .sort-links a { background: white; color: #374151; }
 .sort-links a.active { border-color: #0369a1; background: #e0f2fe; color: #075985; }
 .sort-links span { font-size: 12px; font-weight: 700; }
@@ -60,8 +64,8 @@
 .print-page th, .print-page td { border: 1px solid #9ca3af; padding: 3px 4px; font-size: 8px; line-height: 1.2; vertical-align: middle; overflow-wrap: anywhere; }
 .print-page th { background: #f3f4f6; font-weight: 700; }
 .print-page .jan { width: 82px; white-space: nowrap; font-family: monospace; }
-.print-page .product { width: 22%; font-weight: 600; }
-.print-page .shelf { width: 42px; }
+.print-page .product { font-weight: 600; }
+.print-page .category { width: 96px; }
 .print-page .entry { width: 72px; height: 22px; }
 .print-page .number { width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
 .print-page .current { font-weight: 800; }

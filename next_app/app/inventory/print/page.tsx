@@ -34,7 +34,7 @@ export default async function InventoryPrintPage({ searchParams }: { searchParam
   const storeId: 6 | 7 = storeValue
   const mode = param(resolved.mode) === 'result' ? 'result' : 'blank'
   const sortValue = param(resolved.sort)
-  const sort = sortValue === 'supplier' || sortValue === 'shelf' || sortValue === 'name' ? sortValue : 'category'
+  const sort = sortValue === 'name' ? 'name' : 'category'
   const sessionId = param(resolved.session) || null
 
   const supabase = await createClient()
@@ -42,16 +42,17 @@ export default async function InventoryPrintPage({ searchParams }: { searchParam
   const data = await getInventoryPrintData(supabase, { storeId, sessionId, mode, sort })
   const isCalculated = mode === 'result' && data.status === 'finalized'
   const title = mode === 'blank'
-    ? '数量を隠した記入用リスト'
+    ? '棚卸し記入用リスト'
     : isCalculated ? '計算済み結果リスト' : '入力済み数量リスト'
   const baseParams = `store=${storeId}&session=${data.sessionId}&mode=${mode}`
+  const csvHref = `/api/inventory/export?${baseParams}&sort=${sort}`
 
   return (
     <main className={`print-page ${mode === 'result' ? 'result-mode' : 'blank-mode'}`}>
-      <PrintToolbar />
+      <PrintToolbar csvHref={csvHref} />
       <nav className="sort-links" aria-label="印刷の並び順">
         <span>並び順:</span>
-        {([['category', 'カテゴリ'], ['supplier', '仕入れ先'], ['shelf', '棚番号'], ['name', '商品名']] as const).map(([value, label]) => (
+        {([['category', 'カテゴリ'], ['name', '商品名']] as const).map(([value, label]) => (
           <Link key={value} className={sort === value ? 'active' : ''} href={`/inventory/print?${baseParams}&sort=${value}`}>{label}</Link>
         ))}
       </nav>
@@ -69,9 +70,7 @@ export default async function InventoryPrintPage({ searchParams }: { searchParam
           <tr>
             <th className="jan">JAN</th>
             <th className="product">商品名</th>
-            <th>カテゴリ</th>
-            <th>仕入れ先</th>
-            <th className="shelf">棚番号</th>
+            <th className="category">カテゴリ</th>
             {mode === 'blank' ? <th className="entry">数量記入欄</th> : null}
             {mode === 'result' && !isCalculated ? <th className="number">入力数量</th> : null}
             {isCalculated ? <>
@@ -86,9 +85,7 @@ export default async function InventoryPrintPage({ searchParams }: { searchParam
             <tr key={`${item.janCode}:${item.productName}`} className={`${item.calculatedQuantity !== null && item.calculatedQuantity < 0 ? 'negative' : ''} ${item.isLargeAdjustment ? 'large-difference' : ''}`}>
               <td className="jan">{item.janCode}</td>
               <td className="product">{item.productName}{!item.isActive ? <span className="status">停止</span> : null}{item.excluded ? <span className="status">除外</span> : null}</td>
-              <td>{item.category || ''}</td>
-              <td>{item.supplierName || ''}</td>
-              <td className="shelf">{item.shelfCode || ''}</td>
+              <td className="category">{item.category || ''}</td>
               {mode === 'blank' ? <td className="entry" aria-label="数量記入欄">&nbsp;</td> : null}
               {mode === 'result' && !isCalculated ? <td className="number">{quantity(item.countedQuantity)}</td> : null}
               {isCalculated ? <>

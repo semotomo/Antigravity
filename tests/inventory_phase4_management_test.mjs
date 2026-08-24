@@ -89,7 +89,7 @@ test('印刷画面は認証済み全件データとA4記入用・結果用レイ
 
   assert.match(printPage, /getInventoryPrintData/i)
   assert.match(printPage, /requireInventoryStoreAccess/i)
-  assert.match(printPage, /数量を隠した記入用リスト/)
+  assert.match(printPage, /棚卸し記入用リスト/)
   assert.match(printPage, /計算済み結果リスト/)
   assert.match(printPage, /JAN/)
   assert.match(printStyles, /@page[\s\S]*A4/i)
