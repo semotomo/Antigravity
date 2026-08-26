@@ -9,6 +9,27 @@ import type { Database, Json } from '@/lib/types/database'
 import { normalizePosSnapshot } from './posSnapshot'
 
 const MAX_POS_ROWS = 100_000
+const PRESERVED_DRAFT_MESSAGE = '入力済みの棚卸し数量は保存されています。'
+
+type InventorySynchronizationStage =
+  | 'context'
+  | 'configuration'
+  | 'pos_fetch'
+  | 'snapshot_save'
+  | 'preview'
+  | 'recalculation'
+
+export class InventorySynchronizationError extends Error {
+  readonly detail: string
+  readonly stage: InventorySynchronizationStage
+
+  constructor(stage: InventorySynchronizationStage, message: string, detail: string) {
+    super(message)
+    this.name = 'InventorySynchronizationError'
+    this.stage = stage
+    this.detail = detail
+  }
+}
 
 type RecalculationContext = {
   calculation_from: string
@@ -104,6 +125,22 @@ function inventoryRpc(supabase: SupabaseClient<Database>) {
   return supabase as unknown as InventoryRpcClient
 }
 
+function errorDetail(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function synchronizationError(
+  stage: InventorySynchronizationStage,
+  message: string,
+  error: unknown,
+) {
+  return new InventorySynchronizationError(
+    stage,
+    `${message}${PRESERVED_DRAFT_MESSAGE}時間をおいて再試行してください。`,
+    errorDetail(error),
+  )
+}
+
 function getStore(storeId: 6 | 7): HistoryTargetStore {
   return storeId === 7 ? HISTORY_STORES.main : HISTORY_STORES.wanwan
 }
@@ -190,25 +227,52 @@ async function createInventoryPosSnapshot(
     'get_inventory_recalculation_context',
     { p_session_id: input.sessionId, p_store_id: input.storeId },
   )
-  if (contextError) throw new Error(`再計算範囲の取得に失敗しました: ${contextError.message}`)
+  if (contextError) {
+    throw synchronizationError(
+      'context',
+      '棚卸しの再計算範囲を確認できませんでした。',
+      contextError.message,
+    )
+  }
 
   const context = contextRows?.[0]
   if (!context) throw new Error('再計算できる棚卸し数量がありません。')
 
   const store = getStore(input.storeId)
-  const gasWebAppUrl = process.env.GAS_WEB_APP_URL
-  if (!gasWebAppUrl) throw new Error('GAS_WEB_APP_URLが設定されていません。')
+  // 既存のGAS連携で使用中の設定名を正本とし、誤設定名は移行互換だけ残す。
+  const gasWebAppUrl = process.env.GAS_WEBAPP_URL ?? process.env.GAS_WEB_APP_URL
 
   let payloadSha256 = '0'.repeat(64)
   try {
-    const sourceRows = await fetchGasHistoryRows(
-      gasWebAppUrl,
-      store,
-      toJstDate(context.source_from),
-      toJstDate(calculatedAsOf),
-    )
+    if (!gasWebAppUrl) {
+      throw new InventorySynchronizationError(
+        'configuration',
+        `販売・返品履歴の接続設定が見つかりません。${PRESERVED_DRAFT_MESSAGE}管理者へ連絡してください。`,
+        'GAS_WEBAPP_URLが設定されていません。',
+      )
+    }
+
+    let sourceRows
+    try {
+      sourceRows = await fetchGasHistoryRows(
+        gasWebAppUrl,
+        store,
+        toJstDate(context.source_from),
+        toJstDate(calculatedAsOf),
+      )
+    } catch (error) {
+      throw synchronizationError(
+        'pos_fetch',
+        '販売・返品のPOS履歴の取得に失敗しました。',
+        error,
+      )
+    }
     if (sourceRows.length > MAX_POS_ROWS) {
-      throw new Error(`POS履歴が上限${MAX_POS_ROWS.toLocaleString()}件を超えています。`)
+      throw new InventorySynchronizationError(
+        'pos_fetch',
+        `POS履歴が上限を超えたため処理できません。${PRESERVED_DRAFT_MESSAGE}管理者へ連絡してください。`,
+        `POS履歴が上限${MAX_POS_ROWS.toLocaleString()}件を超えています。`,
+      )
     }
 
     const snapshot = normalizePosSnapshot(sourceRows, input.storeId)
@@ -224,22 +288,40 @@ async function createInventoryPosSnapshot(
         p_store_id: input.storeId,
       },
     )
-    if (saveError) throw new Error(`POS snapshotの保存に失敗しました: ${saveError.message}`)
+    if (saveError) {
+      throw synchronizationError(
+        'snapshot_save',
+        'POS snapshotの保存に失敗しました。',
+        saveError.message,
+      )
+    }
 
     const snapshotId = savedRows?.[0]?.snapshot_id
-    if (!snapshotId) throw new Error('保存したPOS snapshot IDを取得できませんでした。')
+    if (!snapshotId) {
+      throw synchronizationError(
+        'snapshot_save',
+        'POS snapshotの保存結果を確認できませんでした。',
+        '保存したPOS snapshot IDを取得できませんでした。',
+      )
+    }
     return { snapshotId, calculatedAsOf }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'POS同期に失敗しました。'
-    await rpcClient.rpc('record_inventory_pos_snapshot_failure', {
-      p_failure_message: message.slice(0, 1_000),
-      p_fetched_at: calculatedAsOf,
-      p_payload_sha256: payloadSha256,
-      p_source_from: context.source_from,
-      p_source_to: calculatedAsOf,
-      p_store_id: input.storeId,
-    })
-    throw error
+    const failure = error instanceof InventorySynchronizationError
+      ? error
+      : synchronizationError('pos_fetch', '販売・返品履歴の同期に失敗しました。', error)
+    try {
+      await rpcClient.rpc('record_inventory_pos_snapshot_failure', {
+        p_failure_message: failure.detail.slice(0, 1_000),
+        p_fetched_at: calculatedAsOf,
+        p_payload_sha256: payloadSha256,
+        p_source_from: context.source_from,
+        p_source_to: calculatedAsOf,
+        p_store_id: input.storeId,
+      })
+    } catch {
+      // 失敗監査の記録エラーで、利用者へ返す元の同期エラーを上書きしない。
+    }
+    throw failure
   }
 }
 
@@ -258,7 +340,13 @@ export async function recalculateInventorySession(
       p_store_id: input.storeId,
     },
   )
-  if (calculationError) throw new Error(`在庫の再計算に失敗しました: ${calculationError.message}`)
+  if (calculationError) {
+    throw synchronizationError(
+      'recalculation',
+      '最新履歴による現在庫の再計算に失敗しました。',
+      calculationError.message,
+    )
+  }
   return { snapshotId, calculatedAsOf, result: calculationRows?.[0] ?? null }
 }
 
@@ -273,6 +361,20 @@ export async function prepareInventoryFinalization(
     p_snapshot_id: snapshotId,
     p_store_id: input.storeId,
   })
-  if (error) throw new Error(`確定前チェックに失敗しました: ${error.message}`)
-  return parseFinalizationReview(data)
+  if (error) {
+    throw synchronizationError(
+      'preview',
+      '確定前チェックのDB集計に失敗しました。',
+      error.message,
+    )
+  }
+  try {
+    return parseFinalizationReview(data)
+  } catch (error) {
+    throw synchronizationError(
+      'preview',
+      '確定前チェック結果の読み取りに失敗しました。',
+      error,
+    )
+  }
 }

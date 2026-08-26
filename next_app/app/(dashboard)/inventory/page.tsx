@@ -11,6 +11,8 @@ type InventorySearchParams = { [key: string]: string | string[] | undefined }
 export const metadata = {
   title: '棚卸し・在庫管理 | Kennel Dashboard',
 }
+// 確定前チェックと確定後同期はGAS履歴の取得を含むため、Server Actionの実行時間を確保する。
+export const maxDuration = 300
 
 function requestedStoreId(value: string | string[] | undefined) {
   const raw = typeof value === 'string' ? Number(value) : null

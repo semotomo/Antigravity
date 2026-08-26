@@ -22,6 +22,7 @@ import {
 import {
   finalizeInventorySessionAction,
   prepareInventoryFinalizationAction,
+  refreshInventoryBalanceAction,
   saveInventoryCountAction,
   setInventoryItemExclusionAction,
   setInventoryProductStatusAction,
@@ -50,6 +51,20 @@ const JanCodeScannerField = dynamic(
 )
 
 type CountStatus = 'all' | 'counted' | 'uncounted'
+const FINALIZATION_NOTICE_KEY = 'inventory-finalization-notice'
+
+type FinalizationNotice = {
+  kind: 'success' | 'warning'
+  storeId: 6 | 7
+}
+
+function saveFinalizationNotice(notice: FinalizationNotice) {
+  try {
+    window.sessionStorage.setItem(FINALIZATION_NOTICE_KEY, JSON.stringify(notice))
+  } catch {
+    // ブラウザ保存が使えなくても、確定・同期結果そのものには影響させない。
+  }
+}
 
 type InventoryBoardProps = {
   allowedStores: Array<6 | 7>
@@ -252,6 +267,28 @@ export function InventoryBoard({
   const [starting, startTransition] = useTransition()
   const activeSessionId = workspace.session?.id ?? null
   const canManage = managerStores.includes(storeId)
+  const finalizationPending = finalizing || savingItemId !== null
+
+  useEffect(() => {
+    try {
+      const rawNotice = window.sessionStorage.getItem(FINALIZATION_NOTICE_KEY)
+      if (!rawNotice) return
+      window.sessionStorage.removeItem(FINALIZATION_NOTICE_KEY)
+      const notice = JSON.parse(rawNotice) as FinalizationNotice
+      if (notice.storeId !== storeId) return
+      if (notice.kind === 'warning') {
+        setError('棚卸しの確定は完了しましたが、確定直後の最新履歴同期に失敗しました。現在庫の「最新履歴で再計算」を実行してください。')
+        return
+      }
+      setMessage('棚卸しを確定し、確定後に最新の販売・返品履歴を同期しました。')
+    } catch {
+      try {
+        window.sessionStorage.removeItem(FINALIZATION_NOTICE_KEY)
+      } catch {
+        // sessionStorage自体が無効でも画面表示は継続する。
+      }
+    }
+  }, [storeId])
 
   const loadWorkspace = useCallback(async (options?: {
     countStatus?: CountStatus
@@ -344,38 +381,70 @@ export function InventoryBoard({
 
   const runFinalizationReview = async () => {
     if (!workspace.session) return
-    setFinalizing(true)
-    setDialogError('')
-    const result = await prepareInventoryFinalizationAction({ storeId, sessionId: workspace.session.id })
-    if (!result.success) {
-      setDialogError(result.message)
-      setFinalizing(false)
+    if (savingItemId) {
+      setDialogError('数量の保存完了後に確定前チェックを実行してください。')
       return
     }
-    setFinalizationReview(result.data)
-    setFinalizing(false)
+    setFinalizing(true)
+    setDialogError('')
+    try {
+      const result = await prepareInventoryFinalizationAction({ storeId, sessionId: workspace.session.id })
+      if (!result.success) {
+        setDialogError(result.message)
+        return
+      }
+      setFinalizationReview(result.data)
+    } catch {
+      setDialogError('確定前チェック結果を取得できませんでした。入力済みの棚卸し数量は保存されています。通信を確認して再試行してください。')
+    } finally {
+      setFinalizing(false)
+    }
   }
 
   const finalizeSession = async () => {
-    if (!workspace.session || !finalizationReview?.canFinalize) return
+    if (!workspace.session || !finalizationReview?.canFinalize || savingItemId) return
     setFinalizing(true)
     setDialogError('')
-    const result = await finalizeInventorySessionAction({
-      storeId,
-      sessionId: workspace.session.id,
-      snapshotId: finalizationReview.snapshotId,
-      calculatedAsOf: finalizationReview.calculatedAsOf,
-      expectedRowVersion: workspace.session.rowVersion,
-    })
+    let result
+    try {
+      result = await finalizeInventorySessionAction({
+        storeId,
+        sessionId: workspace.session.id,
+        snapshotId: finalizationReview.snapshotId,
+        calculatedAsOf: finalizationReview.calculatedAsOf,
+        expectedRowVersion: workspace.session.rowVersion,
+      })
+    } catch {
+      setDialogError('棚卸しの確定結果を確認できませんでした。入力数量は失われません。画面を再読み込みして確定状態を確認してください。')
+      setFinalizing(false)
+      return
+    }
     if (!result.success) {
       setDialogError(result.message)
       setFinalizing(false)
       if (result.conflict) await loadWorkspace()
       return
     }
+
+    let syncWarning: string | null = null
+    try {
+      // 確定応答を受け取ってから別Actionで同期し、同期障害を確定失敗に見せない。
+      const synchronization = await refreshInventoryBalanceAction({
+        storeId,
+        sessionId: workspace.session.id,
+      })
+      if (!synchronization.success) syncWarning = synchronization.message
+    } catch {
+      syncWarning = '確定直後の最新履歴同期に失敗しました。'
+    }
+
     setFinalizeOpen(false)
     setFinalizationReview(null)
     setFinalizing(false)
+    saveFinalizationNotice({
+      kind: syncWarning ? 'warning' : 'success',
+      storeId,
+    })
     window.location.reload()
   }
 
@@ -510,7 +579,7 @@ export function InventoryBoard({
             <div className="flex flex-wrap gap-2">
               <Link href={`/inventory/print?store=${storeId}&session=${workspace.session.id}&mode=blank&sort=category`} target="_blank" className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600"><Printer className="size-4" aria-hidden="true" />記入用を印刷</Link>
               <Link href={`/inventory/print?store=${storeId}&session=${workspace.session.id}&mode=result&sort=category`} target="_blank" className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-600"><Printer className="size-4" aria-hidden="true" />入力結果を印刷</Link>
-              <button type="button" onClick={() => { setDialogError(''); setFinalizationReview(null); setFinalizeOpen(true) }} className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2">確定前チェック</button>
+              <button type="button" onClick={() => { setDialogError(''); setFinalizationReview(null); setFinalizeOpen(true) }} disabled={finalizationPending} className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">確定前チェック</button>
             </div>
           ) : null}
         </div>
@@ -725,7 +794,7 @@ export function InventoryBoard({
       {finalizeOpen ? (
         <InventoryFinalizeDialog
           error={dialogError}
-          pending={finalizing}
+          pending={finalizationPending}
           review={finalizationReview}
           onClose={() => { if (!finalizing) setFinalizeOpen(false) }}
           onReview={runFinalizationReview}

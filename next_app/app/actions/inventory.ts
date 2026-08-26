@@ -15,6 +15,7 @@ import {
   setInventoryProductStatus,
 } from '@/lib/inventory/management'
 import {
+  InventorySynchronizationError,
   prepareInventoryFinalization,
   recalculateInventorySession,
 } from '@/lib/inventory/recalculationService'
@@ -42,6 +43,9 @@ export type InventoryMutationResult<T> =
 function inventoryActionFailure(error: unknown): InventoryMutationResult<never> {
   const message = error instanceof Error ? error.message : '棚卸し処理に失敗しました。'
   if (error instanceof InventoryAccessError) {
+    return { success: false, message: error.message }
+  }
+  if (error instanceof InventorySynchronizationError) {
     return { success: false, message: error.message }
   }
   if (/updated by another user|40001/i.test(message)) {
@@ -160,9 +164,9 @@ export async function finalizeInventorySessionAction(
     const validated = parseInventoryFinalizeRequest(input)
     const supabase = await createClient()
     await requireInventoryStoreAccess(supabase, validated.storeId)
-    const data = await finalizeInventorySession(supabase, validated)
+    const finalization = await finalizeInventorySession(supabase, validated)
     revalidatePath('/inventory')
-    return { success: true, data }
+    return { success: true, data: finalization }
   } catch (error) {
     return inventoryActionFailure(error)
   }
