@@ -96,6 +96,15 @@ export type InventoryCountSaveResult = {
   progress: Omit<InventoryProgress, 'excludedCount'>
 }
 
+export type InventoryFinalizationReadiness = {
+  rowVersion: number
+  totalCount: number
+  countedCount: number
+  pendingCount: number
+  excludedCount: number
+  canFinalize: boolean
+}
+
 function inventoryRpc(supabase: SupabaseClient<Database>) {
   // 手書きDatabase型へPhase 3 RPCを局所的に追加し、ブラウザへservice roleを出さない。
   return supabase as unknown as InventoryRpcClient
@@ -204,6 +213,36 @@ export async function getInventoryWorkspace(
   })
   if (error) throw new Error(`棚卸し一覧の取得に失敗しました: ${error.message}`)
   return parseInventoryWorkspace(data)
+}
+
+export async function getInventoryFinalizationReadiness(
+  supabase: SupabaseClient<Database>,
+  input: { storeId: 6 | 7; sessionId: string },
+): Promise<InventoryFinalizationReadiness> {
+  const workspace = await getInventoryWorkspace(supabase, {
+    storeId: input.storeId,
+    sessionId: input.sessionId,
+    query: '',
+    countStatus: 'all',
+    limit: 1,
+    offset: 0,
+  })
+  if (!workspace.session || workspace.session.id !== input.sessionId) {
+    throw new Error('棚卸しセッションが見つかりません。')
+  }
+  if (workspace.session.status !== 'draft') {
+    throw new Error('この棚卸しは確定前チェックできません。')
+  }
+
+  const progress = workspace.progress
+  return {
+    rowVersion: workspace.session.rowVersion,
+    totalCount: progress.totalCount,
+    countedCount: progress.countedCount,
+    pendingCount: progress.uncountedCount,
+    excludedCount: progress.excludedCount,
+    canFinalize: progress.countedCount > 0 && progress.uncountedCount === 0,
+  }
 }
 
 export async function startInventorySession(

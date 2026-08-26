@@ -24,12 +24,13 @@ import {
   parseInventoryCountRequest,
   parseInventoryCorrectionRequest,
   parseInventoryExclusionRequest,
-  parseInventoryFinalizeRequest,
+  parseInventoryFinalizeLatestRequest,
   parseInventoryProductStatusRequest,
   parseInventoryRecalculationRequest,
   parseInventoryStartRequest,
 } from '@/lib/inventory/validation'
 import {
+  getInventoryFinalizationReadiness,
   saveInventoryCount,
   startInventorySession,
   type InventoryCountSaveResult,
@@ -40,6 +41,21 @@ export type InventoryMutationResult<T> =
   | { success: true; data: T }
   | { success: false; message: string; conflict?: boolean }
 
+export type InventoryFinalizationActionData =
+  | {
+      status: 'not_ready'
+      readiness: Awaited<ReturnType<typeof getInventoryFinalizationReadiness>>
+    }
+  | {
+      status: 'blocked'
+      review: Awaited<ReturnType<typeof prepareInventoryFinalization>>
+    }
+  | {
+      status: 'finalized'
+      calculatedAsOf: string
+      finalization: Record<string, unknown>
+    }
+
 function inventoryActionFailure(error: unknown): InventoryMutationResult<never> {
   const message = error instanceof Error ? error.message : '棚卸し処理に失敗しました。'
   if (error instanceof InventoryAccessError) {
@@ -48,7 +64,7 @@ function inventoryActionFailure(error: unknown): InventoryMutationResult<never> 
   if (error instanceof InventorySynchronizationError) {
     return { success: false, message: error.message }
   }
-  if (/updated by another user|40001/i.test(message)) {
+  if (/updated by another user|changed by another device|40001/i.test(message)) {
     return {
       success: false,
       message: '他の端末で数量が更新されました。一覧を更新してもう一度入力してください。',
@@ -145,12 +161,12 @@ export async function setInventoryItemExclusionAction(
 
 export async function prepareInventoryFinalizationAction(
   input: unknown,
-): Promise<InventoryMutationResult<Awaited<ReturnType<typeof prepareInventoryFinalization>>>> {
+): Promise<InventoryMutationResult<Awaited<ReturnType<typeof getInventoryFinalizationReadiness>>>> {
   try {
     const validated = parseInventoryRecalculationRequest(input)
     const supabase = await createClient()
     await requireInventoryStoreAccess(supabase, validated.storeId)
-    const data = await prepareInventoryFinalization(supabase, validated)
+    const data = await getInventoryFinalizationReadiness(supabase, validated)
     return { success: true, data }
   } catch (error) {
     return inventoryActionFailure(error)
@@ -159,14 +175,37 @@ export async function prepareInventoryFinalizationAction(
 
 export async function finalizeInventorySessionAction(
   input: unknown,
-): Promise<InventoryMutationResult<Record<string, unknown>>> {
+): Promise<InventoryMutationResult<InventoryFinalizationActionData>> {
   try {
-    const validated = parseInventoryFinalizeRequest(input)
+    const validated = parseInventoryFinalizeLatestRequest(input)
     const supabase = await createClient()
     await requireInventoryStoreAccess(supabase, validated.storeId)
-    const finalization = await finalizeInventorySession(supabase, validated)
+    const readiness = await getInventoryFinalizationReadiness(supabase, validated)
+    if (!readiness.canFinalize) {
+      return { success: true, data: { status: 'not_ready', readiness } }
+    }
+    if (readiness.rowVersion !== validated.expectedRowVersion) {
+      throw new Error('inventory session was changed by another device')
+    }
+    // 外部POS取得は利用者が実際に確定した時だけ1回行い、そのsnapshotで確定する。
+    const review = await prepareInventoryFinalization(supabase, validated)
+    if (!review.canFinalize) {
+      return { success: true, data: { status: 'blocked', review } }
+    }
+    const finalization = await finalizeInventorySession(supabase, {
+      ...validated,
+      snapshotId: review.snapshotId,
+      calculatedAsOf: review.calculatedAsOf,
+    })
     revalidatePath('/inventory')
-    return { success: true, data: finalization }
+    return {
+      success: true,
+      data: {
+        status: 'finalized',
+        calculatedAsOf: review.calculatedAsOf,
+        finalization,
+      },
+    }
   } catch (error) {
     return inventoryActionFailure(error)
   }

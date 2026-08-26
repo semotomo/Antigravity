@@ -342,6 +342,19 @@
 
 ローカル実装後、GASからわんわんの当日履歴30件と棚卸し期間履歴115件を各約39秒で取得できることを確認した。GAS取得を含むServer Actionの上限を300秒に設定し、全関連回帰93/93、型検査、変更対象Lint、本番buildが成功した。全体Lintは従来どおり今回差分外の4 errors / 4 warningsだけが残る。
 
+### Phase 5.3: 確定前チェックの高速化
+
+2026-08-26、入力値を商品別`counted_at`時点の正本とし、確定後の現在庫だけへ販売・返品を反映する設計に合わせ、約39秒のGAS/POS取得を確定前チェックから外した。
+
+- 確定前チェックは認証・店舗権限を再検証した`get_inventory_workspace`を上限1件で呼び、対象、棚卸し済み、未棚卸し、理由付き除外、session row versionだけを確認する。GASやPOSには接続しない。
+- 未棚卸しがなく1件以上の物理計数がある場合だけ、実確定ボタンを有効にする。
+- 実確定ActionはDB進捗とrow versionを再確認してから最新POS履歴を1回取得し、そのsnapshotをpreviewと確定transactionの両方で使う。
+- POS未照合・同分時刻がある場合は確定せず問題一覧を返す。POS取得失敗、別端末更新、DB確定失敗でも下書き数量は保持する。
+- 確定transaction内の`recalculate_inventory_session`が商品別`counted_at`以降を全量再集計して`inventory_balances`を上書きするため、別の確定直後GAS取得は行わない。同じ履歴の再同期で二重減算は発生しない。
+- 確定後に発生する販売・返品は現在庫画面の「最新履歴で再計算」で同じ上書き方式により反映する。
+
+DB migrationとGAS変更は不要。回帰97/97、`npx tsc --noEmit`、変更対象ESLint、本番`next build`が成功した。全体Lintは従来どおり今回差分外の4 errors / 4 warningsだけが残る。
+
 総規模の目安は16〜25人日。POS安定IDの有無、既存products RLSの安全な閉鎖方法、営業中の同分時刻曖昧件数で変動する。
 
 ## 10. 承認済み設計判断と次のゲート

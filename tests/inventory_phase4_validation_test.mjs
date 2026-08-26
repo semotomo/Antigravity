@@ -6,6 +6,7 @@ import {
   parseInventoryCorrectionRequest,
   parseInventoryExclusionRequest,
   parseInventoryFinalizeRequest,
+  parseInventoryFinalizeLatestRequest,
   parseInventoryOverviewRequest,
   parseInventoryProductStatusRequest,
 } from '../next_app/lib/inventory/validation.ts'
@@ -57,6 +58,14 @@ test('確定要求はsession・snapshot・row version・計算時刻を検証す
   assert.equal(result.storeId, 6)
   assert.throws(() => parseInventoryFinalizeRequest({ ...result, calculatedAsOf: 'invalid' }))
   assert.throws(() => parseInventoryFinalizeRequest({ ...result, expectedRowVersion: 0 }))
+
+  const latest = parseInventoryFinalizeLatestRequest({
+    storeId: 6,
+    sessionId,
+    expectedRowVersion: 3,
+  })
+  assert.equal(latest.storeId, 6)
+  assert.throws(() => parseInventoryFinalizeLatestRequest({ ...latest, expectedRowVersion: 0 }))
 })
 
 test('手動調整は0を拒否し、符号付き数量・理由・冪等キーを検証する', () => {

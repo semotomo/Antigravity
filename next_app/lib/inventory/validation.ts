@@ -51,6 +51,12 @@ export type InventoryFinalizeRequest = {
   calculatedAsOf: string
 }
 
+export type InventoryFinalizeLatestRequest = {
+  storeId: 6 | 7
+  sessionId: string
+  expectedRowVersion: number
+}
+
 export type InventoryCorrectionRequest = {
   storeId: 6 | 7
   sessionId: string
@@ -257,6 +263,15 @@ export function parseInventoryFinalizeRequest(value: unknown): InventoryFinalize
     snapshotId: parseUuid(input.snapshotId, 'POSスナップショットIDが不正です。'),
     expectedRowVersion: parseRowVersion(input.expectedRowVersion),
     calculatedAsOf: new Date(calculatedAsOf).toISOString(),
+  }
+}
+
+export function parseInventoryFinalizeLatestRequest(value: unknown): InventoryFinalizeLatestRequest {
+  const input = requireRecord(value, '棚卸し確定の入力が不正です。')
+  return {
+    storeId: parseStoreId(input.storeId),
+    sessionId: parseUuid(input.sessionId, '棚卸しセッションIDが不正です。'),
+    expectedRowVersion: parseRowVersion(input.expectedRowVersion),
   }
 }
 

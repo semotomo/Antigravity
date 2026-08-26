@@ -19,7 +19,7 @@ test('棚卸し同期は既存GAS設定名を優先し、旧誤設定名も移�
   assert.match(service, /GAS_WEBAPP_URLが設定されていません/)
 })
 
-test('確定前チェックの同期失敗は入力数量を保持したまま段階別メッセージを返す', () => {
+test('POS同期失敗は入力数量を保持したまま段階別メッセージを返す', () => {
   const service = source('next_app/lib/inventory/recalculationService.ts')
   const actions = source('next_app/app/actions/inventory.ts')
 
@@ -31,7 +31,18 @@ test('確定前チェックの同期失敗は入力数量を保持したまま�
   assert.match(actions, /error instanceof InventorySynchronizationError/)
 })
 
-test('確定成功後は最新履歴を全量再計算し、同期失敗を確定失敗に戻さない', () => {
+test('確定前チェックはDB進捗だけを確認し、GAS/POS履歴を取得しない', () => {
+  const actions = source('next_app/app/actions/inventory.ts')
+  const reviewAction = actions.match(
+    /export async function prepareInventoryFinalizationAction[\s\S]*?\n}\n\nexport async function finalizeInventorySessionAction/,
+  )?.[0] ?? ''
+
+  assert.match(reviewAction, /getInventoryFinalizationReadiness/)
+  assert.doesNotMatch(reviewAction, /await prepareInventoryFinalization\(/)
+  assert.doesNotMatch(reviewAction, /fetchGasHistoryRows|createInventoryPosSnapshot/)
+})
+
+test('実確定時に最新POS履歴を1回取得し、同じsnapshotで確定する', () => {
   const actions = source('next_app/app/actions/inventory.ts')
   const board = source('next_app/components/inventory/InventoryBoard.tsx')
   const finalizeAction = actions.match(
@@ -41,27 +52,30 @@ test('確定成功後は最新履歴を全量再計算し、同期失敗を確�
     /const finalizeSession = async \(\) => \{[\s\S]*?\n  }\n\n  const handleSave/,
   )?.[0] ?? ''
 
+  assert.match(finalizeAction, /const review = await prepareInventoryFinalization/)
+  assert.match(finalizeAction, /if \(!review\.canFinalize\)/)
+  assert.match(finalizeAction, /snapshotId: review\.snapshotId/)
+  assert.match(finalizeAction, /calculatedAsOf: review\.calculatedAsOf/)
   assert.match(finalizeAction, /const finalization = await finalizeInventorySession/)
+  assert.equal((finalizeAction.match(/prepareInventoryFinalization/g) ?? []).length, 1)
   assert.doesNotMatch(finalizeAction, /recalculateInventorySession/)
-  assert.match(finalizeAction, /return \{ success: true, data: finalization \}/)
+  assert.match(finalizeAction, /status: 'finalized'/)
   assert.match(finalizeClient, /await finalizeInventorySessionAction/)
-  assert.match(finalizeClient, /await refreshInventoryBalanceAction/)
-  assert.match(finalizeClient, /syncWarning/)
-  assert.ok(
-    finalizeClient.indexOf('finalizeInventorySessionAction') < finalizeClient.indexOf('refreshInventoryBalanceAction'),
-    '確定transactionより前に確定後同期を実行してはいけない',
-  )
+  assert.doesNotMatch(finalizeClient, /refreshInventoryBalanceAction/)
+  assert.doesNotMatch(finalizeClient, /syncWarning/)
 })
 
-test('数量保存中は確定前チェックを開始せず、確定後の同期結果を再表示する', () => {
+test('数量保存中は確定前チェックを開始せず、確定中のPOS取得を利用者へ明示する', () => {
   const board = source('next_app/components/inventory/InventoryBoard.tsx')
+  const dialog = source('next_app/components/inventory/InventoryFinalizeDialog.tsx')
   const page = source('next_app/app/(dashboard)/inventory/page.tsx')
 
   assert.match(board, /const finalizationPending = finalizing \|\| savingItemId !== null/)
   assert.match(board, /disabled=\{finalizationPending\}/)
   assert.match(board, /inventory-finalization-notice/)
-  assert.match(board, /確定後に最新の販売・返品履歴を同期しました/)
-  assert.match(board, /確定は完了しましたが、確定直後の最新履歴同期に失敗しました/)
+  assert.match(board, /最新の販売・返品履歴を反映して棚卸しを確定しました/)
+  assert.match(dialog, /確定前チェックではPOSへ接続しません/)
+  assert.match(dialog, /確定時に最新の販売・返品履歴を取得/)
   assert.match(page, /export const maxDuration = 300/)
 })
 
