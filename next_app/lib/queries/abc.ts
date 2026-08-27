@@ -6,6 +6,7 @@ export type AbcRank = 'A' | 'B' | 'C'
 
 export type AbcAnalysisRow = {
   key: string
+  storeId: 6 | 7
   label: string
   jan_code: string
   category: string
@@ -23,7 +24,7 @@ function normalizeCategory(category: string | null | undefined) {
 }
 
 function buildGroupKey(row: ProductSummaryRow) {
-  return [row.product_id ?? 'unknown', row.jan_code, row.product_name].join(':')
+  return [row.store_id, row.product_id ?? 'unknown', row.jan_code, row.product_name].join(':')
 }
 
 function resolveRank(cumulativeSalesShare: number): AbcRank {
@@ -96,11 +97,16 @@ export async function fetchAbcAnalysis(
   const grouped = new Map<string, AbcAnalysisRow>()
 
   for (const row of sourceRows) {
+    if (row.store_id !== 6 && row.store_id !== 7) {
+      continue
+    }
+
     const key = buildGroupKey(row)
     const current =
       grouped.get(key) ??
       ({
         key,
+        storeId: row.store_id,
         label: row.product_name?.trim() || '商品名未設定',
         jan_code: row.jan_code?.trim() ?? '',
         category: normalizeCategory(row.category),

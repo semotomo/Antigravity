@@ -22,6 +22,7 @@ type TrendDataRow = {
 type ProductSalesTrendsModalProps = {
   isOpen: boolean
   onClose: () => void
+  storeId: 6 | 7
   janCode?: string | null
   productName: string
   searchDateFrom?: string
@@ -33,6 +34,7 @@ type PeriodType = 'search' | '30' | '7'
 export function ProductSalesTrendsModal({
   isOpen,
   onClose,
+  storeId,
   janCode,
   productName,
   searchDateFrom,
@@ -59,6 +61,7 @@ export function ProductSalesTrendsModal({
       setError(null)
       try {
         const url = new URL('/api/sales/trends', window.location.origin)
+        url.searchParams.set('storeId', String(storeId))
         if (janCode) {
           url.searchParams.append('janCode', janCode)
         } else {
@@ -92,7 +95,7 @@ export function ProductSalesTrendsModal({
     }
 
     fetchTrends()
-  }, [isOpen, janCode, productName, periodType, searchDateFrom, searchDateTo])
+  }, [isOpen, storeId, janCode, productName, periodType, searchDateFrom, searchDateTo])
 
   if (!isOpen) return null
 

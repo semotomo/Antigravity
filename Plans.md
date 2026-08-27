@@ -1,7 +1,7 @@
 # シフト作成ツール 改善・デプロイ計画
 
 > 生成日: 2026-02-23
-> 最終更新: 2026-08-26 JST
+> 最終更新: 2026-08-27 JST
 > ステータス: 計画中
 
 ## 目標
@@ -22,6 +22,23 @@
 ## タスク一覧
 
 ## 🔴 進行中のタスク
+
+- [ ] Next.js版 セキュリティスキャン・Sentry監視準備 `cc:WIP` `[feature:security]` `[feature:stability]` `[feature:tdd]`
+  - 状態: **Sentryローカル準備・依存更新・Codex Security標準スキャン完了、検出事項の修正と外部接続は未実施**
+  - [x] Codex Securityプラグインを導入
+  - [x] Codex Security標準スキャンを完了（scan `249454a2-26b5-491b-bf2b-91790475130c`、452ファイル、high 4 / medium 2）
+  - [ ] スキャン指摘を修正（匿名全許可RLS、編集可能metadataのmaster判定、店舗間移動IDOR、印刷XSS、売上推移の店舗混在、Git履歴内パスワード）
+    - [x] 売上推移を画面・API・DBビューで`store_id`必須にし、`user_store_access`認可後に店舗別集計する（本番migration適用済み、Git/Vercel反映待ち）
+    - [x] 現行ブランチから旧Streamlit機密ファイルを削除し、専用ミラーで履歴除外を準備する安全スクリプトと手順書を追加（履歴書き換え・強制push・パスワードローテーションは未実施）
+  - [ ] 独立ワーカー再監査（利用上限で実行できなかったため、利用可能時に単独レビューを追加）
+  - [x] Sentry SDKをDSN未設定時は完全無効、既定PII送信なし、Replayなしで導入
+  - [x] Next.jsのclient/server/edge/request errorとglobal error boundaryを接続
+  - [x] Vercel用の環境変数名と段階リリース手順を文書化（値の登録・Production反映は別承認）
+  - [x] コード内に残るCMS認証情報のフォールバック廃止をローカル実装（Vercel Productionに環境変数が未登録のため本番コミットから保留）
+  - [ ] CMS側の実パスワードをローテーションし、Vercel環境変数へ移す（本番反映前の必須作業）
+  - [x] 回帰100/100、型検査、対象Lint、本番buildを確認
+  - [x] Next.js / eslint-config-nextを16.3.3へ更新し、脆弱な推移依存も許容範囲内で更新
+  - [x] `npm audit`と`npm audit --omit=dev`の両方で脆弱性0件、回帰100/100、型、対象Lint、本番build成功を確認
 
 - [ ] Next.js版「棚卸し・在庫管理」 `cc:WIP` `[feature:security]` `[feature:tdd]` `[feature:a11y]`
   - 状態: **Phase 5.2 確定処理・確定後同期の堅牢化を実装中**

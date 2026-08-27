@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { InventoryAccessError, requireInventoryStoreAccess } from '@/lib/inventory/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const janCode = searchParams.get('janCode') || ''
     const productName = searchParams.get('productName') || ''
+    const storeId = Number(searchParams.get('storeId'))
     const daysParam = searchParams.get('days')
     const dateFrom = searchParams.get('dateFrom') || ''
     const dateTo = searchParams.get('dateTo') || ''
@@ -19,12 +21,20 @@ export async function GET(request: Request) {
       )
     }
 
+    if (storeId !== 6 && storeId !== 7) {
+      return NextResponse.json(
+        { message: 'storeId は6（わんわん）または7（本店）を指定してください。' },
+        { status: 400 }
+      )
+    }
+
     const supabase = await createClient()
+    await requireInventoryStoreAccess(supabase, storeId)
 
     let dateLimitStr = ''
     let dateEndStr = ''
     let totalDays = 30
-    let nowJst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+    const nowJst = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
 
     // dateFrom と dateTo が両方指定されている場合、その日付範囲を使用
     if (dateFrom && dateTo) {
@@ -69,6 +79,7 @@ export async function GET(request: Request) {
       .select('sale_date, quantity, sales_amount')
       .gte('sale_date', dateLimitStr)
       .lte('sale_date', dateEndStr)
+      .eq('store_id', storeId)
 
     if (janCode) {
       query = query.eq('jan_code', janCode)
@@ -126,8 +137,13 @@ export async function GET(request: Request) {
       success: true,
       data: resultList,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
+    if (error instanceof InventoryAccessError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status })
+    }
+
     console.error('Unexpected error in trends API:', error)
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    const message = error instanceof Error ? error.message : '予期せぬエラーが発生しました。'
+    return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
 }

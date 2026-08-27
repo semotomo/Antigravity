@@ -14,6 +14,7 @@ type SalesListViewProps = {
 
 export function SalesListView({ salesData, dateFrom, dateTo }: SalesListViewProps) {
   const [selectedProduct, setSelectedProduct] = useState<{
+    storeId: 6 | 7
     janCode: string | null
     productName: string
   } | null>(null)
@@ -28,7 +29,13 @@ export function SalesListView({ salesData, dateFrom, dateTo }: SalesListViewProp
       render: (item) => (
         <div className="flex flex-col">
           <button
-            onClick={() => setSelectedProduct({ janCode: item.jan_code, productName: item.product_name })}
+            onClick={() =>
+              setSelectedProduct({
+                storeId: item.store_id,
+                janCode: item.jan_code,
+                productName: item.product_name,
+              })
+            }
             className="font-semibold text-left text-gray-900 hover:text-indigo-600 hover:underline transition"
           >
             {item.product_name}
@@ -77,14 +84,17 @@ export function SalesListView({ salesData, dateFrom, dateTo }: SalesListViewProp
         rowClassName={(item) => (item.unmatched_master ? 'bg-red-50 hover:bg-red-100' : '')}
       />
 
-      <ProductSalesTrendsModal
-        isOpen={selectedProduct !== null}
-        onClose={() => setSelectedProduct(null)}
-        janCode={selectedProduct?.janCode}
-        productName={selectedProduct?.productName || ''}
-        searchDateFrom={dateFrom}
-        searchDateTo={dateTo}
-      />
+      {selectedProduct ? (
+        <ProductSalesTrendsModal
+          isOpen
+          onClose={() => setSelectedProduct(null)}
+          storeId={selectedProduct.storeId}
+          janCode={selectedProduct.janCode}
+          productName={selectedProduct.productName}
+          searchDateFrom={dateFrom}
+          searchDateTo={dateTo}
+        />
+      ) : null}
     </>
   )
 }

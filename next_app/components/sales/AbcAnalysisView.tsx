@@ -14,6 +14,7 @@ type AbcAnalysisViewProps = {
 
 export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps) {
   const [selectedProduct, setSelectedProduct] = useState<{
+    storeId: 6 | 7
     janCode: string | null
     productName: string
   } | null>(null)
@@ -44,7 +45,13 @@ export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps
       render: (item) => (
         <div className="min-w-[240px]">
           <button
-            onClick={() => setSelectedProduct({ janCode: item.jan_code, productName: item.label })}
+            onClick={() =>
+              setSelectedProduct({
+                storeId: item.storeId,
+                janCode: item.jan_code,
+                productName: item.label,
+              })
+            }
             className="font-semibold text-left text-gray-900 hover:text-indigo-600 hover:underline transition"
           >
             {item.label}
@@ -90,14 +97,17 @@ export function AbcAnalysisView({ rows, dateFrom, dateTo }: AbcAnalysisViewProps
         emptyMessage="指定期間に集計できる商品データが見つかりませんでした。"
       />
 
-      <ProductSalesTrendsModal
-        isOpen={selectedProduct !== null}
-        onClose={() => setSelectedProduct(null)}
-        janCode={selectedProduct?.janCode}
-        productName={selectedProduct?.productName || ''}
-        searchDateFrom={dateFrom}
-        searchDateTo={dateTo}
-      />
+      {selectedProduct ? (
+        <ProductSalesTrendsModal
+          isOpen
+          onClose={() => setSelectedProduct(null)}
+          storeId={selectedProduct.storeId}
+          janCode={selectedProduct.janCode}
+          productName={selectedProduct.productName}
+          searchDateFrom={dateFrom}
+          searchDateTo={dateTo}
+        />
+      ) : null}
     </>
   )
 }

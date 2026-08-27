@@ -404,6 +404,7 @@ export interface Database {
           match_source: string
           unmatched_master: boolean
           created_at: string
+          store_id: 6 | 7
         }
         Relationships: []
       }
@@ -423,6 +424,7 @@ export interface Database {
           estimated_cost: number | null
           estimated_profit: number | null
           unmatched_master: boolean
+          store_id: 6 | 7
         }
         Relationships: []
       }
