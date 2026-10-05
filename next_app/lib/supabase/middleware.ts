@@ -6,8 +6,9 @@ export async function updateSession(request: NextRequest) {
     request,
   })
 
-  // 自動同期API (/api/cron/) はセッション検証をスルーして直接処理を通す
-  if (request.nextUrl.pathname.startsWith('/api/cron/')) {
+  // 外部ジョブとGAS専用POSTは各APIで認証する。商品consume以外の店舗認証は変更しない。
+  if (request.nextUrl.pathname.startsWith('/api/cron/') ||
+      (request.nextUrl.pathname === '/api/pos-products/consume' && request.method === 'POST')) {
     return supabaseResponse
   }
 

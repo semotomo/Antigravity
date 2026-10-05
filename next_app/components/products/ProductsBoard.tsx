@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Search, SquarePen, Loader2 } from 'lucide-react'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { ProductFormModal } from '@/components/products/ProductFormModal'
+import { PosProductEditModal } from '@/components/products/PosProductEditModal'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { BarcodeToggle } from '@/components/ui/BarcodeToggle'
@@ -18,6 +19,9 @@ import { getProductStoreName } from '@/lib/productStores'
 
 type ProductsBoardProps = {
   products: ProductListRow[]
+  posEditorEnabled?: boolean
+  posSaveEnabled?: boolean
+  selectedStoreId?: 6 | 7 | null
 }
 
 type DialogState = {
@@ -25,15 +29,17 @@ type DialogState = {
   nonce: number
 } | null
 
-export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps) {
+export function ProductsBoard({ products: _initialProducts, posEditorEnabled = false, posSaveEnabled = false, selectedStoreId = null }: ProductsBoardProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ProductListRow[]>([])
   const [loading, setLoading] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(null)
   const [includeInactive, setIncludeInactive] = useState(false)
+  const [searchRevision, setSearchRevision] = useState(0)
 
   // 300ms のデバウンス付きでサーバーサイド検索APIを呼び出す
   useEffect(() => {
+    let active = true
     const trimmed = query.trim()
     if (!trimmed) {
       setResults([])
@@ -52,19 +58,19 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
         const res = await fetch(`/api/products/search?${params.toString()}`)
         if (res.ok) {
           const result = await res.json()
-          if (result.success && Array.isArray(result.data)) {
+          if (active && result.success && Array.isArray(result.data)) {
             setResults(result.data)
           }
         }
       } catch (e) {
         console.error('商品検索エラー:', e)
       } finally {
-        setLoading(false)
+        if (active) setLoading(false)
       }
     }, 300) // 300ms デバウンス
 
-    return () => clearTimeout(timer)
-  }, [includeInactive, query])
+    return () => { active = false; clearTimeout(timer) }
+  }, [includeInactive, query, searchRevision])
 
   const columns: DataTableColumn<ProductListRow>[] = [
     {
@@ -140,16 +146,19 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       render: (product) => (
         <button
           type="button"
-          onClick={() =>
+          disabled={posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId)}
+          title={posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId) ? '編集する店舗を一つ選択してください。' : undefined}
+          onClick={() => {
+            if (posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId)) return
             setDialogState({
               product,
               nonce: Date.now(),
             })
-          }
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          }}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <SquarePen className="h-4 w-4" />
-          編集
+          {posEditorEnabled ? 'POS編集' : '編集'}
         </button>
       ),
     },
@@ -159,6 +168,11 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
     <>
       <div className="space-y-6">
         <ProductsSubnav />
+        {posEditorEnabled && selectedStoreId === null ? (
+          <p role="status" className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            POS商品を編集する店舗を「本店のみ」または「わんわん」から選択してください。
+          </p>
+        ) : null}
 
         <section className="overflow-hidden rounded-[2rem] border border-gray-200 bg-white shadow-sm">
           <div className="bg-gradient-to-r from-gray-900 via-slate-800 to-sky-700 px-6 py-7 text-white">
@@ -237,12 +251,25 @@ export function ProductsBoard({ products: _initialProducts }: ProductsBoardProps
       </div>
 
       {dialogState ? (
-        <ProductFormModal
-          key={`${dialogState.product.id}-${dialogState.nonce}`}
-          open
-          product={dialogState.product}
-          onClose={() => setDialogState(null)}
-        />
+        posEditorEnabled ? (
+          selectedStoreId !== null && dialogState.product.store_id === selectedStoreId ? (
+            <PosProductEditModal
+              key={`${dialogState.product.id}-${dialogState.nonce}`}
+              product={dialogState.product}
+              storeId={selectedStoreId}
+              savingEnabled={posSaveEnabled}
+              onSaved={() => setSearchRevision(value => value + 1)}
+              onClose={() => setDialogState(null)}
+            />
+          ) : null
+        ) : (
+          <ProductFormModal
+            key={`${dialogState.product.id}-${dialogState.nonce}`}
+            open
+            product={dialogState.product}
+            onClose={() => setDialogState(null)}
+          />
+        )
       ) : null}
     </>
   )

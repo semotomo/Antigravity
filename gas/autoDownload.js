@@ -1318,16 +1318,20 @@ function autoRunProductSalesMonthly() {
 // ===================================================================
 function downloadAndSyncProductMasterMenu() {
   var ui = SpreadsheetApp.getUi();
-  var posConfig = getPOSConfig_();
-
-  if (!posConfig) {
-    ui.alert('⚙️ 設定が必要です', 'POS接続情報を設定してください。', ui.ButtonSet.OK);
+  var properties = PropertiesService.getScriptProperties();
+  if (properties.getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') !== 'true' ||
+      properties.getProperty('POS_PRODUCT_SYNC_FENCE_ENABLED') !== 'true') {
+    ui.alert('商品同期は停止中です', '専用の商品同期設定を確認してください。', ui.ButtonSet.OK);
     return;
   }
-
-  var storeName = posConfig.tenpoGroupName || '本店';
+  var selected = ui.prompt('商品マスタ同期の店舗', '店舗番号を一つ入力してください。6: わんわん、7: 本店', ui.ButtonSet.OK_CANCEL);
+  if (selected.getSelectedButton() !== ui.Button.OK) return;
+  var input = selected.getResponseText().trim();
+  if (input !== '6' && input !== '7') { ui.alert('店舗番号6または7を一つ指定してください。'); return; }
+  var storeId = Number(input);
+  var storeName = storeId === 6 ? 'わんわん' : '本店';
   var response = ui.alert('🏷️ 商品マスタ同期',
-    'POSポータルから商品マスタCSVをダウンロードし、\n' +
+    storeName + 'のPOSポータルから商品マスタCSVをダウンロードし、\n' +
     'Supabaseの商品データベースを最新の状態に同期します。\n\n' +
     '処理内容:\n' +
     '  1. POSポータルにログイン\n' +
@@ -1342,7 +1346,7 @@ function downloadAndSyncProductMasterMenu() {
   if (response !== ui.Button.YES) return;
 
   try {
-    var result = downloadProductMasterFromPOS_(posConfig, storeName);
+    var result = downloadFixedProductMasterSync_(storeId);
 
     if (result.success) {
       ui.alert('✅ 商品マスタ同期 完了',
@@ -1355,18 +1359,60 @@ function downloadAndSyncProductMasterMenu() {
         ui.ButtonSet.OK);
     } else {
       ui.alert('❌ 取得失敗',
-        '商品マスタCSVの取得に失敗しました。\n\n原因: ' + result.message,
+        productMasterSyncError_(result.code, result.outcome).message,
         ui.ButtonSet.OK);
     }
   } catch (e) {
     ui.alert('❌ エラー',
-      '処理中にエラーが発生しました。\n\n' + e.message,
+      '商品同期の結果を確認できません。前回同期の状態を確認してください。',
       ui.ButtonSet.OK);
   }
 }
 
 
 // ===================================================================
+// 重複原因の件数診断。商品名・JAN・金額の実値は追加の診断結果へ出さない。
+function inspectProductMasterSyncSafety_(rows) {
+  var groups = Object.create(null);
+  var result = {
+    duplicateGroups: 0, duplicateExtraRows: 0, identicalRowGroups: 0,
+    conflictingRowGroups: 0, mixedKindGroups: 0, missingJanRows: 0,
+    missingNameRows: 0, shortRows: 0, invalidMoneyRows: 0,
+    rowsByKind: Object.create(null), differingColumns: Object.create(null),
+  };
+  rows.forEach(function(row) {
+    if (row.length < 12) result.shortRows++;
+    var kind = row[2] === '1' || row[2] === '2' || row[2] === '3' ? row[2] : 'unknown';
+    result.rowsByKind[kind] = (result.rowsByKind[kind] || 0) + 1;
+    var jan = normalizeProductMasterJanCode_(row[3]);
+    if (!jan) result.missingJanRows++;
+    if (!(row[6] || '').trim()) result.missingNameRows++;
+    if ([8, 11].some(function(i) { return !/^\d{1,9}$/.test((row[i] || '').replace(/[¥\\,\s]/g, '')); })) result.invalidMoneyRows++;
+    if (!jan) return;
+    var key = JSON.stringify([(row[0] || '').trim(), jan]);
+    var values = row.map(function(value) { return value.trim(); });
+    if (!groups[key]) groups[key] = { first: values, count: 0, kinds: Object.create(null), differences: Object.create(null) };
+    var group = groups[key];
+    group.count++;
+    group.kinds[kind] = true;
+    for (var i = 0; i < Math.max(values.length, group.first.length); i++) {
+      if (values[i] !== group.first[i]) group.differences[i] = true;
+    }
+  });
+  Object.keys(groups).forEach(function(key) {
+    var group = groups[key];
+    if (group.count < 2) return;
+    result.duplicateGroups++;
+    result.duplicateExtraRows += group.count - 1;
+    var columns = Object.keys(group.differences);
+    if (columns.length === 0) result.identicalRowGroups++;
+    else result.conflictingRowGroups++;
+    if (Object.keys(group.kinds).length > 1) result.mixedKindGroups++;
+    columns.forEach(function(column) { result.differingColumns[column] = (result.differingColumns[column] || 0) + 1; });
+  });
+  return result;
+}
+
 // 【商品マスタ診断】CSVをDBへ送信せず、件数と先頭サンプルだけを確認する
 function inspectProductMasterCSV_(csvBlob) {
   var csvContent = csvBlob.getDataAsString(CONFIG.CSV_ENCODING);
@@ -1472,6 +1518,7 @@ function inspectProductMasterCSV_(csvBlob) {
     rowShapeSample: rowShapeSample,
     columnStats: columnStats,
     storeSummary: storeSummary,
+    syncSafety: inspectProductMasterSyncSafety_(rows),
   };
 }
 
@@ -1491,6 +1538,15 @@ function isExpectedProductMasterStore_(storeSummary, targetStoreName) {
 // ===================================================================
 function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   Logger.log('========== 商品マスタCSV取得開始 ==========');
+
+  // 取得後では古いCSVを区別できないため、最初のPOS通信より前に店舗版を記録する。
+  var syncContext = options && options.syncContext ? options.syncContext : null;
+  if (syncContext && (!targetStoreName || syncContext.storeId !== productMasterSyncStoreId_(targetStoreName) || !productMasterSyncUuid_(syncContext.id))) {
+    throw productMasterSyncError_('PRODUCT_SYNC_UNAVAILABLE', 'rejected');
+  }
+  if (!syncContext && PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_SYNC_FENCE_ENABLED') === 'true') {
+    syncContext = beginCoordinatedProductMasterSync_(targetStoreName, options);
+  }
 
   var loginUrl = posConfig.baseUrl + POS_PATHS.LOGIN;
   var getLoginResponse = UrlFetchApp.fetch(loginUrl, { method: 'get', followRedirects: true, muteHttpExceptions: true });
@@ -1521,7 +1577,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   // 302リダイレクト処理...
   if (loginResponse.getResponseCode() === 302) {
     var dashboardUrl = resolveUrl_(posConfig.baseUrl, loginResponse.getHeaders()['Location']);
-    Logger.log('ログイン成功、ダッシュボードへ遷移: ' + dashboardUrl);
+    Logger.log('ログイン成功、ダッシュボードへ遷移');
     var dashboardResponse = fetchWithCookies_(dashboardUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, dashboardResponse);
   }
@@ -1541,7 +1597,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   // 302リダイレクトをフォロー
   if (searchResponse.getResponseCode() === 302) {
     var redirUrl = resolveUrl_(posConfig.baseUrl, searchResponse.getHeaders()['Location']);
-    Logger.log('商品検索リダイレクト: ' + redirUrl);
+    Logger.log('商品検索リダイレクト');
     searchResponse = fetchWithCookies_(redirUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, searchResponse);
   }
@@ -1623,7 +1679,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var searchResultUrl = searchPostUrl;
   if (searchResult.getResponseCode() === 302) {
     searchResultUrl = resolveUrl_(posConfig.baseUrl, searchResult.getHeaders()['Location']);
-    Logger.log('検索結果リダイレクト: ' + searchResultUrl);
+    Logger.log('検索結果リダイレクト');
     searchResult = fetchWithCookies_(searchResultUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, searchResult);
   }
@@ -1682,7 +1738,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var exportPageUrl = exportPostUrl;
   if (exportNavResponse.getResponseCode() === 302) {
     exportPageUrl = resolveUrl_(posConfig.baseUrl, exportNavResponse.getHeaders()['Location']);
-    Logger.log('エクスポート画面リダイレクト: ' + exportPageUrl);
+    Logger.log('エクスポート画面リダイレクト');
     exportNavResponse = fetchWithCookies_(exportPageUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, exportNavResponse);
   }
@@ -1756,7 +1812,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
     ? resolveUrl_(posConfig.baseUrl, expFormAction)
     : exportPageUrl;
 
-  Logger.log('エクスポート実行POST先: ' + expPostUrl);
+  Logger.log('エクスポートを一回送信');
 
   var expResponse = fetchWithCookies_(expPostUrl, 'post', expPayload, cookies);
   cookies = mergeCookies_(cookies, expResponse);
@@ -1765,7 +1821,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var expResultUrl = expPostUrl;
   if (expResponse.getResponseCode() === 302) {
     expResultUrl = resolveUrl_(posConfig.baseUrl, expResponse.getHeaders()['Location']);
-    Logger.log('エクスポート結果リダイレクト: ' + expResultUrl);
+    Logger.log('エクスポート結果リダイレクト');
     expResponse = fetchWithCookies_(expResultUrl, 'get', null, cookies);
     cookies = mergeCookies_(cookies, expResponse);
   }
@@ -1840,14 +1896,14 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
     ? resolveUrl_(posConfig.baseUrl, dlFormAction)
     : downloadPageUrl;
 
-  Logger.log('ダウンロードPOST先: ' + dlPostUrl);
+  Logger.log('ダウンロードを一回送信');
 
   var csvResponse = fetchWithCookies_(dlPostUrl, 'post', dlPayload, cookies);
 
   // 302リダイレクトをフォロー
   if (csvResponse.getResponseCode() === 302) {
     var csvRedirUrl = resolveUrl_(posConfig.baseUrl, csvResponse.getHeaders()['Location']);
-    Logger.log('ダウンロードリダイレクト: ' + csvRedirUrl);
+    Logger.log('ダウンロードリダイレクト');
     csvResponse = fetchWithCookies_(csvRedirUrl, 'get', null, cookies);
   }
 
@@ -1855,8 +1911,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var respHeaders = csvResponse.getHeaders();
   var contentType = respHeaders['Content-Type'] || respHeaders['content-type'] || '';
   var contentDisposition = respHeaders['Content-Disposition'] || respHeaders['content-disposition'] || '';
-  Logger.log('ダウンロード応答: Status=' + csvResponse.getResponseCode() + ', Type=' + contentType);
-  Logger.log('Content-Disposition: ' + contentDisposition);
+  Logger.log('商品マスタダウンロード応答: Status=' + csvResponse.getResponseCode());
 
   var isCSV = contentDisposition.indexOf('csv') !== -1 ||
               contentDisposition.indexOf('attachment') !== -1 ||
@@ -1864,8 +1919,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
               contentType.indexOf('text/csv') !== -1;
 
   if (csvResponse.getResponseCode() !== 200 || !isCSV) {
-    var preview = csvResponse.getContentText().substring(0, 500);
-    Logger.log('応答プレビュー: ' + preview);
+    Logger.log('商品マスタCSVを取得できませんでした。');
     return {
       success: false,
       message: '商品マスタCSVが取得できませんでした\n' +
@@ -1907,6 +1961,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
         rowShapeSample: inspection.rowShapeSample,
         columnStats: inspection.columnStats,
         storeSummary: inspection.storeSummary,
+        syncSafety: inspection.syncSafety,
       },
     };
   }
@@ -1948,12 +2003,17 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var syncResult = null;
   var csvRowCount = 0;
   try {
-    var result = processProductMasterCSV_(csvResponse.getBlob(), storePrefix);
+    var result = processProductMasterCSV_(csvResponse.getBlob(), storePrefix, syncContext);
     syncResult = result;
     csvRowCount = result.count || 0;
   } catch (e) {
-    Logger.log('商品マスタ同期エラー: ' + e.message);
-    syncResult = { success: false, count: 0, message: 'Supabase同期エラー: ' + e.message };
+    if (syncContext) {
+      syncResult = productMasterSyncFailure_(e, syncContext.storeId, syncContext.id);
+      Logger.log('商品マスタ同期エラー: ' + syncResult.code);
+    } else {
+      Logger.log('商品マスタ同期エラー');
+      syncResult = { success: false, count: 0, message: '商品マスタを同期できませんでした。' };
+    }
   }
 
   Logger.log('========== 商品マスタCSVダウンロード完了 ==========');
@@ -1964,6 +2024,10 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
     fileName: fileName,
     csvRowCount: csvRowCount,
     syncResult: syncResult,
+    code: syncResult && syncResult.code,
+    outcome: syncResult && syncResult.outcome,
+    storeId: syncContext ? syncContext.storeId : undefined,
+    runId: syncContext ? syncContext.id : undefined,
   };
 }
 
@@ -2377,19 +2441,54 @@ function downloadSalesHistoryFromPOS_(posConfig, startDate, endDate, options) {
 // 【Web App】外部からの POST リクエスト受け取り（セキュアな通信用）
 // ===================================================================
 function doPost(e) {
-  var results = {};
-
+  var params = {};
+  // 署名要求をmode経路より先に分離する。部分的な署名/不正JSONを従来の同期へ流さない。
   try {
-    var params = {};
-    if (e.postData && e.postData.contents) {
-      try {
-        params = JSON.parse(e.postData.contents);
-      } catch(ex) {
-        Logger.log('POSTデータのJSONパースエラー: ' + ex.message);
+    if (e && e.postData) {
+      var body = e.postData.contents;
+      if (typeof body !== 'string' || !body || body.length > 24576 ||
+          Utilities.newBlob(body).getBytes().length > 24576) throw new Error('INVALID_BODY');
+      params = JSON.parse(body);
+      if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('INVALID_BODY');
+      // 商品同期専用audienceを先に分離し、不正要求を既存modeへ流さない。
+      if (params.audience === 'kennel.product-master-sync.request.v1' ||
+          Object.prototype.hasOwnProperty.call(params, 'requestId')) {
+        if (typeof e.postData.type !== 'string' || !/^application\/json(?:\s*;[^\r\n]*)?$/i.test(e.postData.type)) throw new Error('INVALID_SYNC_REQUEST');
+        var masterResponse = handleProductMasterSyncRequest_(body);
+        return ContentService.createTextOutput(JSON.stringify(masterResponse)).setMimeType(ContentService.MimeType.JSON);
+      }
+      var signedKeys = ['version', 'audience', 'action', 'operationId', 'actorId', 'storeId',
+        'issuedAt', 'expiresAt', 'payload', 'payloadHash', 'signature'];
+      var signedRequest = signedKeys.some(function(key) { return Object.prototype.hasOwnProperty.call(params, key); });
+      if (signedRequest) {
+        if (PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_PUBLIC_GATEWAY_ENABLED') !== 'true' ||
+            typeof e.postData.type !== 'string' || !/^application\/json(?:\s*;[^\r\n]*)?$/i.test(e.postData.type) ||
+            Object.keys(params).length !== signedKeys.length ||
+            signedKeys.some(function(key) { return !Object.prototype.hasOwnProperty.call(params, key); }) ||
+            params.version !== 1 || params.audience !== 'kennel.pos-products.v1' ||
+            (params.action !== 'inspect' && params.action !== 'dispatch')) throw new Error('INVALID_SIGNED_REQUEST');
+        // 個別handlerが専用フラグ・署名・対象を再検査する。業務結果にlegacyログを付けない。
+        var response = params.action === 'inspect' ? handlePosProductInspection_(body) : handlePosProductEditDispatch_(body);
+        return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
       }
     }
+  } catch (_) {
+    // 本文、JSON例外、署名、資格情報、既存Loggerの内容は外部へ返さない。
+    return ContentService.createTextOutput(JSON.stringify({
+      version: 1, success: false, code: 'POS_PRODUCT_PUBLIC_GATEWAY_UNAVAILABLE',
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var results = {};
+  try {
     var mode = params.mode || 'history';
     results.mode = mode;
+    if ((mode === 'master' || mode === 'full') &&
+        (PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_SYNC_FENCE_ENABLED') === 'true' ||
+         PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') === 'true')) {
+      return ContentService.createTextOutput(JSON.stringify({ success: false, mode: mode, code: 'PRODUCT_SYNC_DISABLED', outcome: 'rejected' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     if (mode === 'history_schema' && !isHistorySchemaDiagnosticAuthorized_(params.diagnosticToken)) {
       return ContentService.createTextOutput(JSON.stringify({
         success: false,
@@ -2465,6 +2564,12 @@ function doPost(e) {
 
 function doGet(e) {
   var mode = (e && e.parameter && e.parameter.mode) ? e.parameter.mode : 'history';
+  if ((mode === 'master' || mode === 'full') &&
+      (PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_SYNC_FENCE_ENABLED') === 'true' ||
+       PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') === 'true')) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, mode: mode, code: 'PRODUCT_SYNC_DISABLED', outcome: 'rejected' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   if (mode === 'history_schema') {
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
@@ -2607,7 +2712,7 @@ function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
     var tcFormAction = extractFormAction_(tcHtml, tcFormName);
     var postUrl = tcFormAction ? resolveUrl_(baseUrl, tcFormAction) : tcUrl;
 
-    Logger.log('店舗切替の決定をPOST送信します。URL=' + postUrl);
+    Logger.log('店舗切替の決定をPOST送信します。');
     var postResp = fetchWithCookies_(postUrl, 'post', postPayload, tcCookies);
     var finalCookies = mergeCookies_(tcCookies, postResp);
 
@@ -2615,7 +2720,7 @@ function switchStoreContext_(baseUrl, cookies, storeNameTarget) {
     return finalCookies;
 
   } catch (err) {
-    Logger.log('【店舗切替エラー】処理中に予期しないエラーが発生しました: ' + err.message);
+    Logger.log('【店舗切替エラー】処理中に予期しないエラーが発生しました。');
     return cookies;
   }
 }

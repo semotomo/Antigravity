@@ -2,159 +2,34 @@ import { revalidatePath } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreContext } from '@/lib/storeAuth'
+import { InventoryAccessError, requireInventoryManagerAccess } from '@/lib/inventory/auth'
+import { isSameOriginInventoryRequest } from '@/lib/inventory/validation'
+import { PRODUCT_SYNC_STORES } from '@/lib/product-sync/notifications'
+import { runProductMasterSync } from '@/lib/product-sync/run.server'
+import { updateProductSyncSuccessHistory } from '@/lib/product-sync/notifications.server'
+import { configuredProductMasterSyncTransport } from '@/lib/pos-products/master-sync-transport.server'
 
 export const maxDuration = 300
 
-type ProductMasterStore = {
-  name: '本店' | 'わんわん'
-  tenpoGroupId: '11098' | '11099'
-  tenpoGroupName: 'からつケンネル本店' | 'わんわんペットセンター'
-}
-
-const PRODUCT_MASTER_STORES: Record<'main' | 'wanwan', ProductMasterStore> = {
-  main: {
-    name: '本店',
-    tenpoGroupId: '11098',
-    tenpoGroupName: 'からつケンネル本店',
-  },
-  wanwan: {
-    name: 'わんわん',
-    tenpoGroupId: '11099',
-    tenpoGroupName: 'わんわんペットセンター',
-  },
-}
-
-// 商品マスタ同期用APIルート
-// GAS Web App を mode=master で呼び出す
-export async function POST() {
+export async function POST(request: Request) {
+  // ブラウザが送る正規のOriginだけを認め、認証・DB・GAS処理より前に拒否する。
+  if (!isSameOriginInventoryRequest(request) || request.headers.get('origin') !== new URL(request.url).origin) {
+    return NextResponse.json({ success: false, message: 'この画面からの商品同期だけを受け付けます。商品一覧から再実行してください。' }, { status: 403 })
+  }
   try {
     const supabase = await createClient()
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser()
-
-    if (error || !user) {
-      return NextResponse.json(
-        { message: 'ログイン状態を確認できませんでした。再度ログインしてください。' },
-        { status: 401 }
-      )
-    }
-
-    const gasWebAppUrl = process.env.GAS_WEBAPP_URL
-
-    if (!gasWebAppUrl) {
-      return NextResponse.json(
-        { message: 'GAS_WEBAPP_URL が設定されていません。' },
-        { status: 500 }
-      )
-    }
-
-    const storeContext = await getStoreContext()
-    let targetStores: ProductMasterStore[] = []
-
-    if (storeContext.currentView === 'wanwan') {
-      targetStores = [PRODUCT_MASTER_STORES.wanwan]
-    } else if (storeContext.currentView === 'main') {
-      targetStores = [PRODUCT_MASTER_STORES.main]
-    } else {
-      targetStores = [PRODUCT_MASTER_STORES.main, PRODUCT_MASTER_STORES.wanwan]
-    }
-
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-    const syncResults: Array<{ store: string; csvCount: number; syncCount: number }> = []
-
-    for (let i = 0; i < targetStores.length; i++) {
-      const store = targetStores[i]
-      if (i > 0) {
-        await sleep(10000)
-      }
-
-      const url = new URL(gasWebAppUrl)
-      const bodyPayload = {
-        mode: 'master',
-        tenpoGroupId: store.tenpoGroupId,
-        tenpoGroupName: store.tenpoGroupName,
-        targetStoreName: store.name,
-      }
-
-      const response = await fetch(url.toString(), {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload)
-      })
-
-      if (!response.ok) {
-        const responseText = await response.text()
-        return NextResponse.json(
-          {
-            message: `[${store.name}] GAS Web App の呼び出しに失敗しました: ${responseText}`,
-          },
-          { status: 502 }
-        )
-      }
-
-      const gasResult = (await response.json().catch(() => null)) as {
-        success?: boolean
-        master?: { success?: boolean; message?: string; csvRowCount?: number; syncResult?: { count?: number } }
-        message?: string
-        logs?: string
-      } | null
-
-      if (gasResult?.logs) {
-        console.log(`[GAS Logs for ${store.name}]:`, gasResult.logs)
-      }
-
-      if (!gasResult || gasResult.success === false) {
-        return NextResponse.json(
-          {
-            message: `[${store.name}] GAS内部でエラーが発生しました: ${gasResult?.message || ''}`,
-            logs: gasResult?.logs || '',
-          },
-          { status: 500 }
-        )
-      }
-
-      const masterResult = gasResult.master
-      if (masterResult && masterResult.success === false) {
-        return NextResponse.json(
-          {
-            message: `[${store.name}] 商品マスタ同期失敗: ${masterResult.message || ''}`,
-            logs: gasResult?.logs || '',
-          },
-          { status: 500 }
-        )
-      }
-
-      const syncCount = masterResult?.syncResult?.count ?? 0
-      const csvCount = masterResult?.csvRowCount ?? 0
-      syncResults.push({ store: store.name, csvCount, syncCount })
-    }
-
-    revalidatePath('/sales')
-    revalidatePath('/sales/daily')
-    revalidatePath('/sales/abc')
-    revalidatePath('/products')
-
-    // 同期履歴の更新
-    await supabase.from('sync_history').upsert({
-      sync_type: 'products_sync',
-      last_synced_at: new Date().toISOString(),
-    } as never)
-
-    const totalSyncCount = syncResults.reduce((sum, r) => sum + r.syncCount, 0)
-    const totalCsvCount = syncResults.reduce((sum, r) => sum + r.csvCount, 0)
-
-    return NextResponse.json({
-      message: `商品マスタの同期が完了しました。（対象店舗: ${syncResults.map(r => r.store).join(', ')} / CSV: ${totalCsvCount}件 → Supabase: ${totalSyncCount}件処理）`,
-      details: syncResults,
-    })
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error || !user) return NextResponse.json({ success: false, message: 'ログイン状態を確認できませんでした。再度ログインしてください。' }, { status: 401 })
+    const context = await getStoreContext()
+    const stores = PRODUCT_SYNC_STORES.filter(store => context.currentView === 'all' || store.id === (context.currentView === 'wanwan' ? 6 : 7))
+    // 全店舗表示でも、対象全店舗のmanager権限を送信前に確認する。
+    await Promise.all(stores.map(store => requireInventoryManagerAccess(supabase, store.id)))
+    const result = await runProductMasterSync(stores, 'manual', (store, attemptId) => configuredProductMasterSyncTransport().sync(store.id, attemptId))
+    if (result.success) await updateProductSyncSuccessHistory()
+    for (const path of ['/sales', '/sales/daily', '/sales/abc', '/products']) revalidatePath(path)
+    return NextResponse.json(result, { status: result.success ? 200 : result.results.some(row => row.outcome === 'unknown') ? 502 : 409 })
   } catch (error) {
-    console.error('Unexpected error while syncing product master:', error)
-    return NextResponse.json(
-      { message: '商品マスタ同期の呼び出し中に予期しないエラーが発生しました。' },
-      { status: 500 }
-    )
+    if (error instanceof InventoryAccessError) return NextResponse.json({ success: false, message: error.status === 401 ? 'ログインが必要です。' : '対象店舗すべての店舗管理者権限が必要です。' }, { status: error.status })
+    return NextResponse.json({ success: false, message: '商品同期の状態を確認できませんでした。再送せず、管理者に同期状態を確認してもらってください。' }, { status: 500 })
   }
 }

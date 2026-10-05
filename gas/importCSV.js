@@ -1167,8 +1167,13 @@ function removeProductStoreTag_(existingTags, storeTag) {
 }
 
 
-function processProductMasterCSV_(csvBlob, storePrefix) {
+function processProductMasterCSV_(csvBlob, storePrefix, syncContext) {
   var storeTag = storePrefix || '本店';
+  // 取得中にフラグがOFFになっても、受付済みのCSVを旧書込み経路へ戻さない。
+  var coordinated = !!syncContext || PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_SYNC_FENCE_ENABLED') === 'true';
+  if (coordinated && (!syncContext || syncContext.storeId !== productMasterSyncStoreId_(storeTag))) {
+    throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
+  }
   var csvContent = csvBlob.getDataAsString(CONFIG.CSV_ENCODING);
 
   // BOM除去
@@ -1188,11 +1193,12 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
   Logger.log('商品マスタCSV: ' + rows.length + '行読み込み');
 
   if (rows.length < 1) {
+    if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
     return { success: false, count: 0, message: 'CSVにデータがありません' };
   }
 
   // 先頭行をサンプル表示（デバッグ用）
-  Logger.log('1行目サンプル（列数=' + rows[0].length + '）: ' + rows[0].join(' | '));
+  if (!coordinated) Logger.log('1行目サンプル（列数=' + rows[0].length + '）: ' + rows[0].join(' | '));
 
   // ヘッダーなし — カラム位置を固定で指定（0-indexed）
   var COL = {
@@ -1213,8 +1219,18 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 
     // 列数が足りない行はスキップ
     if (row.length <= COL.COST_PRICE) {
+      if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
       skipped++;
       continue;
+    }
+
+    // 呼出し側の店舗指定だけでなく、CSVの全行が同じ店舗であることを検証する。
+    if (coordinated) {
+      var expectedOffice = syncContext.storeId === 6 ? '11054' : '11053';
+      var expectedStoreName = syncContext.storeId === 6 ? 'わんわんペットセンター' : 'からつケンネル本店';
+      if (row[0].trim() !== expectedOffice || row[1].trim() !== expectedStoreName) {
+        throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
+      }
     }
 
     // JANコードを文字列として取得
@@ -1223,12 +1239,14 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 
     // JANコードまたは商品名が空の行はスキップ
     if (!janCode || !productName) {
+      if (coordinated && janCode) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
       skipped++;
       continue;
     }
 
     // 重複JANコードはスキップ（最初の出現を優先）
     if (seen[janCode]) {
+      if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
       skipped++;
       continue;
     }
@@ -1240,6 +1258,9 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
     // 価格の解析（¥マークやカンマを除去）
     var priceStr = (row[COL.SELLING_PRICE] || '').replace(/[¥\\,\s]/g, '').trim();
     var costStr = (row[COL.COST_PRICE] || '').replace(/[¥\\,\s]/g, '').trim();
+    if (coordinated && (!/^\d{1,9}$/.test(priceStr) || !/^\d{1,9}$/.test(costStr))) {
+      throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
+    }
     var sellingPrice = parseInt(priceStr, 10) || 0;
     var costPrice = parseInt(costStr, 10) || 0;
 
@@ -1269,7 +1290,7 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 
   Logger.log('商品マスタCSVパース完了: 有効=' + records.length + '件, スキップ=' + skipped + '件');
 
-  if (records.length > 0) {
+  if (!coordinated && records.length > 0) {
     // 最初の3件をサンプル表示
     var sample = records.slice(0, 3);
     for (var s = 0; s < sample.length; s++) {
@@ -1278,10 +1299,15 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
   }
 
   if (records.length === 0) {
+    if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
     return { success: false, count: 0, message: '送信対象の商品データがありませんでした。' };
   }
 
   // JAN一覧をGET URLへ載せるため、GASのURLFetch URL長上限を超えない40件単位にする
+  if (coordinated) {
+    // 全商品更新と未取得商品の無効化を一つのDB transactionで行う。
+    return applyCoordinatedProductMasterSync_(records, storeTag, syncContext);
+  }
   var chunkSize = 40;
   var sentCount = 0;
   var syncStartedAt = new Date().toISOString();
@@ -1313,6 +1339,9 @@ function processProductMasterCSV_(csvBlob, storePrefix) {
 // ===================================================================
 function upsertProductMasterToSupabase_(records, syncStartedAt, storeTag) {
   var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') === 'true') {
+    throw new Error('商品マスタの旧直接書込みは停止しました。店舗別の署名付き同期を使用してください。');
+  }
   var supabaseUrl = props.getProperty('SUPABASE_URL');
   var supabaseKey = props.getProperty('SUPABASE_KEY');
 
@@ -1394,6 +1423,9 @@ function fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey) {
 // ===================================================================
 function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') === 'true') {
+    throw new Error('商品マスタの旧直接書込みは停止しました。欠落商品の自動停止は行いません。');
+  }
   var supabaseUrl = props.getProperty('SUPABASE_URL');
   var supabaseKey = props.getProperty('SUPABASE_KEY');
   if (!supabaseUrl || !supabaseKey || supabaseUrl.trim() === '') {

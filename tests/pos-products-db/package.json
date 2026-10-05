@@ -1,0 +1,10 @@
+{
+  "name": "kennel-pos-products-db-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test ledger.integration.mjs sync.integration.mjs apply.integration.mjs dispatch.integration.mjs notifications.integration.mjs cancellation.integration.mjs cutover.integration.mjs master-gateway.integration.mjs",
+    "test:concurrency": "node --test concurrency.integration.mjs"
+  },
+  "devDependencies": { "@electric-sql/pglite": "0.5.8", "pg": "8.16.3" }
+}

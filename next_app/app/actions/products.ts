@@ -15,6 +15,11 @@ import { createClient } from '@/lib/supabase/server'
 
 const POS_SOURCE_SYSTEM = 'pos'
 const JAN_CODE_PATTERN = /^(\d{8}|\d{12}|\d{13})$/
+
+function rejectLegacyProductWrite(): void {
+  // 旧画面・古いタブ・Action直呼びでも、DBだけの商品変更へ迂回させない。
+  throw new Error('商品マスタの直接変更・CSV取込みは停止しました。店舗を選び、POS商品編集または商品マスタ同期を使用してください。')
+}
 type ProductPayload = Omit<ProductInsert, 'store_id'>
 
 function getTrimmedValue(formData: FormData, key: string) {
@@ -336,6 +341,7 @@ export async function createNewProductAndMatchAction(
   formData: FormData
 ): Promise<ProductMutationState> {
   try {
+    rejectLegacyProductWrite()
     const { aliasName, fieldErrors, payload } = buildProductPayload(formData, {
       requireAliasName: true,
       defaultIsActive: true,
@@ -429,7 +435,12 @@ export async function updateProductAction(
   _prevState: ProductMutationState,
   formData: FormData
 ): Promise<ProductMutationState> {
+  // POS経路の有効時は、別Actionの直接呼出しでDBだけを変更する迂回を拒否する。
+  if (process.env.POS_PRODUCT_EDITOR_ENABLED === 'true') {
+    return { status: 'error', message: 'POSの商品編集画面を使用してください。POS保存はまだ有効になっていません。', fieldErrors: {} }
+  }
   try {
+    rejectLegacyProductWrite()
     const fieldErrors: ProductMutationState['fieldErrors'] = {}
     const productIdValue = getTrimmedValue(formData, 'id')
     const productId = Number(productIdValue)
@@ -613,6 +624,7 @@ export async function deleteAliasAction(formData: FormData) {
 
 export async function uploadProductMasterCsv(formData: FormData) {
   try {
+    rejectLegacyProductWrite()
     const csvContent = formData.get('csvContent')
     const fileName = formData.get('fileName')
 
@@ -738,6 +750,7 @@ export async function uploadProductMasterCsv(formData: FormData) {
 
 export async function uploadSupplierCsv(formData: FormData) {
   try {
+    rejectLegacyProductWrite()
     const csvContent = formData.get('csvContent')
     const fileName = formData.get('fileName')
 
