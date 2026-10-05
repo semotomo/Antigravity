@@ -90,6 +90,7 @@
     - 最新検証（2026-10-06）: 通常回帰419/422（同じ既存3失敗）、本番型PGlite84/84・通常PG21/21、独立型・対象Lint・26ページ本番build成功。全体Lintは既存3 errors/5 warnings。合成PC/390pxスマホの通知と復旧を確認済み、実POS保存/画像保持/再同期後の保持は未確認。
     - 2026-10-06: Supabase CLIの対象project読取り接続を確認。17テーブル・定義/権限・19適用履歴を単一のREAD ONLY/REPEATABLE READ snapshotでGit対象外へ論理退避し、SHA-256と17テーブルの型/NOT NULL/主キー/全行全列一致をPGlite復元で確認。商品6,568・棚卸し明細6,544件。全DBの関数/RLS/外部FKを含む完全復元試験ではない。本番migration・設定/公開版・対象商品は未変更。
     - GAS現行6ソースと公開v56を再確認・退避し、現行manifest保持の12ファイル反映候補を準備。共有globalの109関数に衝突なし。Git再認証後のアカウントsemotomo、対象semotomo/Antigravityのpush/admin権限、main ac06232を確認。Vercelは既存4変数だけで、新service/署名/機能設定は未登録。公開有効化前に設定/切替条件を揃える。
+    - [x] 専用ブランチの117ファイルだけをe30300dにcommit/push。GitHub status成功とVercel Preview CDEC56xnGqXanr5bxLDthXcFPaSJのReady/Preview/同じcommitを確認。Production/mainはac06232のまま。本番DB/キー/店舗設定/GAS公開反映/実商品保存はまだ行っていない。
   - [ ] 後続: 商品機能完成後に犬猫の詳細を確認し、犬猫編集/追加、その後JAN商品名候補検索を設計
   - 境界: POS商品保存、DB本番適用、GASデプロイ、Git push、Vercel Production反映は対象・差分確認後の別承認。棚卸し数量は変更しない
 

@@ -39,6 +39,19 @@
 - これらの設定だけでは商品編集/追加は完成しない。POSフォーム契約、商品link、同一transaction内のDB反映、既存CSV同期との競合制御、実保存検証が揃うまで有効化しない。
 - 保存用prepare/save/recover Server Actionはローカル追加済み。読込/レビューActionとは分け、保存用review（POS候補・内部ID・期待結果hash）をブラウザから信用せず、サーバーで取得/検証する。新規送信には6フラグ、既存操作の照合/DB反映には書込み用3フラグ、読取り復旧には送信許可不要。各Actionの店舗manager認可は維持する。
 
+### 専用設定の登録先（値はチャット/ソース/ログへ出さない）
+
+| 設定 | 登録先 | 注意 |
+|---|---|---|
+| 対象projectの `SUPABASE_SERVICE_ROLE_KEY` | Vercelサーバー環境変数とGAS Script Properties | ブラウザ用NEXT_PUBLICには登録しない。anonへのfallbackはしない |
+| `POS_PRODUCT_SIGNING_SECRET` | VercelとGAS | inspect/編集の両側を一致させる専用鍵 |
+| `POS_PRODUCT_CONSUME_SECRET` | VercelとGAS | 消費確認専用。上の署名鍵とは別の値 |
+| `POS_PRODUCT_MASTER_SYNC_SECRET` | VercelとGAS | 商品同期専用。編集署名鍵とは別の値 |
+| `POS_PRODUCT_*_GAS_URL` / `POS_PRODUCT_CONSUME_URL` | 前者はVercel、後者はGAS | 確認した新GAS公開URLと対応するPreview/Productionのconsume URLだけ |
+| `POS_PRODUCT_SYNC_STORE_6_*` / `POS_PRODUCT_SYNC_STORE_7_*` | GAS | BASE_URL / LOGIN_ID / PASSWORD / COMPANY_CD / COMPANY_KEY / TENPO_GROUP_ID / TENPO_GROUP_NAMEを店舗ごとに固定。COMPANY_KEYは空でも明示設定。実画面で確認した値だけを使う |
+
+初期登録では書込み/実行/同期フラグをfalseのままにする。GASの公開gatewayフラグ、同期のMASTER/FENCE、Next側の各フラグを一括でONにせず、DB適用・署名読取り・実CSVの検証後に段階有効化する。新規資格情報の設定画面への入力は本人に引き継ぎ、パスワード/キー値をチャットへ送ってもらわない。
+
 ## 一度だけの保存開始と中断後の照合（ローカル実装済み）
 
 - `registerProductEditDispatch` / `register_pos_product_edit_dispatch` はprepared・未送信の操作だけで、新規本文と変更前/期待結果の業務指紋を固定する。操作hashとdispatchHashは別物。本人manager、店舗6/7、POS内部ID、JAN/商品/POSの3予約、現在のDB商品と固定intentを照合し、登録直前にも期限を検査する。
@@ -106,3 +119,4 @@
 - 署名/同期/取消/通知のDB84件、通常PG独立接続の競合21件は成功。型・対象Lint・26ページ本番buildも成功。通常回帰は419/422で、変更前からの棚卸し静的検査2件・Sentry/CMS検査1件が残る。全体Lintも既存3 errors/5 warningsが残り、完全greenとは扱わない。
 - 指定商品4779/本店7/JAN4582107173062は、退避snapshotでも旧名/199円/95円/有効のまま。データ削除、本番migration/GAS反映、Git push、Vercel反映、実商品の保存は未実施。
 - その後Git CLIを再認証し、アカウントsemotomoと対象semotomo/Antigravityのpush/admin権限、main ac06232を確認。GAS現行6ソースを再取得し、現行manifest保持の12ファイル候補をlocal_exportsに用意した（公開反映は未実施）。Vercelの変数名一覧はCRON_SECRET/GAS_WEBAPP_URL/公開Supabase2キーだけで、新service/署名/機能設定は未登録。キー値は取得/表示していない。
+- 続行で専用ブランチだけe30300dをpushし、Vercel Preview CDEC56xnGqXanr5bxLDthXcFPaSJのReadyを確認。本番ブランチ/Productionは未反映であり、専用設定未登録のまま実保存や新同期が使えるとは扱わない。

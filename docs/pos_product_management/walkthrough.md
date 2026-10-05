@@ -305,6 +305,7 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - Supabase CLIの読取り専用接続を確認し、10/6 02:49 JSTに対象17テーブル/公開private定義/ACL/19履歴を単一READ ONLY/REPEATABLE READ snapshotで退避。10,488,816 bytes、SHA-256 `6f52fd19cf3553485c5d07b5822a07909006d61dcc295b2ccc372d6356ffa957`。商品6,568、棚卸し明細6,544、移動505、店舗権限6行。PGliteでchecksum/型/NOT NULL/主キー/全行全列一致を確認。関数/RLS/Auth/外部FKを含む完全DB復元試験ではない。本文はGit対象外のlocal_exportsだけに保持した。
 - GASのkirikan22アカウント/対象scriptを確認し、現行6ソースを `local_exports/gas-pre-cutover-09c4071d242649efa37a3093525fdcbb` へ再取得。form SHA-256は前回値と一致、公開版HEAD/11/12/56は不変。現行manifest保持の12ファイル候補を `local_exports/gas-release-candidate-a4ba14c952374e079995b5e045785754` に準備、11script構文と共有109関数の衝突なしを確認。Vercel画面でもProduction Ready/main ac06232を再確認し、新設定未登録を変数名だけで確認。401だったGit CLIはユーザー再認証後にsemotomo/push/admin/main ac06232を確認。対象商品4779は旧名/199円/95円/有効のまま。
 - **残る本番前条件**: 実CSVの重複/商品区分/金額/取込み範囲、旧writer/稼働ジョブの停止順、専用キー・固定店舗設定の登録、対象差分の最終承認/適用と段階有効化。商品名/200円/100円の実保存、保存後の非対象設定/画像、再同期後の保持は未検証。本番migration・GAS公開反映・Git push・Vercel反映・実POS保存は未実施。元ルート/他worktreeの未コミットファイルは混入していない。
+- その後のGit続行: 再認証semotomo/push/admin/main一致を確認後、taskの117ファイルだけをe30300dにcommitし、codex/pos-product-managementへpush。stage差分の空白検査と追加行の実tokenパターン検査も実施（該当0、一般的なtoken検査であり全秘密情報不在の証明ではない）。local_exports/実env/元ルートscratch/別worktree petsSyncは含めていない。GitHub Vercel status成功、画面でもPreview/Ready/同じcommitを確認。URLは `https://antigravity-744nrym2s-semotomos-projects.vercel.app/`、deployment CDEC56xnGqXanr5bxLDthXcFPaSJ。本番main/Production、GAS公開版、DB、指定商品は変更していない。
 
 ## 確認した一次資料
 
