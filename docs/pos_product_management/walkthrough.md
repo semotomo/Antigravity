@@ -307,6 +307,18 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - **残る本番前条件**: 実CSVの重複/商品区分/金額/取込み範囲、旧writer/稼働ジョブの停止順、専用キー・固定店舗設定の登録、対象差分の最終承認/適用と段階有効化。商品名/200円/100円の実保存、保存後の非対象設定/画像、再同期後の保持は未検証。本番migration・GAS公開反映・Git push・Vercel反映・実POS保存は未実施。元ルート/他worktreeの未コミットファイルは混入していない。
 - その後のGit続行: 再認証semotomo/push/admin/main一致を確認後、taskの117ファイルだけをe30300dにcommitし、codex/pos-product-managementへpush。stage差分の空白検査と追加行の実tokenパターン検査も実施（該当0、一般的なtoken検査であり全秘密情報不在の証明ではない）。local_exports/実env/元ルートscratch/別worktree petsSyncは含めていない。GitHub Vercel status成功、画面でもPreview/Ready/同じcommitを確認。URLは `https://antigravity-744nrym2s-semotomos-projects.vercel.app/`、deployment CDEC56xnGqXanr5bxLDthXcFPaSJ。本番main/Production、GAS公開版、DB、指定商品は変更していない。
 
+## 2026-10-06 設定保存後: 所有者エディタ専用のCSV診断
+
+- 本人がGAS Script PropertiesとVercel Production Secretへservice_role鍵と用途別3鍵を保存。値を取得せず、登録名と保存済み状態だけを確認。新しい書込み/同期フラグは未登録で既定OFF。Previewに専用鍵があるとは扱わない。
+- `diagnoseHontenProductMasterReadiness`はWeb App/トリガーへ接続しない。書込みフラグOFF、3鍵の64桁小文字hex/相互独立、service鍵の存在、既知POS URLと明示本店グループ11098を検査してから既存dryRunを実行する。返却/最終ログは固定stage/code・boolean・件数だけ。CSVサンプル/JAN/商品値/例外原文/資格情報は出さない。列3/7の統計、行幅、店舗一致、重複分類を確認し、診断成功を同期許可と扱わない。
+- 新規8件と関連回帰35/35、全回帰427/430成功。既存3失敗（棚卸し静的regex2件、Sentry/CMS検査1件）を維持。12script構文/共有114関数衝突なし/差分検査成功。Next/DB/UIは変更せず、直前の型・対象Lint・本番build・DB競合・スマホ検証結果を継承する。
+- 最新ソース退避 `local_exports/gas-pre-inspection-20261006-b72e16a1` の6ファイルを保持し、manifest変更なしで13ファイルをGAS HEADだけへ反映。反映後の別フォルダ `local_exports/gas-post-readiness-upload-20261006-c42d8d6a` へ再取得し、13/13 hash一致。公開HEAD/11/12/56の版一覧は不変。既存月次売上トリガーは維持し、所有者の一覧に商品マスタ定期トリガーはなかった。他所有者や外部旧writer全停止の証明ではない。
+- 所有者エディタで診断を実行し、`READINESS_CSV_INSPECTED`を確認。書込みフラグOFF、GAS3鍵の書式/相互独立とservice鍵存在はすべてtrue。本店のみ3,970行・全行12列、旧パース有効3,928/skip42。列3は非空3,958/一意3,928/JAN形式3,944、列7は非空45/一意44/JAN形式0。区分1が8行、区分2が3,962行。重複20群/余剰30行はすべて内容不一致・区分混在0。差異列は4:1群、5:1群、6（商品名）:20群、7:1群、8（売価）:8群、9:1群、11（原価）:12群。JANなし12、短行/不正金額0。GAS鍵の確認はVercelとの一致やservice鍵の有効性の証明ではない。
+- **同期ONの停止条件**: 新しい厳密同期は上記20群を拒否する。区分だけを絞っても今回は解決せず、先勝ち/後勝ちや名称・金額の推測採用はしない。旧パースの有効件数は同期可能な件数ではない。重複の実POS内部IDと意図した商品対応を追加確認してから切り替える。
+- 続行で`duplicateProfile`を追加し、元コードの完全一致対正規化由来・区分・群サイズ・各変換の影響を件数だけで検査。関連37/37、全回帰429/432（同じ既存3失敗）、GAS構文/共有関数衝突/差分検査成功。最新13ファイル退避 `local_exports/gas-pre-duplicate-profile-20261006-ae10c3e7` は直前HEADから変更なし。候補差分はautoDownload/readinessの2ファイルのみ、再反映後13/13 hash一致、公開v56不変。
+- 実診断で店販区分2の衝突20群、群サイズは2行19群/12行1群、元コード完全一致20群、正規化由来0群、空白/全角/末尾.0の影響各0群を確認。表記補正や区分混在は原因ではない。一方、CSVに内部商品IDがあると証明できておらず、この結果だけで別商品IDと断定しない。POSの出力項目と候補内部IDの読取り確認が残る。確認用のPOSタブはセッション切れで保存済み情報も未入力のため、本人へログインを依頼。資格情報はチャットへ求めない。
+- 本番DB適用、公開GAS切替、新書込み/同期ON、main push/Production更新、指定商品の実保存はまだ行っていない。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。

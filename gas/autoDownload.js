@@ -1379,6 +1379,11 @@ function inspectProductMasterSyncSafety_(rows) {
     conflictingRowGroups: 0, mixedKindGroups: 0, missingJanRows: 0,
     missingNameRows: 0, shortRows: 0, invalidMoneyRows: 0,
     rowsByKind: Object.create(null), differingColumns: Object.create(null),
+    duplicateProfile: {
+      groupsByKind: { '1': 0, '2': 0, '3': 0, unknown: 0, mixed: 0 },
+      groupSizeCounts: Object.create(null), rawIdenticalGroups: 0, normalizedVariantGroups: 0,
+      transformAffectedGroups: { whitespace: 0, fullWidthDigits: 0, trailingDotZero: 0 },
+    },
   };
   rows.forEach(function(row) {
     if (row.length < 12) result.shortRows++;
@@ -1391,10 +1396,17 @@ function inspectProductMasterSyncSafety_(rows) {
     if (!jan) return;
     var key = JSON.stringify([(row[0] || '').trim(), jan]);
     var values = row.map(function(value) { return value.trim(); });
-    if (!groups[key]) groups[key] = { first: values, count: 0, kinds: Object.create(null), differences: Object.create(null) };
+    if (!groups[key]) groups[key] = { first: values, count: 0, kinds: Object.create(null), differences: Object.create(null),
+      rawJanSpellings: Object.create(null), transforms: { whitespace: false, fullWidthDigits: false, trailingDotZero: false } };
     var group = groups[key];
     group.count++;
     group.kinds[kind] = true;
+    // 元コードは関数内の比較にだけ使い、表記や商品値を診断結果へ出さない。
+    var rawJan = (row[3] || '').toString(), trimmedJan = rawJan.trim();
+    group.rawJanSpellings[rawJan] = true;
+    if (rawJan !== trimmedJan) group.transforms.whitespace = true;
+    if (/[０-９]/.test(trimmedJan)) group.transforms.fullWidthDigits = true;
+    if (/\.[0０]$/.test(trimmedJan)) group.transforms.trailingDotZero = true;
     for (var i = 0; i < Math.max(values.length, group.first.length); i++) {
       if (values[i] !== group.first[i]) group.differences[i] = true;
     }
@@ -1407,7 +1419,16 @@ function inspectProductMasterSyncSafety_(rows) {
     var columns = Object.keys(group.differences);
     if (columns.length === 0) result.identicalRowGroups++;
     else result.conflictingRowGroups++;
-    if (Object.keys(group.kinds).length > 1) result.mixedKindGroups++;
+    var kinds = Object.keys(group.kinds);
+    if (kinds.length > 1) result.mixedKindGroups++;
+    var profile = result.duplicateProfile, kind = kinds.length === 1 ? kinds[0] : 'mixed';
+    profile.groupsByKind[kind]++;
+    profile.groupSizeCounts[group.count] = (profile.groupSizeCounts[group.count] || 0) + 1;
+    if (Object.keys(group.rawJanSpellings).length === 1) profile.rawIdenticalGroups++;
+    else profile.normalizedVariantGroups++;
+    Object.keys(group.transforms).forEach(function(name) {
+      if (group.transforms[name]) profile.transformAffectedGroups[name]++;
+    });
     columns.forEach(function(column) { result.differingColumns[column] = (result.differingColumns[column] || 0) + 1; });
   });
   return result;
@@ -1423,6 +1444,8 @@ function inspectProductMasterCSV_(csvBlob) {
   var rows = Utilities.parseCsv(csvContent).filter(function(row) {
     return row.some(function(cell) { return cell.trim() !== ''; });
   });
+  var rowWidthCounts = Object.create(null);
+  rows.forEach(function(row) { rowWidthCounts[row.length] = (rowWidthCounts[row.length] || 0) + 1; });
   var janColumn = 3;
   var productGroupColumn = 5;
   var productNameColumn = 6;
@@ -1517,6 +1540,7 @@ function inspectProductMasterCSV_(csvBlob) {
     sample: sample,
     rowShapeSample: rowShapeSample,
     columnStats: columnStats,
+    rowWidthCounts: rowWidthCounts,
     storeSummary: storeSummary,
     syncSafety: inspectProductMasterSyncSafety_(rows),
   };
@@ -1960,6 +1984,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
         sample: inspection.sample,
         rowShapeSample: inspection.rowShapeSample,
         columnStats: inspection.columnStats,
+        rowWidthCounts: inspection.rowWidthCounts,
         storeSummary: inspection.storeSummary,
         syncSafety: inspection.syncSafety,
       },
