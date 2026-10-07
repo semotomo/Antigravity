@@ -319,6 +319,15 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 実診断で店販区分2の衝突20群、群サイズは2行19群/12行1群、元コード完全一致20群、正規化由来0群、空白/全角/末尾.0の影響各0群を確認。表記補正や区分混在は原因ではない。一方、CSVに内部商品IDがあると証明できておらず、この結果だけで別商品IDと断定しない。POSの出力項目と候補内部IDの読取り確認が残る。確認用のPOSタブはセッション切れで保存済み情報も未入力のため、本人へログインを依頼。資格情報はチャットへ求めない。
 - 本番DB適用、公開GAS切替、新書込み/同期ON、main push/Production更新、指定商品の実保存はまだ行っていない。
 
+## 2026-10-08 続行: 実出力項目契約と重複確認一覧
+
+- ログイン後のPOS出力画面を読み取り、固定3項目と任意9項目の順序を確認。全選択して表示したが新規エクスポートは実行せず、10/6 17:45の既存ファイルを取得した。Shift_JIS/516,306 bytes、本店office11053のみ3,970行・全12列、SHA-256 `7396909ddd61d6795e19872f05c500329604b714a8ba6171faee1290eac0bd41`。元ファイルは変更せずGit対象外の `local_exports/pos-master-readonly-20261006.csv` に同hashで保持した。
+- 実任意項目は `ofNameChk/gdsSalesKbnChk/goodsGroupChk/goodsGroupNameChk/goodsNameKanaChk/goodsPriceChk/liveMembersDispChk/goodsTaxCdChk/goodsCostChk`、いずれもvalue=true。フォームidはhmma02494Form、nameはincludeChildBody:hmma02494Form、出力submitは同prefixのdoExport。列3は商品コード、列4は商品グループID、列7はフリガナであり、CSVに内部商品ID/メーカー品番の出力項目は見つからなかった。
+- 汎用抽出が未チェックを含め全inputを拾う副作用と架空chk*名に依存していたため、実契約を一意性/型/value/disabledで検証して単一フォームからpayload・ボタン・actionを構築するようローカル修正。別formの同prefix項目/hidden上書きを独立レビューで再現し、防止テストを追加して解消確認。署名同期は12列以外もapply前拒否、エラーは固定invalid-data/rejectedへ伝播。商品照合・重複拒否・店舗一致検査は変更しない。
+- CSV重複は13桁JAN19組と共通コード999999の12項目。代表の本店2候補はPOS検索と詳細で名称・金額・メーカー品番・所属本店を確認したが、内部ID値はブラウザでマスクされており取得制限を迂回していない。この観測を内部IDの一致/不一致の証明とは扱わない。
+- 本番対象projectで21コード（重複20組＋本人指定商品）をREAD ONLYで照合。重複20組はDBに各1商品、各1件の棚卸し明細参照があり、現行名/金額はCSV先頭候補と一致。本人指定商品4779は旧値のまま。既存値を正解と推定せず、商品ID再作成や単純な重複除外を行わない。候補・原価等の生データはGit対象外の `local_exports/pos-duplicate-review-20261008.md` に限定して保存。
+- 新規7件を含む関連36/36、通常回帰436/439（同じ既存3失敗）、GAS12script構文/共有115関数衝突なし/差分検査成功。Next/SQL/UIに変更はなく前回の型・対象Lint・本番build・DB競合確認を継承。実POS出力POSTを使う修正後の結合検証は未実施。ローカルの修正はGAS HEAD/公開版へ未反映。本番DB、フラグ、main、Vercel Production、POS商品の変更なし。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。

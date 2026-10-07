@@ -1,0 +1,141 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+import vm from 'node:vm'
+
+const read = name => fs.readFileSync(new URL(`../gas/${name}`, import.meta.url), 'utf8')
+const names = ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk',
+  'goodsNameKanaChk', 'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk']
+const prefix = 'includeChildBody:hmma02494Form:'
+const input = name => `<input value="true" type="checkbox" name="${prefix}${name}" id="${name}" />`
+const form = (inputs = names.map(input).join(''), attributes = 'id="hmma02494Form" name="includeChildBody:hmma02494Form"') =>
+  `<form ${attributes}>${inputs}<input type="hidden" name="${prefix}viewState" value="private-state" /><input type="submit" name="${prefix}doExport" value="" /></form>`
+function fixture() {
+  const writes = [], logs = []
+  const context = vm.createContext({
+    Logger: { log: value => logs.push(value) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
+    Utilities: { parseCsv: csv => csv.split('\n').map(row => row.split(',')) },
+  })
+  for (const name of ['importCSV.js', 'autoDownload.js', 'posProductSync.js', 'posProductMasterSyncGateway.js']) vm.runInContext(read(name), context)
+  context.applyCoordinatedProductMasterSync_ = records => { writes.push(JSON.parse(JSON.stringify(records))); return { success: true, count: records.length } }
+  return { context, writes, logs }
+}
+
+test('実9項目を未チェックでも明示ONにし、存在しない推測checkboxは送らない', () => {
+  const f = fixture(), payload = { [`${prefix}viewState`]: 'private-state' }
+  const contract = f.context.configureProductMasterExportFields_(form(), 'hmma02494Form', payload), result = contract.payload
+  assert.equal(result[`${prefix}viewState`], 'private-state')
+  for (const name of names) assert.equal(result[prefix + name], 'true')
+  assert.equal(Object.keys(result).length, 10)
+  assert.equal(contract.buttonKey, prefix + 'doExport')
+  assert.deepEqual(payload, { [`${prefix}viewState`]: 'private-state' })
+  assert.doesNotMatch(JSON.stringify(f.logs), /private/)
+  assert.match(read('autoDownload.js'), /exportContract = configureProductMasterExportFields_\(exportPageHtml, expFormName\)/)
+  assert.match(read('autoDownload.js'), /extractFormAction_\(exportContract\.formHtml, expFormName\)/)
+  assert.doesNotMatch(read('autoDownload.js'), /'chkGoods(?:Cd|Nm|Price|Genka)'/)
+})
+
+test('欠落・重複・別フォーム・無効項目・追加列は出力前に拒否する', () => {
+  const f = fixture(), validInputs = names.map(input).join('')
+  const invalid = [
+    form(names.slice(0, -1).map(input).join('')),
+    form(validInputs + input(names[0])),
+    form(validInputs.replace('type="checkbox"', 'type="text"')),
+    form(validInputs.replace('value="true"', 'value="false"')),
+    form(validInputs.replace('type="checkbox"', 'disabled="disabled" type="checkbox"')),
+    form(validInputs + input('newUnknownColumnChk')),
+    form(validInputs, 'id="otherForm" name="includeChildBody:otherForm"'),
+    form() + form(),
+    form(validInputs.replace('type="checkbox"', 'type="checkbox" type="text"')),
+    form('') + `<form id="otherForm">${validInputs}</form>`,
+    form().replace(`<input type="submit" name="${prefix}doExport" value="" />`, ''),
+    form().replace(`<input type="submit" name="${prefix}doExport"`, `<input disabled type="submit" name="${prefix}doExport"`),
+    form().replace('</form>', `<input type="submit" name="${prefix}doExport" value="" /></form>`),
+  ]
+  for (const html of invalid) {
+    const payload = { original: 'private-state' }
+    assert.throws(() => f.context.configureProductMasterExportFields_(html, 'hmma02494Form', payload),
+      error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected' && !error.message.includes('private'))
+    assert.deepEqual(payload, { original: 'private-state' })
+  }
+  assert.equal(f.writes.length, 0)
+})
+
+test('対象外フォームやscript/comment内の偽項目を実checkboxとして採用しない', () => {
+  const f = fixture()
+  const html = `<form id="otherForm">${input(names[0])}</form><!-- ${input(names[0])} -->` +
+    `<script>const sample = '${input(names[0])}'</script>` + form()
+  assert.equal(Object.keys(f.context.configureProductMasterExportFields_(html, 'hmma02494Form', {}).payload).length, 10)
+})
+
+test('別formの同接頭辞checkbox/hidden/ボタン/actionを持ち越さない', () => {
+  const f = fixture()
+  const outside = `<form id="otherForm" action="https://other.test/">${input('newUnknownColumnChk')}` +
+    `<input type="hidden" name="${prefix}viewState" value="outside" />` +
+    `<input type="submit" name="${prefix}doExportWrong" value="" /></form>`
+  const html = form().replace('name="includeChildBody:hmma02494Form"', 'name="includeChildBody:hmma02494Form" action="/verified.html"') + outside
+  // 汎用抽出では後の別formの値が勝つため、実際にその不具合も再現する。
+  const unscoped = f.context.extractAllFormFields_(html, 'hmma02494Form')
+  assert.equal(unscoped[prefix + 'viewState'], 'outside')
+  const result = f.context.configureProductMasterExportFields_(html, 'hmma02494Form', unscoped)
+  assert.equal(result.payload[prefix + 'viewState'], 'private-state')
+  assert.equal(Object.hasOwn(result.payload, prefix + 'newUnknownColumnChk'), false)
+  assert.equal(Object.hasOwn(result.payload, prefix + 'doExportWrong'), false)
+  assert.equal(f.context.extractFormAction_(result.formHtml, 'hmma02494Form'), '/verified.html')
+  assert.equal(result.buttonKey, prefix + 'doExport')
+})
+
+test('出力項目不備を未適用の固定拒否として通知経路へ伝え、曖昧な成功にしない', () => {
+  const f = fixture(), id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  let failure
+  try { f.context.configureProductMasterExportFields_(form(''), 'hmma02494Form', {}) }
+  catch (error) { failure = f.context.productMasterSyncFailure_(error, 7, id) }
+  assert.deepEqual(JSON.parse(JSON.stringify(failure)), {
+    success: false, storeId: 7, code: 'PRODUCT_SYNC_INVALID_DATA', outcome: 'rejected', runId: id,
+  })
+  assert.equal(f.writes.length, 0)
+})
+
+test('署名同期は11列/13列をapply前に拒否し、正しい12列だけ固定マッピングを使う', () => {
+  for (const storeId of [6, 7]) {
+    const f = fixture(), storeTag = storeId === 6 ? 'わんわん' : '本店'
+    const row = [storeId === 6 ? '11054' : '11053', storeId === 6 ? 'わんわんペットセンター' : 'からつケンネル本店',
+      '2', '0012345678901', 'group-id', 'category', 'product', 'furigana', '200', '1', 'tax', '100']
+    const sync = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', storeId, startedAt: new Date().toISOString() }
+    for (const invalid of [row.slice(0, -1), [...row, 'extra']]) {
+      assert.throws(() => f.context.processProductMasterCSV_({ getDataAsString: () => invalid.join(',') }, storeTag, sync),
+        error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
+      assert.equal(f.writes.length, 0)
+    }
+    const result = f.context.processProductMasterCSV_({ getDataAsString: () => row.join(',') }, storeTag, sync)
+    assert.equal(result.success, true)
+    assert.equal(f.writes.length, 1)
+    assert.equal(f.writes[0][0].jan_code, '0012345678901')
+    assert.equal(f.writes[0][0].store_id, storeId)
+    assert.equal(f.writes[0][0].category, 'category')
+    assert.equal(f.writes[0][0].product_name, 'product')
+    assert.equal(f.writes[0][0].selling_price, 200)
+    assert.equal(f.writes[0][0].cost_price, 100)
+  }
+})
+
+test('3970行に同区分20競合があっても全競合を診断し、部分適用や先勝ちをしない', () => {
+  const f = fixture()
+  const row = (code, name) => ['11053', 'からつケンネル本店', '2', code, 'group', 'category', name, '', '200', '1', 'tax', '100'].join(',')
+  const rows = Array.from({ length: 3920 }, (_, i) => row(String(1000000000000 + i), `unique-${i}`))
+  for (let i = 0; i < 19; i++) rows.push(row(String(2000000000000 + i), 'first'), row(String(2000000000000 + i), 'second'))
+  for (let i = 0; i < 12; i++) rows.push(row('999999', `category-${i}`))
+  assert.equal(rows.length, 3970)
+  const blob = { getDataAsString: () => rows.join('\n') }
+  const diagnostic = f.context.inspectProductMasterCSV_(blob)
+  assert.equal(diagnostic.syncSafety.conflictingRowGroups, 20)
+  assert.equal(diagnostic.syncSafety.duplicateExtraRows, 30)
+  assert.equal(diagnostic.syncSafety.duplicateProfile.groupsByKind['2'], 20)
+  assert.deepEqual(JSON.parse(JSON.stringify(diagnostic.syncSafety.duplicateProfile.groupSizeCounts)), { 2: 19, 12: 1 })
+  assert.throws(() => f.context.processProductMasterCSV_(blob, '本店', {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', storeId: 7, startedAt: new Date().toISOString(),
+  }), error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
+  assert.equal(f.writes.length, 0)
+  assert.doesNotMatch(JSON.stringify(f.logs), /unique-|category-|2000000000000/)
+})

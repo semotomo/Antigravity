@@ -1558,6 +1558,73 @@ function isExpectedProductMasterStore_(storeSummary, targetStoreName) {
 }
 
 
+// 実画面の出力契約を検証し、12列に必要な任意9項目を明示的にONにする。
+// 入力名の推測や未チェック項目を拾う汎用抽出の副作用には依存しない。
+function configureProductMasterExportFields_(html, formName) {
+  function reject() {
+    var error = new Error('PRODUCT_EXPORT_FIELDS_INVALID');
+    error.code = 'PRODUCT_SYNC_INVALID_DATA';
+    error.outcome = 'rejected';
+    error.productMasterSyncFailure = true;
+    throw error;
+  }
+  function attributes(tag) {
+    var result = {};
+    var body = tag.replace(/^<\w+\b/i, '').replace(/\/?\s*>$/, '');
+    var pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+    var match;
+    while ((match = pattern.exec(body)) !== null) {
+      var key = match[1].toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(result, key)) reject();
+      result[key] = match[2] !== undefined ? match[2] : match[3] !== undefined ? match[3] : match[4];
+    }
+    return result;
+  }
+  if (typeof html !== 'string' || formName !== 'hmma02494Form') reject();
+  var prefix = 'includeChildBody:' + formName + ':';
+  var names = ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk',
+    'goodsNameKanaChk', 'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk'];
+  var cleanHtml = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
+  var forms = cleanHtml.match(/<form\b[^>]*>[\s\S]*?<\/form\s*>/gi) || [];
+  var targetForms = forms.filter(function(form) {
+    var opening = form.match(/^<form\b[^>]*>/i);
+    var attrs = attributes(opening[0]);
+    if (attrs.id !== formName) return false;
+    if (attrs.name !== 'includeChildBody:' + formName) reject();
+    return true;
+  });
+  if (targetForms.length !== 1) reject();
+  var inputs = targetForms[0].match(/<input\b[^>]*>/gi) || [];
+  var found = {};
+  var exportButtons = 0;
+  inputs.forEach(function(tag) {
+    var attrs = attributes(tag);
+    if (!attrs.name) return;
+    if (attrs.name === prefix + 'doExport') {
+      if ((attrs.type || '').toLowerCase() !== 'submit' ||
+          Object.prototype.hasOwnProperty.call(attrs, 'disabled')) reject();
+      exportButtons++;
+    }
+    var name = attrs.name.indexOf(prefix) === 0 ? attrs.name.substring(prefix.length) : '';
+    var required = names.indexOf(name) !== -1;
+    if ((attrs.type || '').toLowerCase() === 'checkbox' && !required) reject();
+    if (!required) return;
+    if (found[name] || (attrs.type || '').toLowerCase() !== 'checkbox' || attrs.value !== 'true' ||
+        Object.prototype.hasOwnProperty.call(attrs, 'disabled')) reject();
+    found[name] = true;
+  });
+  if (exportButtons !== 1 || names.some(function(name) { return !found[name]; })) reject();
+  // 同じ接頭辞でも別formのhidden/checkbox/ボタンを持ち越さない。
+  var scopedFields = extractAllFormFields_(targetForms[0], formName);
+  var result = {};
+  Object.keys(scopedFields).forEach(function(key) {
+    if (!/:do[A-Z]/.test(key)) result[key] = scopedFields[key];
+  });
+  names.forEach(function(name) { result[prefix + name] = 'true'; });
+  return { payload: result, buttonKey: prefix + 'doExport', formHtml: targetForms[0] };
+}
+
+
 // 【商品マスタ】POSポータル (hmma02405) から全件CSVをダウンロードし、JSONで返す
 // ===================================================================
 function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
@@ -1779,59 +1846,13 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   var expFormName = expFormMatch ? expFormMatch[1] : searchFormName;
   Logger.log('エクスポート画面フォーム名: ' + expFormName);
 
-  var expFields = extractAllFormFields_(exportPageHtml, expFormName);
-  var expPrefix = 'includeChildBody:' + expFormName + ':';
+  // 必須3項目はPOS固定出力。任意9項目は実フォーム契約の検証後に指定する。
+  var exportContract = configureProductMasterExportFields_(exportPageHtml, expFormName);
+  var expPayload = exportContract.payload;
+  expPayload[exportContract.buttonKey] = '';
+  Logger.log('エクスポート実行ボタン: doExport');
 
-  var expPayload = {};
-  var expButtons = [];
-  for (var xKey in expFields) {
-    if (xKey.match(/:do[A-Z]/)) {
-      expButtons.push(xKey.split(':').pop());
-      continue;
-    }
-    expPayload[xKey] = expFields[xKey];
-  }
-  Logger.log('エクスポートボタン候補(' + expButtons.length + '): ' + expButtons.join(', '));
-
-  // チェックボックスを設定（出力項目）
-  // ※ フィールド名はPOSの実装に依存するため、よくあるパターンを網羅
-  // 必須項目（デフォルトON）: 店舗コード、商品コード、商品名
-  // 追加でONにする: 商品区分、商品グループ名称、商品金額、商品原価
-  var checkboxNames = [
-    'chkTenpoCd',         // 店舗コード
-    'chkGoodsCd',         // 商品コード
-    'chkGoodsNm',         // 商品名
-    'chkGoodsKbn',        // 商品区分
-    'chkGoodsGroupNm',    // 商品グループ名称
-    'chkGoodsPrice',      // 商品金額
-    'chkGoodsGenka',      // 商品原価
-  ];
-
-  // チェックボックスをONにする（trueまたは'on'）
-  for (var ci = 0; ci < checkboxNames.length; ci++) {
-    var cbKey = expPrefix + checkboxNames[ci];
-    expPayload[cbKey] = 'true';
-    // 'on' パターンも試す
-    var cbKeyOn = cbKey + '-x';
-    if (expFields[cbKeyOn] !== undefined) {
-      expPayload[cbKeyOn] = 'on';
-    }
-  }
-
-  // エクスポート実行ボタン（doExport）
-  var doExportKey = null;
-  for (var xb = 0; xb < expButtons.length; xb++) {
-    if (expButtons[xb] === 'doExport' || expButtons[xb].indexOf('Export') !== -1) {
-      doExportKey = expButtons[xb];
-      break;
-    }
-  }
-  if (doExportKey) {
-    expPayload[expPrefix + doExportKey] = '';
-    Logger.log('エクスポート実行ボタン: ' + doExportKey);
-  }
-
-  var expFormAction = extractFormAction_(exportPageHtml, expFormName);
+  var expFormAction = extractFormAction_(exportContract.formHtml, expFormName);
   var expPostUrl = expFormAction
     ? resolveUrl_(posConfig.baseUrl, expFormAction)
     : exportPageUrl;

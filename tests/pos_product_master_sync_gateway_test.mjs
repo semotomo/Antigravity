@@ -207,11 +207,17 @@ test('実CSVダウンロード上位はsyncResultの固定code/outcomeを保ち�
   c.Session = { getScriptTimeZone: () => 'Asia/Tokyo' }
   c.Utilities.sleep = () => {}; c.Utilities.formatDate = () => '20261005'
   const blob = { setName() { return this } }
-  const response = { getResponseCode: () => 200, getContentText: () => '<form id="hmma02405Form">処理完了 ダウンロード</form>',
+  // 実出力画面の9項目を使い、出力契約検証を迂回せず後段の失敗伝播を確認する。
+  const exportHtml = '<form id="hmma02494Form" name="includeChildBody:hmma02494Form">' +
+    ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk', 'goodsNameKanaChk',
+      'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk']
+      .map(name => `<input type="checkbox" name="includeChildBody:hmma02494Form:${name}" value="true" />`).join('') +
+    '<input type="submit" name="includeChildBody:hmma02494Form:doExport" value="" />処理完了 ダウンロード</form>'
+  const response = { getResponseCode: () => 200, getContentText: () => exportHtml,
     getHeaders: () => ({ 'Content-Type': 'text/csv' }), getBlob: () => blob }
   c.UrlFetchApp.fetch = () => response; c.fetchWithCookies_ = () => response
   c.extractCookies_ = () => ''; c.mergeCookies_ = () => ''; c.extractFormAction_ = () => null
-  c.extractAllFormFields_ = () => ({ 'hmma02405Form:doSearch': '', 'hmma02405Form:doExport': '', 'hmma02405Form:doDownload': '' })
+  c.extractAllFormFields_ = () => ({ 'hmma02494Form:doSearch': '', 'hmma02494Form:doExport': '', 'hmma02494Form:doDownload': '' })
   c.applyTenpoParamsGlobal_ = () => {}; c.switchStoreContext_ = (_, cookies) => cookies
   c.inspectProductMasterCSV_ = () => ({ storeSummary: [{ storeName: 'わんわんペットセンター' }] })
   c.DriveApp = { getFolderById: () => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: () => ({ getName: () => 'fixture.csv' }) }) }

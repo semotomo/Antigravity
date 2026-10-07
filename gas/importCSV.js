@@ -1202,7 +1202,7 @@ function processProductMasterCSV_(csvBlob, storePrefix, syncContext) {
 
   // ヘッダーなし — カラム位置を固定で指定（0-indexed）
   var COL = {
-    JAN_CODE: 3,       // D列 — JANコード（列構造を再調査中）
+    JAN_CODE: 3,       // D列 — 商品コード（JANとして照合。実12列出力で確認）
     PRODUCT_GROUP: 5,  // F列 — 商品グループ
     PRODUCT_NAME: 6,   // G列 — 商品名
     SELLING_PRICE: 8,  // I列 — 商品金額（売価）
@@ -1217,7 +1217,10 @@ function processProductMasterCSV_(csvBlob, storePrefix, syncContext) {
   for (var r = 0; r < rows.length; r++) {
     var row = rows[r];
 
-    // 列数が足りない行はスキップ
+    // 固定位置の署名同期は列の追加/欠落も拒否する。旧経路の互換性は維持する。
+    if (coordinated && row.length !== 12) {
+      throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
+    }
     if (row.length <= COL.COST_PRICE) {
       if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
       skipped++;
