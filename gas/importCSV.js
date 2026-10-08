@@ -1247,14 +1247,6 @@ function processProductMasterCSV_(csvBlob, storePrefix, syncContext) {
       continue;
     }
 
-    // 重複JANコードはスキップ（最初の出現を優先）
-    if (seen[janCode]) {
-      if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
-      skipped++;
-      continue;
-    }
-    seen[janCode] = true;
-
     // 商品グループ
     var productGroup = (row[COL.PRODUCT_GROUP] || '').trim();
 
@@ -1266,6 +1258,20 @@ function processProductMasterCSV_(csvBlob, storePrefix, syncContext) {
     }
     var sellingPrice = parseInt(priceStr, 10) || 0;
     var costPrice = parseInt(costStr, 10) || 0;
+
+    // 共通コードは商品識別子ではない。列・店舗・名称・金額の検証後だけ除外する。
+    if (isExcludedProductMasterJanCode_(janCode)) {
+      skipped++;
+      continue;
+    }
+
+    // 通常JANの重複は署名同期全体を拒否し、旧経路のみ互換動作を維持する。
+    if (seen[janCode]) {
+      if (coordinated) throw productMasterSyncError_('PRODUCT_SYNC_INVALID_DATA', 'rejected');
+      skipped++;
+      continue;
+    }
+    seen[janCode] = true;
 
     // カテゴリ = 商品グループ名称を使用
     var category = productGroup || '';
@@ -1424,6 +1430,11 @@ function fetchExistingProductTags_(janCodes, supabaseUrl, supabaseKey) {
 // ===================================================================
 // 【商品マスタ同期】今回のCSVに存在しなかった店舗別商品を無効化する
 // ===================================================================
+// 呼出し側で既存のJAN正規化を済ませ、近似コードや先頭ゼロ付きJANは除外しない。
+function isExcludedProductMasterJanCode_(normalizedJan) {
+  return normalizedJan === '999999';
+}
+
 function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('POS_PRODUCT_MASTER_SYNC_ENABLED') === 'true') {
@@ -1440,6 +1451,7 @@ function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   for (var offset = 0; ; offset += 1000) {
     var selectUrl = supabaseUrl + '/rest/v1/products?select=id' +
       '&store_id=eq.' + storeId +
+      '&jan_code=neq.999999' +
       '&or=(updated_at.lt.' + encodeURIComponent(syncStartedAt) + ',updated_at.is.null)' +
       '&limit=1000&offset=' + offset;
     var selectResponse = UrlFetchApp.fetch(selectUrl, {
@@ -1463,7 +1475,9 @@ function reconcileStaleProductStoreMembership_(storeTag, syncStartedAt) {
   var ids = staleRows.map(function(row) { return row.id; });
   for (var idIndex = 0; idIndex < ids.length; idIndex += 100) {
     var idChunk = ids.slice(idIndex, idIndex + 100);
-    var patchUrl = supabaseUrl + '/rest/v1/products?id=in.(' + idChunk.join(',') + ')';
+    // 旧経路でも共通コードを停止しない。取得後に別のIDが混入しても店舗を越えない。
+    var patchUrl = supabaseUrl + '/rest/v1/products?id=in.(' + idChunk.join(',') + ')' +
+      '&store_id=eq.' + storeId + '&jan_code=neq.999999';
     var patchResponse = UrlFetchApp.fetch(patchUrl, {
       method: 'patch',
       contentType: 'application/json',

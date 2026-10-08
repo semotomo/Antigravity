@@ -1393,7 +1393,7 @@ function inspectProductMasterSyncSafety_(rows) {
     if (!jan) result.missingJanRows++;
     if (!(row[6] || '').trim()) result.missingNameRows++;
     if ([8, 11].some(function(i) { return !/^\d{1,9}$/.test((row[i] || '').replace(/[¥\\,\s]/g, '')); })) result.invalidMoneyRows++;
-    if (!jan) return;
+    if (!jan || isExcludedProductMasterJanCode_(jan)) return;
     var key = JSON.stringify([(row[0] || '').trim(), jan]);
     var values = row.map(function(value) { return value.trim(); });
     if (!groups[key]) groups[key] = { first: values, count: 0, kinds: Object.create(null), differences: Object.create(null),
@@ -1453,6 +1453,7 @@ function inspectProductMasterCSV_(csvBlob) {
   var storeCounts = {};
   var validCount = 0;
   var skippedCount = 0;
+  var excludedCount = 0;
   var sample = [];
   var rowShapeSample = rows.slice(0, 3).map(function(row) {
     return {
@@ -1517,6 +1518,11 @@ function inspectProductMasterCSV_(csvBlob) {
 
     var janCode = normalizeProductMasterJanCode_(row[janColumn]);
     var productName = (row[productNameColumn] || '').trim();
+    if (isExcludedProductMasterJanCode_(janCode)) {
+      excludedCount++;
+      skippedCount++;
+      continue;
+    }
     if (!janCode || !productName || seen[janCode]) {
       skippedCount++;
       continue;
@@ -1537,6 +1543,7 @@ function inspectProductMasterCSV_(csvBlob) {
     rawRowCount: rows.length,
     validRowCount: validCount,
     skippedRowCount: skippedCount,
+    excludedRowCount: excludedCount,
     sample: sample,
     rowShapeSample: rowShapeSample,
     columnStats: columnStats,
@@ -2002,6 +2009,7 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
         requestedTenpoGroupName: posConfig.tenpoGroupName || null,
         rawRowCount: inspection.rawRowCount,
         skippedRowCount: inspection.skippedRowCount,
+        excludedRowCount: inspection.excludedRowCount,
         sample: inspection.sample,
         rowShapeSample: inspection.rowShapeSample,
         columnStats: inspection.columnStats,

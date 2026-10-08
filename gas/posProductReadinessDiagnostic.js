@@ -74,6 +74,7 @@ function posProductReadinessCounts_(diagnostics, validRowCount) {
   var raw = posProductReadinessCount_(diagnostics.rawRowCount, 1000000);
   var valid = posProductReadinessCount_(validRowCount, raw);
   var skipped = posProductReadinessCount_(diagnostics.skippedRowCount, raw);
+  var excluded = posProductReadinessCount_(diagnostics.excludedRowCount === undefined ? 0 : diagnostics.excludedRowCount, skipped);
   if (valid + skipped !== raw || !Array.isArray(diagnostics.storeSummary) || !Array.isArray(diagnostics.columnStats)) {
     throw new Error('READINESS_CSV_INVALID');
   }
@@ -131,7 +132,7 @@ function posProductReadinessCounts_(diagnostics, validRowCount) {
       Object.keys(profile.transformAffectedGroups).length !== transformKeys.length ||
       sum(profile.groupsByKind) !== safety.duplicateGroups || profile.groupsByKind.mixed !== safety.mixedKindGroups ||
       sum(profile.groupSizeCounts) !== safety.duplicateGroups ||
-      safety.duplicateGroups + safety.duplicateExtraRows > raw - safety.missingJanRows ||
+      safety.duplicateGroups + safety.duplicateExtraRows > raw - safety.missingJanRows - excluded ||
       Object.keys(profile.groupSizeCounts).some(function(size) { return profile.groupSizeCounts[size] === 0; }) ||
       kindKeys.slice(0, 4).some(function(kind) { return profile.groupsByKind[kind] * 2 > (safety.rowsByKind[kind] || 0); }) ||
       Object.keys(profile.groupSizeCounts).reduce(function(total, size) {
@@ -143,5 +144,5 @@ function posProductReadinessCounts_(diagnostics, validRowCount) {
   }
   safety.duplicateProfile = profile;
   return { storeConsistency: store, csv: { rawRowCount: raw, validRowCount: valid, skippedRowCount: skipped,
-    columnCounts: columnCounts, rowWidthCounts: widths, syncSafety: safety } };
+    excludedRowCount: excluded, columnCounts: columnCounts, rowWidthCounts: widths, syncSafety: safety } };
 }

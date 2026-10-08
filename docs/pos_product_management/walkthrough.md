@@ -328,6 +328,18 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 本番対象projectで21コード（重複20組＋本人指定商品）をREAD ONLYで照合。重複20組はDBに各1商品、各1件の棚卸し明細参照があり、現行名/金額はCSV先頭候補と一致。本人指定商品4779は旧値のまま。既存値を正解と推定せず、商品ID再作成や単純な重複除外を行わない。候補・原価等の生データはGit対象外の `local_exports/pos-duplicate-review-20261008.md` に限定して保存。
 - 新規7件を含む関連36/36、通常回帰436/439（同じ既存3失敗）、GAS12script構文/共有115関数衝突なし/差分検査成功。Next/SQL/UIに変更はなく前回の型・対象Lint・本番build・DB競合確認を継承。実POS出力POSTを使う修正後の結合検証は未実施。ローカルの修正はGAS HEAD/公開版へ未反映。本番DB、フラグ、main、Vercel Production、POS商品の変更なし。
 
+## 2026-10-08 続行: 承認済み共通コード999999除外と最新CSV確認
+
+- 本人が旧19組を個別処理し、共通コード999999のCSV取込み除外を承認。商品削除の承認とは扱わず、正規化後の完全一致だけを対象外にした。列・店舗・名称・金額を先に検査し、他JANの同一行/競合/正規化重複は引き続き同期全体を拒否。全件除外でも成功や商品停止へ進まず、applyを呼ばない。
+- raw行数・店舗・列幅・不正値の診断は全CSVを保持し、対象件数/対象重複/商品サンプルから999999を除外。所有者用の件数診断へexcludedRowCountを追加。署名付き成功応答の件数は除外後の実適用件数で照合し、NextのAPI契約は変更していない。
+- 旧staleのSELECT/PATCHに999999除外と店舗条件を維持。新同期の欠落商品自動停止無効化は再導入しない。後続migration `20261008120000_product_master_sync_excluded_code.sql` は切替後の既知関数だけへ入力の999999再混入拒否を追加し、旧停止関数への単独適用も拒否する。既存商品テーブルの制約、商品行、ID、active、棚卸し参照/数量は移行時に変更しない。
+- POSで本店11098と全12項目を明示して再エクスポートし、10/8 04:31の処理完了を確認。自動ダウンロードの完了通知が取得できなかったため本人に保存を依頼し、指定された最新CSVを元ファイルを変更せず読取った。517,071 bytes/Shift_JIS、本店office11053のみ3,977行/全12列、SHA-256 `2950abca6995d26acff4828320aede97dcaa84b84f984bf4047e274ac4b2fe8e`。
+- 旧19組のJAN重複は最新の重複一覧に残らないが、別JANで2組の内容不一致が残る。999999の12行は除外、JANなし12行、不正金額0。実パーサーの読取り試験はPRODUCT_SYNC_INVALID_DATAで拒否し、DB適用の呼出し0。生データの対応一覧はGit対象外へ限定し、本人の判断前に統合・削除・同期ONを行わない。
+- 新規8件を含む関連52/52、通常444/447（同じ既存3失敗）、本番型PGlite86/86、GAS12script構文/共有116関数衝突なし/差分検査成功。独立レビューで追加指摘なし。欠落していた通常PGの実行環境を公式EDB PostgreSQL17.11の配布物から専用のGit対象外ディレクトリへ復元し、新migrationを含む22/22成功（fail0/skip0）。独立接続・実ロック待機と999999/既存ID・状態保持を確認し、runner finallyのserver stoppedと終了後pg_ctlのno server runningまで確認。本番DBへの接続やサービス登録なし。初回sandboxのrestricted token起動失敗後、権限レビュー承認済みの同じrunnerで成功した。配布物の取得SHA-256と実行ログはGit対象外に保存（上流公開checksumとの照合は未実施）。Next未変更につき直前の型・対象Lint・26ページ本番build・合成PC/スマホ結果を継承。
+- 本人から残る2組もPOSで修正済みとの回答を受領。本店11098と全12項目を選択して修正後のエクスポートを開始したがブラウザが応答しなくなったため、二重出力・商品保存を行わず本人のダウンロードを依頼。指定された `goodsExport (3).csv` を元ファイルを変更せず読取り、516,657 bytes/Shift_JIS、本店office11053のみ3,974行/全12列、SHA-256 `21cc3e8d3f54e468bc4a929b9726f6026e2609ccb2eee4e6a9fb61246d22481a` を確認。通常JAN重複0、999999除外12行、JANなし12行、不正金額0、対象3,950件。リポジトリの実GASパーサーでも成功した。apply呼出し1は通信しないローカルスタブで捕捉しただけで、DB適用済みを意味しない。修正前の比較記録もGit対象外に保持した。
+- GASの既存kirikan22アカウントと対象scriptを再確認し、最新13ファイルを `local_exports/gas-pre-common-code-20261008-41dd0b73` へ退避。差分がautoDownload/importCSV/readinessの3ファイルだけで他の10ファイルとmanifestが一致する候補を作成し、GAS HEADへ反映。別フォルダ `local_exports/gas-post-common-code-20261008-c0fd7a62` へ再取得して13/13 hash一致、デプロイ一覧HEAD/11/12/56と公開v56不変を確認した。Script Properties/フラグは変更していない。所有者専用診断は既存実行APIのNOT_FOUNDで結果を取得できず、ブラウザ連携も起動に失敗している。追加の実行API公開や権限拡大は行わず、実GAS診断成功とは扱わない。
+- Supabase project `wpxewebmezghoulnasre` を明示READ ONLY/ROLLBACKで再確認。PostgreSQL17.6、既存19 migration/追加10本未適用、新台帳/同期受付なし、商品store6:2,764/store7:3,939件。指定商品4779は旧名/199円/95円/有効のまま。GitHub CLIの401後に本人が通常デバイス再認証を完了。制限環境では更新後も401だったが、通常資格情報アクセスではsemotomo/push/admin/main `ac0623292836f609570084234fe1cb137bd8f0fd` を確認できた。保存対象は今回の11ファイル、反映先は既存feature branch。本番DB適用、公開GAS切替、フラグ有効化、Vercel Production、指定商品の実保存は未実施。CSV重複と通常PG検証のゲートは通過したが、実GAS診断・本番切替の安全ゲートは引き続き必要。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。

@@ -570,3 +570,45 @@ integration('新版同期状態確認はapply待機後に再読し、期限超�
     }
   }
 })
+
+integration('切替後の999999混入は開始済み同期を部分適用せず、正常JANの再試行でも両店舗の既存IDとactiveを保持する', async h => {
+  const normal = [await fixture(h, 6), await fixture(h, 7)]
+  const excluded = (await h.observer.query(
+    "INSERT INTO public.products(store_id,jan_code,product_name,brand,cost_price,selling_price,is_active) VALUES(6,'999999','共通コードの既存商品','保持',75,150,true),(7,'999999','停止済み共通コード','保持',80,160,false) RETURNING *"
+  )).rows
+  const beforeMigration = await snapshot(h)
+  // 旧停止仕様のケースはそのまま残し、このケースだけ切替後の全migrationを順に適用する。
+  for (const name of [
+    '20261005122000_product_master_write_cutover.sql',
+    '20261005123000_product_master_sync_gateway.sql',
+    '20261008120000_product_master_sync_excluded_code.sql',
+  ]) await h.observer.query(await migration(name))
+  assert.deepEqual(await snapshot(h), beforeMigration, '移行時に既存商品・店舗版・同期runを変更しない')
+  const syncState = async () => ({
+    ...await snapshot(h),
+    requests: (await h.observer.query('SELECT * FROM public.product_master_sync_requests ORDER BY id')).rows,
+  })
+  for (const x of normal) {
+    const run = await rpc(h.a, masterRequestBeginSql, await masterRequestArgs(h, randomUUID(), x.command.storeId))
+    assert.equal(run.accepted, true)
+    const beforeInvalid = await syncState()
+    // 通常商品を先に置き、後続の共通コード拒否で部分更新も版更新も残らないことを確認する。
+    await assert.rejects(
+      rpc(h.a, syncSql, syncArgs(run, [syncRow(x), syncRow(x, '999999')])),
+      error => error.code === '22023' && error.message === 'invalid sync values'
+    )
+    assert.deepEqual(await syncState(), beforeInvalid, '拒否後は商品・店舗版・run・requestが全て未変更')
+    // rollback後は別接続から同じ開始済みrunで正常入力だけを適用できる。
+    const applied = await rpc(h.b, syncSql, syncArgs(run, [syncRow(x)]))
+    assert.equal(applied.success, true)
+    assert.equal(applied.count, 1)
+    assert.equal(applied.deactivatedCount, 0)
+    const updated = await product(h, x.product.id)
+    assert.equal(updated.id, x.product.id)
+    assert.equal(updated.product_name, '同期商品')
+    assert.equal(updated.selling_price, 999)
+    for (const existing of excluded) {
+      assert.deepEqual(await product(h, existing.id), existing, '両店舗の共通コード商品はID・activeを含む全列を保持する')
+    }
+  }
+})

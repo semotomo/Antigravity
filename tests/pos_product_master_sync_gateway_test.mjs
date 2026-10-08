@@ -229,10 +229,24 @@ test('実CSVダウンロード上位はsyncResultの固定code/outcomeを保ち�
     assert.equal(result.syncResult.code, code); assert.equal(result.syncResult.outcome, outcome); assert.equal(result.runId, attemptId)
     assert.ok(!JSON.stringify(result).includes('private'))
   }
-  // 診断経路も実関数を通し、追加の重複件数が返ることとDB/Drive非更新を確認する。
+  // 実パーサーを通し、raw件数ではなく除外後の件数で成功応答を照合する。
+  vm.runInContext(read('gas/importCSV.js'), c)
+  vm.runInContext('CONFIG.CSV_FOLDER_ID = "fixture-folder"', c)
+  const csvRows = ['11054,わんわんペットセンター,2,999999,,分類,共通コード,,100,1,,50',
+    '11054,わんわんペットセンター,2,00123456,,分類,商品,,100,1,,50']
+  c.Utilities.parseCsv = text => text.split('\n').map(line => line.split(','))
+  blob.getDataAsString = () => csvRows.join('\n')
+  let appliedRows
+  c.applyCoordinatedProductMasterSync_ = records => {
+    appliedRows = JSON.parse(JSON.stringify(records)); return { success: true, count: records.length }
+  }
+  const success = c.downloadProductMasterFromPOS_(c.productMasterSyncFixedStoreConfig_(6), 'わんわん', { syncContext: context })
+  assert.equal(success.success, true, JSON.stringify(success)); assert.equal(success.csvRowCount, 1); assert.equal(success.syncResult.count, 1)
+  assert.equal(appliedRows.length, 1); assert.equal(appliedRows[0].jan_code, '00123456')
+  // 診断経路も実関数を通し、除外・重複件数の伝播とDB/Drive非更新を確認する。
   c.inspectProductMasterCSV_ = () => ({
-    storeSummary: [{ storeName: 'わんわんペットセンター' }], rawRowCount: 3, validRowCount: 3,
-    skippedRowCount: 0, syncSafety: { duplicateGroups: 1, duplicateExtraRows: 1, conflictingRowGroups: 1 },
+    storeSummary: [{ storeName: 'わんわんペットセンター' }], rawRowCount: 5, validRowCount: 2,
+    skippedRowCount: 3, excludedRowCount: 2, syncSafety: { duplicateGroups: 1, duplicateExtraRows: 1, conflictingRowGroups: 1 },
   })
   c.DriveApp = { getFolderById: () => { throw Error('dry-run must not access Drive') } }
   c.processProductMasterCSV_ = () => { throw Error('dry-run must not write products') }
@@ -240,6 +254,9 @@ test('実CSVダウンロード上位はsyncResultの固定code/outcomeを保ち�
   assert.equal(diagnostic.success, true)
   assert.equal(diagnostic.dryRun, true)
   assert.equal(diagnostic.syncResult, null)
+  assert.equal(diagnostic.csvRowCount, 2)
+  assert.equal(diagnostic.diagnostics.rawRowCount, 5)
+  assert.equal(diagnostic.diagnostics.excludedRowCount, 2)
   assert.equal(diagnostic.diagnostics.syncSafety.duplicateExtraRows, 1)
   assert.equal(diagnostic.diagnostics.syncSafety.conflictingRowGroups, 1)
   assert.equal(f.calls.length, 0)

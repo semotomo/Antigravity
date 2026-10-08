@@ -125,7 +125,7 @@ test('3970行に同区分20競合があっても全競合を診断し、部分�
   const row = (code, name) => ['11053', 'からつケンネル本店', '2', code, 'group', 'category', name, '', '200', '1', 'tax', '100'].join(',')
   const rows = Array.from({ length: 3920 }, (_, i) => row(String(1000000000000 + i), `unique-${i}`))
   for (let i = 0; i < 19; i++) rows.push(row(String(2000000000000 + i), 'first'), row(String(2000000000000 + i), 'second'))
-  for (let i = 0; i < 12; i++) rows.push(row('999999', `category-${i}`))
+  for (let i = 0; i < 12; i++) rows.push(row('999998', `category-${i}`))
   assert.equal(rows.length, 3970)
   const blob = { getDataAsString: () => rows.join('\n') }
   const diagnostic = f.context.inspectProductMasterCSV_(blob)
@@ -138,4 +138,109 @@ test('3970行に同区分20競合があっても全競合を診断し、部分�
   }), error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
   assert.equal(f.writes.length, 0)
   assert.doesNotMatch(JSON.stringify(f.logs), /unique-|category-|2000000000000/)
+})
+
+const productRow = (jan, storeId = 7) => [storeId === 6 ? '11054' : '11053',
+  storeId === 6 ? 'わんわんペットセンター' : 'からつケンネル本店', '2', jan, 'group', 'category',
+  'private-product', '', '200', '1', 'tax', '100']
+const productBlob = rows => ({ getDataAsString: () => rows.map(row => row.join(',')).join('\n') })
+const productRun = storeId => ({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', storeId,
+  startedAt: '2026-10-08T00:00:00Z' })
+
+test('両店舗で正規化後999999だけを除外し、先頭ゼロと近似コードは保持する', () => {
+  for (const storeId of [6, 7]) {
+    const f = fixture(), storeTag = storeId === 6 ? 'わんわん' : '本店'
+    const codes = ['999999', ' ９９９９９９.０ ', '999999.0', '0999999', '999998', '999999.00', '9999990']
+    const rows = codes.map(jan => productRow(jan, storeId))
+    const result = f.context.processProductMasterCSV_(productBlob(rows), storeTag, productRun(storeId))
+    assert.equal(result.success, true); assert.equal(result.count, 4)
+    assert.equal(f.writes.length, 1)
+    assert.deepEqual(f.writes[0].map(row => row.jan_code), codes.slice(3))
+    assert.ok(f.writes[0].every(row => row.store_id === storeId))
+    assert.doesNotMatch(JSON.stringify(f.logs), /private-product/)
+  }
+})
+
+test('999999の12行は診断の対象件数・重複・商品サンプルから除外し、生CSV検査は保持する', () => {
+  const f = fixture(), rows = Array.from({ length: 12 }, (_, i) => {
+    const row = productRow('999999'); row[6] = `excluded-${i}`; return row
+  })
+  rows.push(productRow('00123456'))
+  const diagnostic = f.context.inspectProductMasterCSV_(productBlob(rows))
+  assert.equal(diagnostic.rawRowCount, 13); assert.equal(diagnostic.validRowCount, 1)
+  assert.equal(diagnostic.skippedRowCount, 12); assert.equal(diagnostic.excludedRowCount, 12)
+  assert.equal(diagnostic.syncSafety.duplicateGroups, 0); assert.equal(diagnostic.syncSafety.duplicateExtraRows, 0)
+  assert.equal(diagnostic.syncSafety.rowsByKind['2'], 13)
+  assert.equal(diagnostic.storeSummary[0].rowCount, 13)
+  assert.equal(diagnostic.rowWidthCounts['12'], 13)
+  assert.equal(diagnostic.columnStats[3].nonEmptyCount, 13)
+  assert.equal(diagnostic.sample.length, 1); assert.equal(diagnostic.sample[0].janCode, '00123456')
+  assert.doesNotMatch(JSON.stringify(diagnostic.sample), /excluded-|999999/)
+})
+
+test('全件999999または空CSVは拒否し、一件もapplyしない', () => {
+  for (const storeId of [6, 7]) {
+    const f = fixture(), storeTag = storeId === 6 ? 'わんわん' : '本店'
+    for (const rows of [[], [productRow('999999', storeId)],
+      [productRow('999999', storeId), productRow('９９９９９９.０', storeId)]]) {
+      assert.throws(() => f.context.processProductMasterCSV_(productBlob(rows), storeTag, productRun(storeId)),
+        error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
+      assert.equal(f.writes.length, 0)
+    }
+  }
+})
+
+test('除外行も店舗・12列・名称・金額の検証を迂回できず、他行を部分適用しない', () => {
+  const mutations = [row => { row[0] = '11054' }, row => { row[1] = 'わんわんペットセンター' },
+    row => { row.pop() }, row => { row.push('extra') }, row => { row[6] = '' },
+    row => { row[8] = '不明' }, row => { row[11] = '-1' }]
+  for (const mutate of mutations) {
+    const f = fixture(), row = productRow('999999'); mutate(row)
+    assert.throws(() => f.context.processProductMasterCSV_(productBlob([productRow('00123456'), row]), '本店', productRun(7)),
+      error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
+    assert.equal(f.writes.length, 0)
+  }
+  const f = fixture(), row = productRow('999999'); row[8] = '不明'
+  const safety = f.context.inspectProductMasterCSV_(productBlob([row])).syncSafety
+  assert.equal(safety.invalidMoneyRows, 1); assert.equal(safety.duplicateGroups, 0)
+})
+
+test('999999を除外しても他JANの同一行/競合/正規化重複は同期全体を拒否する', () => {
+  for (const second of ['00123456', ' ００１２３４５６.０ ']) {
+    const f = fixture(), rows = [productRow('999999'), productRow('00123456'), productRow(second)]
+    assert.throws(() => f.context.processProductMasterCSV_(productBlob(rows), '本店', productRun(7)),
+      error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.outcome === 'rejected')
+    assert.equal(f.writes.length, 0)
+  }
+})
+
+test('旧経路も共通コードを送らず、全件除外ではupsertと停止処理を呼ばない', () => {
+  const f = fixture(), calls = []
+  f.context.upsertProductMasterToSupabase_ = rows => calls.push(Array.from(rows, row => row.jan_code))
+  f.context.reconcileStaleProductStoreMembership_ = () => calls.push('reconcile')
+  const empty = f.context.processProductMasterCSV_(productBlob([productRow('999999')]), '本店')
+  assert.equal(empty.success, false); assert.equal(empty.count, 0); assert.equal(calls.length, 0)
+  const mixed = f.context.processProductMasterCSV_(productBlob([productRow('999999'), productRow('00123456')]), '本店')
+  assert.equal(mixed.count, 1); assert.deepEqual(calls, [['00123456'], 'reconcile'])
+})
+
+test('旧stale取得と停止PATCHは両店舗とも店舗・999999除外条件を維持する', () => {
+  for (const storeId of [6, 7]) {
+    const f = fixture(), requests = []
+    f.context.PropertiesService = { getScriptProperties: () => ({ getProperty: key =>
+      ({ SUPABASE_URL: 'https://fixture.supabase.co', SUPABASE_KEY: 'fixture-key' })[key] ?? null }) }
+    f.context.UrlFetchApp = { fetch: (url, options) => {
+      requests.push({ url, options })
+      return { getResponseCode: () => options.method === 'get' ? 200 : 204,
+        getContentText: () => JSON.stringify([{ id: 42 }]) }
+    } }
+    f.context.reconcileStaleProductStoreMembership_(storeId === 6 ? 'わんわん' : '本店', '2026-10-08T00:00:00Z')
+    assert.equal(requests.length, 2)
+    for (const request of requests) {
+      assert.match(request.url, new RegExp(`store_id=eq\\.${storeId}(?:&|$)`))
+      assert.match(request.url, /jan_code=neq\.999999(?:&|$)/)
+    }
+    assert.equal(requests[1].options.method, 'patch')
+    assert.deepEqual(JSON.parse(requests[1].options.payload), { tags: storeId === 6 ? 'わんわん' : '本店', is_active: false })
+  }
 })

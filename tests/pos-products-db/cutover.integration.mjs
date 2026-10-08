@@ -9,9 +9,23 @@ const manager = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const viewer = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const outsider = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const migration = name => readFile(new URL(`../../supabase/migrations/${name}`, import.meta.url), 'utf8')
+const excludedCodeMigration = '20261008120000_product_master_sync_excluded_code.sql'
 const snapshot = async () => (await db.query('SELECT * FROM public.products ORDER BY id')).rows
-const row = jan => ({ store_id: 6, jan_code: jan, product_name: '更新名', category: '分類', product_group: '分類',
-  selling_price: 200, cost_price: 100, markup_rate: 0.5, is_active: true, tags: 'わんわん' })
+const row = (jan, store = 6) => ({ store_id: store, jan_code: jan, product_name: '更新名', category: '分類', product_group: '分類',
+  selling_price: 200, cost_price: 100, markup_rate: 0.5, is_active: true, tags: store === 6 ? 'わんわん' : '本店' })
+const inventorySnapshot = async () => ({
+  settings: (await db.query('SELECT * FROM public.inventory_product_settings ORDER BY store_id,product_id')).rows,
+  sessions: (await db.query('SELECT * FROM public.inventory_sessions ORDER BY store_id,id')).rows,
+  items: (await db.query('SELECT * FROM public.inventory_session_items ORDER BY store_id,product_id')).rows,
+  statusChanges: (await db.query('SELECT * FROM public.inventory_product_status_changes ORDER BY id')).rows,
+})
+const syncSnapshot = async () => ({
+  products: await snapshot(),
+  inventory: await inventorySnapshot(),
+  versions: (await db.query('SELECT * FROM public.product_master_store_versions ORDER BY store_id')).rows,
+  runs: (await db.query('SELECT * FROM public.product_master_sync_runs ORDER BY id')).rows,
+  requests: (await db.query('SELECT * FROM public.product_master_sync_requests ORDER BY id')).rows,
+})
 async function asRole(name, user, fn) {
   await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)", [user || ''])
   await db.exec(`SET ROLE ${name}`)
@@ -49,10 +63,32 @@ before(async () => {
   for (const name of ['20260908120000_pos_product_operation_ledger.sql','20260908121000_pos_product_operation_functions.sql',
     '20260910090000_product_master_sync_fence.sql','20260910120000_pos_product_edit_apply.sql','20261004120000_pos_product_edit_dispatch.sql',
     '20261005120000_pos_product_operation_cancellation.sql','20261005121000_product_master_sync_notifications.sql']) await db.exec(await migration(name))
+  // 除外前から存在する両店舗の商品と、数量入力済みの棚卸し参照を用意する。
+  await db.exec(`INSERT INTO public.products(store_id,jan_code,product_name,brand,supplier_name,cost_price,selling_price,is_active)
+      VALUES(6,'999999','共通コードの既存商品','既存ブランド','既存仕入先',75,150,true),
+            (7,'999999','停止済み共通コード','既存ブランド','既存仕入先',80,160,false);
+    INSERT INTO public.inventory_product_settings(store_id,product_id,shelf_code,updated_by)
+      SELECT store_id,id,'既存棚',CASE store_id WHEN 6 THEN '${manager}'::uuid ELSE '${viewer}'::uuid END
+      FROM public.products WHERE jan_code='999999';
+    INSERT INTO public.inventory_sessions(store_id,started_by,updated_by)
+      VALUES(6,'${manager}','${manager}'),(7,'${viewer}','${viewer}');
+    INSERT INTO public.inventory_session_items(session_id,store_id,product_id,jan_snapshot,product_name_snapshot,
+        counted_quantity,counted_at,counted_by,created_by,updated_by)
+      SELECT session.id,product.store_id,product.id,product.jan_code,product.product_name,
+          3.5,clock_timestamp(),session.started_by,session.started_by,session.started_by
+      FROM public.products product JOIN public.inventory_sessions session ON session.store_id=product.store_id
+      WHERE product.jan_code='999999';`)
+  // 旧停止処理が残った関数には、新migrationを部分適用しない。
+  const previousDefinition = (await db.query("SELECT pg_get_functiondef('public.apply_product_master_sync(uuid,integer,jsonb)'::regprocedure) AS definition")).rows
+  await assert.rejects(db.exec(await migration(excludedCodeMigration)), /product sync excluded code source mismatch/)
+  assert.deepEqual((await db.query("SELECT pg_get_functiondef('public.apply_product_master_sync(uuid,integer,jsonb)'::regprocedure) AS definition")).rows, previousDefinition)
   const before = await snapshot()
+  const inventoryBefore = await inventorySnapshot()
   await db.exec('BEGIN;\n' + await migration('20261005122000_product_master_write_cutover.sql') + '\nCOMMIT;')
   await db.exec(await migration('20261005123000_product_master_sync_gateway.sql'))
+  await db.exec(await migration(excludedCodeMigration))
   assert.deepEqual(await snapshot(), before, '移行時に既存商品を変更しない')
+  assert.deepEqual(await inventorySnapshot(), inventoryBefore, '移行時に棚卸し参照と数量を変更しない')
 })
 after(async () => db.close())
 
@@ -71,7 +107,7 @@ test('閲覧は本人の店舗だけで、全店service読取りは許可する'
   assert.deepEqual((await asRole('authenticated', manager, () => db.query('SELECT DISTINCT store_id FROM public.products'))).rows,[{store_id:6}])
   assert.deepEqual((await asRole('authenticated', viewer, () => db.query('SELECT DISTINCT store_id FROM public.products'))).rows,[{store_id:7}])
   assert.equal((await asRole('authenticated', outsider, () => db.query('SELECT * FROM public.products'))).rows.length,0)
-  assert.equal((await asRole('service_role', null, () => db.query('SELECT * FROM public.products'))).rows.length,3)
+  assert.equal((await asRole('service_role', null, () => db.query('SELECT * FROM public.products'))).rows.length,5)
 })
 test('一部CSVが来ても欠落商品を停止せず、店舗別同期RPCだけが商品を更新できる', async () => {
   const before = await snapshot()
@@ -93,9 +129,62 @@ test('棚卸しで理由付きの商品停止・再開、他店舗拒否は維�
   assert.equal((await db.query('SELECT count(*)::integer AS n FROM public.inventory_product_status_changes')).rows[0].n,1)
   await asRole('authenticated', manager, () => db.query("SELECT public.set_inventory_product_status(6,'001',true,'再開確認')"))
   assert.equal((await snapshot())[0].is_active,true)
-  assert.equal((await db.query('SELECT count(*)::integer AS n FROM public.inventory_session_items')).rows[0].n,0)
+  assert.equal((await db.query('SELECT count(*)::integer AS n FROM public.inventory_session_items')).rows[0].n,2)
 })
 test('売上の既存GAS書込み権限は変更しない', async () => {
   await asRole('anon', null, () => db.exec('INSERT INTO public.product_sales_data VALUES(1,2)'))
   assert.deepEqual((await db.query('SELECT * FROM public.product_sales_data')).rows,[{id:1,quantity:2}])
+})
+
+test('999999を送らない同期と同一runの再照合は、両店舗の既存ID・active・棚卸し参照を保持する', async () => {
+  for (const store of [6, 7]) {
+    const before = await snapshot(), inventoryBefore = await inventorySnapshot()
+    const excluded = before.filter(product => product.jan_code === '999999')
+    assert.deepEqual(excluded.map(product => product.is_active), [true, false])
+    const run = (await asRole('service_role', null, () => db.query(
+      "SELECT public.begin_product_master_sync_request($1,$2,clock_timestamp()+interval '1 minute') AS value",
+      [store, randomUUID()]))).rows[0].value
+    assert.equal(run.accepted, true)
+    const apply = () => asRole('service_role', null, () => db.query(
+      'SELECT public.apply_product_master_sync($1,$2,$3::jsonb) AS value', [run.id, store, JSON.stringify([row('001', store)])]))
+    const result = (await apply()).rows[0].value
+    assert.equal(result.count, 1)
+    assert.equal(result.deactivatedCount, 0)
+    assert.deepEqual((await snapshot()).filter(product => product.jan_code === '999999'), excluded)
+    assert.deepEqual((await snapshot()).filter(product => product.jan_code === '002'), before.filter(product => product.jan_code === '002'))
+    assert.deepEqual(await inventorySnapshot(), inventoryBefore)
+    const applied = await syncSnapshot()
+    assert.deepEqual((await apply()).rows[0].value, result)
+    assert.deepEqual(await syncSnapshot(), applied)
+  }
+})
+
+test('空RPC・999999と正規化表記の混入・通常JANの重複は、商品も棚卸しも同期状態も部分変更しない', async () => {
+  for (const store of [6, 7]) {
+    const run = (await asRole('service_role', null, () => db.query(
+      "SELECT public.begin_product_master_sync_request($1,$2,clock_timestamp()+interval '1 minute') AS value",
+      [store, randomUUID()]))).rows[0].value
+    assert.equal(run.accepted, true)
+    const ordinary = row('rollback-' + store, store)
+    const cases = [
+      { records: [], message: 'invalid sync count' },
+      ...['999999', '９９９９９９', ' 999999.0 ', '\uFEFF９９９９９９.０\u2003'].map(code => ({
+        records: [ordinary, row(code, store)], message: 'invalid sync values',
+      })),
+      { records: [row('999999', store)], message: 'invalid sync values' },
+      { records: [row('001', store), row('001', store)], message: 'duplicate sync JAN' },
+    ]
+    for (const { records, message } of cases) {
+      const before = await syncSnapshot()
+      await assert.rejects(asRole('service_role', null, () => db.query(
+        'SELECT public.apply_product_master_sync($1,$2,$3::jsonb) AS value', [run.id, store, JSON.stringify(records)])),
+      error => error.code === '22023' && error.message === message)
+      assert.deepEqual(await syncSnapshot(), before)
+    }
+    // 拒否の後も同じ開始権から正しい通常商品だけを適用できる。
+    const result = (await asRole('service_role', null, () => db.query(
+      'SELECT public.apply_product_master_sync($1,$2,$3::jsonb) AS value', [run.id, store, JSON.stringify([row('001', store)])]))).rows[0].value
+    assert.equal(result.count, 1)
+    assert.equal(result.deactivatedCount, 0)
+  }
 })

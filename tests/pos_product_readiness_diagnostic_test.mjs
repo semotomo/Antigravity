@@ -192,6 +192,30 @@ test('正規化による集約と元表記一致を区別し、区分と群サ�
   noLeak(f, result, ['00123456', '00223456', '00323456', '０１２３４５６７', '00012345', '12345', '非公開分類', '別名'])
 })
 
+test('999999除外件数を所有者診断へ伝播し、不正件数や矛盾は拒否する', () => {
+  const f = fixture()
+  f.context.Utilities = { parseCsv: text => text.split('\n').map(line => line.split(',')) }
+  vm.runInContext(source('importCSV.js'), f.context)
+  vm.runInContext(source('autoDownload.js'), f.context)
+  const row = jan => ['11053', 'からつケンネル本店', '2', jan, '', '非公開分類', privateValue, '', '100', '', '', '50'].join(',')
+  const inspected = f.context.inspectProductMasterCSV_({ getDataAsString: () => [row('999999'), row('９９９９９９.０'), row('00123456')].join('\n') })
+  f.context.getPOSConfig_ = config
+  f.context.downloadProductMasterFromPOS_ = () => ({ success: true, dryRun: true, syncResult: null,
+    csvRowCount: inspected.validRowCount, diagnostics: inspected })
+  const result = f.run()
+  assert.equal(result.success, true); assert.equal(result.csv.rawRowCount, 3)
+  assert.equal(result.csv.validRowCount, 1); assert.equal(result.csv.skippedRowCount, 2)
+  assert.equal(result.csv.excludedRowCount, 2); assert.equal(result.csv.syncSafety.duplicateGroups, 0)
+  noLeak(f, result, ['999999', '00123456', '非公開分類'])
+  for (const invalid of [-1, 0.5, '2', null, 3]) {
+    inspected.excludedRowCount = invalid
+    f.logs.length = 0
+    const failure = f.run()
+    assert.equal(failure.success, false); assert.equal(failure.code, 'READINESS_CSV_INVALID')
+    noLeak(f, failure)
+  }
+})
+
 test('duplicateProfileの未許可mapキー・不正数値・群数や余分行数の矛盾は全体拒否する', () => {
   const changes = [p => { p.groupsByKind[privateValue] = 0 }, p => { p.groupSizeCounts[privateValue] = 1 },
     p => { p.transformAffectedGroups[privateValue] = 0 }, p => { p.rawIdenticalGroups = privateValue },
