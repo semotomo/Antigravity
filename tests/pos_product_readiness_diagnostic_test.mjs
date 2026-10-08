@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
+import { attachProductMasterCsvFlow } from './helpers/pos_product_csv_flow.mjs'
 
 const source = name => fs.readFileSync(new URL(`../gas/${name}`, import.meta.url), 'utf8')
 const privateValue = 'PRIVATE_SOURCE_PRODUCT_COOKIE_EXCEPTION'
@@ -37,15 +38,159 @@ function fixture() {
   return { props, logs, calls, context, run }
 }
 
-function noLeak(f, result, extras = []) {
+function noLeak(f, result, extras = [], tag = 'KENNEL_POS_MASTER_READINESS ') {
   const text = JSON.stringify([result, f.logs])
   for (const value of [privateValue, 'private-login', 'private-password', 'private-company',
     'private-service-key', ...Object.values(f.props).filter(v => typeof v === 'string' && v.length === 64), ...extras]) {
     assert.ok(!text.includes(value), `private value leaked: ${value.slice(0, 8)}`)
   }
   assert.equal(f.logs.length, 1)
-  assert.ok(f.logs[0].startsWith('KENNEL_POS_MASTER_READINESS '))
+  assert.ok(f.logs[0].startsWith(tag))
 }
+
+function fixedFixture() {
+  const f = fixture()
+  for (const storeId of [6, 7]) {
+    const prefix = `POS_PRODUCT_SYNC_STORE_${storeId}_`
+    Object.assign(f.props, Object.fromEntries(Object.entries({ BASE_URL: config().baseUrl,
+      LOGIN_ID: `private-login-${storeId}`, PASSWORD: `private-password-${storeId}`,
+      COMPANY_CD: 'private-company', COMPANY_KEY: '', TENPO_GROUP_ID: storeId === 7 ? '11098' : '11099',
+      TENPO_GROUP_NAME: storeId === 7 ? 'からつケンネル本店' : 'わんわんペットセンター',
+    }).map(([name, value]) => [prefix + name, value])))
+  }
+  vm.runInContext(source('posProductSync.js'), f.context)
+  vm.runInContext(source('posProductMasterSyncGateway.js'), f.context)
+  f.context.getPOSConfig_ = () => { throw Error('generic config fallback forbidden') }
+  f.context.downloadProductMasterFromPOS_ = (...args) => {
+    f.calls.push(args)
+    const raw = diagnostic()
+    if (args[1] === 'わんわん') raw.diagnostics.storeSummary = [
+      { storeCode: '11054', storeName: 'わんわんペットセンター', rowCount: 2 }]
+    return raw
+  }
+  f.runFixed = () => JSON.parse(JSON.stringify(f.context.diagnoseFixedStoreProductMasterReadiness()))
+  f.noFixedLeak = result => noLeak(f, result, ['private-login-6', 'private-login-7',
+    'private-password-6', 'private-password-7'], 'KENNEL_POS_FIXED_STORES_READINESS ')
+  return f
+}
+
+test('両店舗の専用固定設定だけを使い、dryRun・店舗別件数だけで所有者へ返す', () => {
+  const f = fixedFixture(), result = f.runFixed()
+  assert.equal(result.success, true)
+  assert.equal(result.code, 'READINESS_FIXED_STORES_INSPECTED')
+  assert.equal(result.mutationFlagsOff, true)
+  assert.deepEqual(result.stores.map(store => store.storeId).sort(), [6, 7])
+  assert.ok(result.stores.every(store => store.success && store.csv.validRowCount === 2 && store.storeConsistency.allExpectedStore))
+  assert.equal(f.calls.length, 2)
+  for (const [pos, target, options] of f.calls) {
+    const storeId = target === '本店' ? 7 : 6
+    assert.equal(pos.loginId, `private-login-${storeId}`)
+    assert.equal(pos.tenpoGroupId, storeId === 7 ? '11098' : '11099')
+    assert.deepEqual(JSON.parse(JSON.stringify(options)), { dryRun: true })
+  }
+  f.noFixedLeak(result)
+  assert.doesNotMatch(source('autoDownload.js'), /diagnoseFixedStoreProductMasterReadiness/)
+})
+
+test('固定設定の欠落/誤店舗/既知URL違いは対象店舗のPOS取得前に停止し、汎用設定へ戻らない', () => {
+  for (const storeId of [6, 7]) for (const [suffix, value] of [
+    ['BASE_URL', null], ['LOGIN_ID', ''], ['PASSWORD', null], ['COMPANY_CD', null], ['COMPANY_KEY', null],
+    ['TENPO_GROUP_ID', storeId === 7 ? '11099' : '11098'], ['TENPO_GROUP_NAME', privateValue],
+    ['BASE_URL', 'https://cg8.power-k.jp/other_company'],
+  ]) {
+    const f = fixedFixture(); f.props[`POS_PRODUCT_SYNC_STORE_${storeId}_${suffix}`] = value
+    const result = f.runFixed(), store = result.stores.find(item => item.storeId === storeId)
+    assert.equal(result.success, false); assert.equal(result.code, 'READINESS_FIXED_STORES_FAILED')
+    assert.equal(store.success, false); assert.equal(store.code, 'READINESS_CONFIG_INVALID')
+    assert.ok(!f.calls.some(([, target]) => target === (storeId === 7 ? '本店' : 'わんわん')))
+    f.noFixedLeak(result)
+  }
+})
+
+test('両店舗診断も書込みフラグや鍵が不正ならPOSへ接続しない', () => {
+  for (const change of [...mutationFlags.map(name => ({ [name]: 'true' })),
+    { POS_PRODUCT_MASTER_SYNC_SECRET: 'bad' }, { POS_PRODUCT_CONSUME_SECRET: 'a'.repeat(64) },
+    { SUPABASE_SERVICE_ROLE_KEY: null }]) {
+    const f = fixedFixture(); Object.assign(f.props, change)
+    const result = f.runFixed()
+    assert.equal(result.success, false); assert.equal(f.calls.length, 0)
+    f.noFixedLeak(result)
+  }
+})
+
+test('CSVの店舗コードと店舗名の両方を固定店舗へ照合し、他店舗なら完了扱いしない', () => {
+  for (const change of [s => { s.storeCode = '11053' }, s => { s.storeName = 'からつケンネル本店' }]) {
+    const f = fixedFixture(), original = f.context.downloadProductMasterFromPOS_
+    f.context.downloadProductMasterFromPOS_ = (...args) => {
+      const raw = original(...args)
+      if (args[1] === 'わんわん') change(raw.diagnostics.storeSummary[0])
+      return raw
+    }
+    const result = f.runFixed()
+    assert.equal(result.success, false)
+    assert.equal(result.stores.find(store => store.storeId === 6).code, 'READINESS_STORE_MISMATCH')
+    f.noFixedLeak(result)
+  }
+})
+
+test('両店固定診断は列幅・重複・金額・名称・空対象が不正なら同期可能と報告しない', () => {
+  for (const change of [raw => { raw.diagnostics.rowWidthCounts = { 13: 2 } },
+    raw => { raw.diagnostics.syncSafety.invalidMoneyRows = 1 },
+    raw => { raw.diagnostics.syncSafety.missingNameRows = 1 },
+    raw => { raw.diagnostics.syncSafety.shortRows = 1 },
+    raw => { raw.csvRowCount = 0; raw.diagnostics.skippedRowCount = 2 },
+    raw => {
+      raw.csvRowCount = 1; raw.diagnostics.skippedRowCount = 1
+      Object.assign(raw.diagnostics.syncSafety, { duplicateGroups: 1, duplicateExtraRows: 1,
+        identicalRowGroups: 1, duplicateProfile: { groupsByKind: { 1: 0, 2: 1, 3: 0, unknown: 0, mixed: 0 },
+          groupSizeCounts: { 2: 1 }, rawIdenticalGroups: 1, normalizedVariantGroups: 0,
+          transformAffectedGroups: { whitespace: 0, fullWidthDigits: 0, trailingDotZero: 0 } } })
+    }]) {
+    const f = fixedFixture(), original = f.context.downloadProductMasterFromPOS_
+    f.context.downloadProductMasterFromPOS_ = (...args) => {
+      const raw = original(...args); if (args[1] === 'わんわん') change(raw); return raw
+    }
+    const result = f.runFixed()
+    assert.equal(result.success, false)
+    assert.equal(result.stores.find(store => store.storeId === 6).code, 'READINESS_CSV_UNSAFE')
+    f.noFixedLeak(result)
+  }
+})
+
+test('両店診断の取得失敗/秘密例外/不正件数は元本文を出さず失敗店舗を特定する', () => {
+  for (const action of [() => { throw Error(privateValue) },
+    () => ({ success: false, message: privateValue }),
+    () => { const raw = diagnostic(); raw.diagnostics.rawRowCount = privateValue; return raw }]) {
+    const f = fixedFixture(), original = f.context.downloadProductMasterFromPOS_
+    f.context.downloadProductMasterFromPOS_ = (...args) => args[1] === 'わんわん' ? action() : original(...args)
+    const result = f.runFixed()
+    assert.equal(result.success, false)
+    assert.equal(result.stores.find(store => store.storeId === 6).success, false)
+    assert.equal(result.stores.find(store => store.storeId === 7).success, true)
+    f.noFixedLeak(result)
+  }
+})
+
+test('実フォーム抽出と実CSVパーサーを通す両店診断でもDB/Driveを更新しない', () => {
+  const f = fixedFixture(), flows = []
+  f.context.Utilities = { parseCsv: text => text.split('\n').map(line => line.split(',')) }
+  vm.runInContext(source('importCSV.js'), f.context)
+  vm.runInContext(source('autoDownload.js'), f.context)
+  const download = f.context.downloadProductMasterFromPOS_
+  f.context.downloadProductMasterFromPOS_ = (pos, target, options) => {
+    const storeId = target === '本店' ? 7 : 6
+    const flow = attachProductMasterCsvFlow(f.context, { storeId }); flows.push(flow)
+    return download(pos, target, options)
+  }
+  const result = f.runFixed()
+  assert.equal(result.success, true)
+  assert.ok(result.stores.every(store => store.csv.validRowCount === 1 && store.csv.excludedRowCount === 1))
+  for (const flow of flows) {
+    assert.equal(flow.counts.exports, 1); assert.equal(flow.counts.downloads, 1)
+    assert.equal(flow.counts.driveWrites, 0); assert.equal(flow.counts.dbWrites, 0)
+  }
+  assert.doesNotMatch(JSON.stringify([result, f.logs]), /private-(?:password|login|company)|0012345678901|search-state-|export-state|outside-state/)
+})
 
 test('本店の明示設定からdry-runだけを実行し、返却と最終ログは件数だけに限定する', () => {
   const f = fixture(), result = f.run()

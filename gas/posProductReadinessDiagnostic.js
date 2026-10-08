@@ -1,8 +1,30 @@
 /** 所有者がScript Editorで手動実行する本店CSV診断。Web App/トリガーへ接続しない。 */
 function diagnoseHontenProductMasterReadiness() {
+  var result = posProductReadinessForStore_(7, false);
+  Logger.log('KENNEL_POS_MASTER_READINESS ' + JSON.stringify(result));
+  return result;
+}
+
+/** 両店の専用固定設定を確認する所有者専用dryRun。公開受付/トリガーへ接続しない。 */
+function diagnoseFixedStoreProductMasterReadiness() {
+  var stores = [7, 6].map(function(storeId) {
+    var status = posProductReadinessForStore_(storeId, true);
+    status.storeId = storeId;
+    return status;
+  });
+  var success = stores.every(function(store) { return store.success === true; });
+  var result = { success: success,
+    code: success ? 'READINESS_FIXED_STORES_INSPECTED' : 'READINESS_FIXED_STORES_FAILED',
+    mutationFlagsOff: stores.every(function(store) { return store.mutationFlagsOff === true; }), stores: stores };
+  Logger.log('KENNEL_POS_FIXED_STORES_READINESS ' + JSON.stringify(result));
+  return result;
+}
+
+function posProductReadinessForStore_(storeId, useFixedConfig) {
   var result = { success: false, stage: 'CONFIG', code: 'READINESS_CONFIG_INVALID', mutationFlagsOff: false,
     keyReadiness: { signingSecretValid: false, consumeSecretValid: false, masterSyncSecretValid: false,
       secretsDistinct: false, serviceKeyPresent: false } };
+  if (storeId !== 6 && storeId !== 7) return result;
   try {
     var properties = PropertiesService.getScriptProperties();
     var keys = ['POS_PRODUCT_SIGNING_SECRET', 'POS_PRODUCT_CONSUME_SECRET', 'POS_PRODUCT_MASTER_SYNC_SECRET']
@@ -24,20 +46,31 @@ function diagnoseHontenProductMasterReadiness() {
       result.stage = 'KEYS'; result.code = 'READINESS_KEYS_INVALID';
     } else {
       result.stage = 'CONFIG';
-      var config = getPOSConfig_();
-      if (config && config.baseUrl === 'https://cg8.power-k.jp/0D890OGI' && config.tenpoGroupId === '11098' &&
-          typeof config.tenpoGroupName === 'string' && config.tenpoGroupName.indexOf('本店') !== -1 &&
+      // 新同期と同じ固定設定factoryを使い、欠落時に汎用POS設定へ後退しない。
+      var config = useFixedConfig ? productMasterSyncFixedStoreConfig_(storeId) : getPOSConfig_();
+      var expectedGroup = storeId === 7 ? '11098' : '11099';
+      var expectedName = storeId === 7 ? 'からつケンネル本店' : 'わんわんペットセンター';
+      if (config && config.baseUrl === 'https://cg8.power-k.jp/0D890OGI' && config.tenpoGroupId === expectedGroup &&
+          typeof config.tenpoGroupName === 'string' && (useFixedConfig ? config.tenpoGroupName === expectedName :
+            config.tenpoGroupName.indexOf('本店') !== -1) &&
           ['loginId', 'password', 'companyCd'].every(function(name) { return typeof config[name] === 'string' && config[name].trim().length > 0; }) &&
           typeof config.companyKey === 'string') {
         result.stage = 'CSV'; result.code = 'READINESS_CSV_FAILED';
         // 同期IDを渡さず、既存の診断分岐でDB受付・Drive保存・商品適用前に終了する。
-        var source = downloadProductMasterFromPOS_(config, '本店', { dryRun: true });
+        var source = downloadProductMasterFromPOS_(config, storeId === 7 ? '本店' : 'わんわん', { dryRun: true });
         if (source && source.success === true && source.dryRun === true && source.syncResult === null) {
           result.code = 'READINESS_CSV_INVALID';
-          var counts = posProductReadinessCounts_(source.diagnostics, source.csvRowCount);
+          var counts = posProductReadinessCounts_(source.diagnostics, source.csvRowCount, storeId);
           result.storeConsistency = counts.storeConsistency;
           result.csv = counts.csv;
           if (!counts.storeConsistency.allExpectedStore) result.code = 'READINESS_STORE_MISMATCH';
+          else if (useFixedConfig && (counts.csv.validRowCount < 1 ||
+              Object.keys(counts.csv.rowWidthCounts).length !== 1 || counts.csv.rowWidthCounts['12'] !== counts.csv.rawRowCount ||
+              counts.csv.syncSafety.duplicateGroups !== 0 || counts.csv.syncSafety.missingNameRows !== 0 ||
+              counts.csv.syncSafety.shortRows !== 0 || counts.csv.syncSafety.invalidMoneyRows !== 0)) {
+            // 本店の旧診断は原因調査用の件数表示を維持し、新固定診断だけ同期前の条件を判定する。
+            result.code = 'READINESS_CSV_UNSAFE';
+          }
           else { result.success = true; result.stage = 'COMPLETE'; result.code = 'READINESS_CSV_INSPECTED'; }
         }
       }
@@ -56,7 +89,6 @@ function diagnoseHontenProductMasterReadiness() {
       result.exportFailureReason = error.exportFailureReason;
     }
   }
-  Logger.log('KENNEL_POS_MASTER_READINESS ' + JSON.stringify(result));
   return result;
 }
 
@@ -80,7 +112,11 @@ function posProductReadinessMap_(value, maximum, keyAllowed) {
   return output;
 }
 
-function posProductReadinessCounts_(diagnostics, validRowCount) {
+function posProductReadinessCounts_(diagnostics, validRowCount, storeId) {
+  if (storeId === undefined) storeId = 7;
+  if (storeId !== 6 && storeId !== 7) throw new Error('READINESS_CSV_INVALID');
+  var expectedCode = storeId === 7 ? '11053' : '11054';
+  var expectedName = storeId === 7 ? 'からつケンネル本店' : 'わんわんペットセンター';
   posProductReadinessRecord_(diagnostics);
   var raw = posProductReadinessCount_(diagnostics.rawRowCount, 1000000);
   var valid = posProductReadinessCount_(validRowCount, raw);
@@ -94,7 +130,7 @@ function posProductReadinessCounts_(diagnostics, validRowCount) {
   diagnostics.storeSummary.forEach(function(item) {
     posProductReadinessRecord_(item);
     store.rowCount += posProductReadinessCount_(item.rowCount, raw);
-    if (item.storeCode === '11053' && item.storeName === 'からつケンネル本店') store.matchingStoreCount++;
+    if (item.storeCode === expectedCode && item.storeName === expectedName) store.matchingStoreCount++;
     else store.mismatchingStoreCount++;
   });
   if (store.rowCount !== raw) throw new Error('READINESS_CSV_INVALID');
