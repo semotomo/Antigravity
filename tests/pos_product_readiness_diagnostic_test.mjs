@@ -105,6 +105,22 @@ test('CSV取得失敗や秘密を含む例外でも原文を返さず、dry-run�
   }
 })
 
+test('出力契約の固定拒否分類だけを示し、例外本文や未知の分類は返さない', () => {
+  for (const reason of ['FORM_COUNT', 'NAVIGATION_BUTTON_INVALID', 'ATTRIBUTE_DUPLICATE_NAME',
+    'CHECKBOX_MISSING', 'DOWNLOAD_NOT_READY', privateValue, null, { privateValue }]) {
+    const f = fixture()
+    f.context.downloadProductMasterFromPOS_ = () => { throw Object.assign(Error(privateValue), {
+      productMasterSyncFailure: true, code: 'PRODUCT_SYNC_INVALID_DATA', exportFailureReason: reason,
+    }) }
+    const result = f.run()
+    assert.equal(result.code, 'READINESS_CSV_FAILED')
+    assert.equal(result.success, false)
+    if (typeof reason === 'string' && reason !== privateValue) assert.equal(result.exportFailureReason, reason)
+    else assert.equal(Object.hasOwn(result, 'exportFailureReason'), false)
+    noLeak(f, result)
+  }
+})
+
 test('CSV内の他店舗は固定店舗件数だけで示し、準備完了として扱わない', () => {
   const f = fixture(), raw = diagnostic()
   raw.diagnostics.storeSummary[0].storeCode = '11054'

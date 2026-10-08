@@ -340,6 +340,18 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - GASの既存kirikan22アカウントと対象scriptを再確認し、最新13ファイルを `local_exports/gas-pre-common-code-20261008-41dd0b73` へ退避。差分がautoDownload/importCSV/readinessの3ファイルだけで他の10ファイルとmanifestが一致する候補を作成し、GAS HEADへ反映。別フォルダ `local_exports/gas-post-common-code-20261008-c0fd7a62` へ再取得して13/13 hash一致、デプロイ一覧HEAD/11/12/56と公開v56不変を確認した。Script Properties/フラグは変更していない。所有者専用診断は既存実行APIのNOT_FOUNDで結果を取得できず、ブラウザ連携も起動に失敗している。追加の実行API公開や権限拡大は行わず、実GAS診断成功とは扱わない。
 - Supabase project `wpxewebmezghoulnasre` を明示READ ONLY/ROLLBACKで再確認。PostgreSQL17.6、既存19 migration/追加10本未適用、新台帳/同期受付なし、商品store6:2,764/store7:3,939件。指定商品4779は旧名/199円/95円/有効のまま。GitHub CLIの401後に本人が通常デバイス再認証を完了。制限環境では更新後も401だったが、通常資格情報アクセスではsemotomo/push/admin/main `ac0623292836f609570084234fe1cb137bd8f0fd` を確認できた。保存対象は今回の11ファイル、反映先は既存feature branch。本番DB適用、公開GAS切替、フラグ有効化、Vercel Production、指定商品の実保存は未実施。CSV重複と通常PG検証のゲートは通過したが、実GAS診断・本番切替の安全ゲートは引き続き必要。
 
+### 2026-10-08 実GASのCSV遷移失敗修復（本店の所有者再診断成功）
+
+- 本人の15:57:59〜15:58:12の実行ログで、ログイン・本店11098検索後に検索formの抽出0となり、STEP5で`READINESS_CSV_FAILED`へ停止することを確認。書込みフラグOFFとGAS専用3鍵の書式/相互独立・service鍵存在はすべてtrue。元ログだけではSTEP5の正確な拒否条件は未特定であり、実環境の修復成功とは扱わない。
+- 実抽出・店舗選択を使う逐次通信fixtureで、doSearchの送信へgoHmma02494/goHmma02400など別操作が混入する不具合を再現。現在の一意な実formから状態を抽出し、選択したdo/go submitだけを送信するよう修正。検索結果が既に出力formなら不要な遷移POSTを省略する。実9項目・12列・店舗・重複拒否は維持し、既知POS編集parser同様に表示class/styleと同値typeの重複だけを許容する。
+- ダウンロードの文字だけで完了とせず、実submitの有効化まで上限付きで待機する。独立レビューで最後の取得結果を未検査で拒否する境界を再現し、最後の応答も確認するよう修正。取得12回目の有効化は一回だけダウンロードし、13回目が必要なら追加GET/出力再送/DB適用をせず固定拒否する。診断には許可済み固定`exportFailureReason`だけを返し、例外原文/HTML/属性値/鍵を出さない。
+- 関連51/51、通常451/454（以前からの棚卸し静的検査2件・Sentry/CMS names-only検査1件）、GAS12script構文/共有120関数衝突なし/差分検査成功。独立レビュー完了。Next/SQL/UIの変更はないため、前回の型・対象Lint・26ページ本番build・DB検証を継承し、今回は再実行していない。
+- 既存GASアカウントkirikan22と対象scriptを再確認。最新13ソースは直前の確認済みHEADから不変で、`local_exports/gas-pre-csv-navigation-20261008-f035ad21`へ退避。候補`local_exports/gas-csv-navigation-candidate-20261008-76caebd9`はautoDownload/readinessの2ファイルだけが変更され、manifestと他11ファイルは一致。16:23:57にHEADへ反映し、別フォルダ`local_exports/gas-post-csv-navigation-20261008-8b285a47`へ再取得して13/13 hash一致。公開デプロイHEAD/11/12/56の一覧とv56不変、Script Properties・フラグ・DB・POS商品は未変更。
+- ブラウザ連携の不調と既存実行APIの制約は前回から継続しており、追加権限/API公開や商品保存で迂回しない。本人にエディタ更新後の同じ`diagnoseHontenProductMasterReadiness`を依頼した。Git/Vercel Productionの反映・本番migration・新機能ON・指定商品の実保存は行っていない。
+- 本人の16:30:11の最終診断で`success:true / COMPLETE / READINESS_CSV_INSPECTED`を確認。本店のみ3973行/全12列、対象3949、skip24（999999除外12/JANなし12）、重複0/不正金額0。列3は非空3961/一意3950/JAN形式3947、列7は非空44/一意43/JAN形式0、区分1:8/2:3965。直前の手動CSV3974行/対象3950とは1行差があり、最新実GAS結果を現時点の読取り基準とする。欠落商品の自動停止や推測削除はしない。
+- 最新論理退避`local_exports/pos-product-cutover-2026-10-08T07-32-32-442Z-6f36a140-f72e-4690-80c3-9c6919dfba4f.json`（16:32 JST、10556871 bytes、SHA-256 `a85a0a80987436bbf6784d985ce49c2ad51043fa25495f38025ff72fe43b6d65`）を単一READ ONLY/REPEATABLE READ snapshotで取得。17テーブルの型/NOT NULL/主キー/全行全列復元一致を確認。商品6703（6:2764/7:3939）、棚卸し明細6544、移動506、19適用履歴/追加10本未適用。4779/本店7/JAN4582107173062は旧名199/95/有効のまま。退避本文はGit/ログへ出さず、全DB/関数/RLS/外部FK/Auth/PITR復元を証明したとは扱わない。
+- 本店診断は汎用POS設定であり、専用`POS_PRODUCT_SYNC_STORE_6_* / _7_*`の存在・接続・わんわんCSV、新公開GASの署名経路、GASとVercelの鍵実一致、全旧writer停止/実行終了はまだ未証明。独立した切替gate監査でこれらを確認。ブラウザ連携の起動を一度再確認したが同じkernel assetsエラーとなり、本人に設定名だけを確認したところ両方未登録との回答。GAS設定への秘密入力は本人に引き継ぎ、値をチャットへ送らせない。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。

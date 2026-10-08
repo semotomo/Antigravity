@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { readFileSync } from 'node:fs'
 import { createHash, createHmac } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { attachProductMasterCsvFlow } from './helpers/pos_product_csv_flow.mjs'
 
 const read = p => readFileSync(new URL('../' + p, import.meta.url), 'utf8')
 const require = createRequire(new URL('../next_app/package.json', import.meta.url)), ts = require('typescript')
@@ -207,29 +208,22 @@ test('実CSVダウンロード上位はsyncResultの固定code/outcomeを保ち�
   c.Session = { getScriptTimeZone: () => 'Asia/Tokyo' }
   c.Utilities.sleep = () => {}; c.Utilities.formatDate = () => '20261005'
   const blob = { setName() { return this } }
-  // 実出力画面の9項目を使い、出力契約検証を迂回せず後段の失敗伝播を確認する。
-  const exportHtml = '<form id="hmma02494Form" name="includeChildBody:hmma02494Form">' +
-    ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk', 'goodsNameKanaChk',
-      'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk']
-      .map(name => `<input type="checkbox" name="includeChildBody:hmma02494Form:${name}" value="true" />`).join('') +
-    '<input type="submit" name="includeChildBody:hmma02494Form:doExport" value="" />処理完了 ダウンロード</form>'
-  const response = { getResponseCode: () => 200, getContentText: () => exportHtml,
-    getHeaders: () => ({ 'Content-Type': 'text/csv' }), getBlob: () => blob }
-  c.UrlFetchApp.fetch = () => response; c.fetchWithCookies_ = () => response
-  c.extractCookies_ = () => ''; c.mergeCookies_ = () => ''; c.extractFormAction_ = () => null
-  c.extractAllFormFields_ = () => ({ 'hmma02494Form:doSearch': '', 'hmma02494Form:doExport': '', 'hmma02494Form:doDownload': '' })
-  c.applyTenpoParamsGlobal_ = () => {}; c.switchStoreContext_ = (_, cookies) => cookies
+  // 実フォーム抽出・店舗選択・単一ボタン送信を含む通信順序も検証する。
+  const attachFlow = () => attachProductMasterCsvFlow(c, { storeId: 6, blob })
   c.inspectProductMasterCSV_ = () => ({ storeSummary: [{ storeName: 'わんわんペットセンター' }] })
-  c.DriveApp = { getFolderById: () => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: () => ({ getName: () => 'fixture.csv' }) }) }
+  const drive = { getFolderById: () => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: () => ({ getName: () => 'fixture.csv' }) }) }
   const context = { id: attemptId, storeId: 6, startedAt: new Date().toISOString() }
   for (const [code, outcome] of [['PRODUCT_SYNC_STALE', 'rejected'], ['PRODUCT_SYNC_UNKNOWN', 'unknown']]) {
+    const flow = attachFlow(); c.DriveApp = drive
     c.processProductMasterCSV_ = () => { throw c.productMasterSyncError_(code, outcome, attemptId) }
-    const result = c.downloadProductMasterFromPOS_(c.productMasterSyncFixedStoreConfig_(6), 'わんわん', { syncContext: context })
+    const result = c.downloadProductMasterFromPOS_(flow.config, 'わんわん', { syncContext: context })
     assert.equal(result.success, false); assert.equal(result.code, code); assert.equal(result.outcome, outcome)
     assert.equal(result.syncResult.code, code); assert.equal(result.syncResult.outcome, outcome); assert.equal(result.runId, attemptId)
     assert.ok(!JSON.stringify(result).includes('private'))
+    assert.equal(flow.counts.exports, 1); assert.equal(flow.counts.downloads, 1)
   }
   // 実パーサーを通し、raw件数ではなく除外後の件数で成功応答を照合する。
+  const successFlow = attachFlow(); c.DriveApp = drive
   vm.runInContext(read('gas/importCSV.js'), c)
   vm.runInContext('CONFIG.CSV_FOLDER_ID = "fixture-folder"', c)
   const csvRows = ['11054,わんわんペットセンター,2,999999,,分類,共通コード,,100,1,,50',
@@ -240,17 +234,18 @@ test('実CSVダウンロード上位はsyncResultの固定code/outcomeを保ち�
   c.applyCoordinatedProductMasterSync_ = records => {
     appliedRows = JSON.parse(JSON.stringify(records)); return { success: true, count: records.length }
   }
-  const success = c.downloadProductMasterFromPOS_(c.productMasterSyncFixedStoreConfig_(6), 'わんわん', { syncContext: context })
+  const success = c.downloadProductMasterFromPOS_(successFlow.config, 'わんわん', { syncContext: context })
   assert.equal(success.success, true, JSON.stringify(success)); assert.equal(success.csvRowCount, 1); assert.equal(success.syncResult.count, 1)
   assert.equal(appliedRows.length, 1); assert.equal(appliedRows[0].jan_code, '00123456')
   // 診断経路も実関数を通し、除外・重複件数の伝播とDB/Drive非更新を確認する。
+  const diagnosticFlow = attachFlow()
   c.inspectProductMasterCSV_ = () => ({
     storeSummary: [{ storeName: 'わんわんペットセンター' }], rawRowCount: 5, validRowCount: 2,
     skippedRowCount: 3, excludedRowCount: 2, syncSafety: { duplicateGroups: 1, duplicateExtraRows: 1, conflictingRowGroups: 1 },
   })
   c.DriveApp = { getFolderById: () => { throw Error('dry-run must not access Drive') } }
   c.processProductMasterCSV_ = () => { throw Error('dry-run must not write products') }
-  const diagnostic = c.downloadProductMasterFromPOS_(c.productMasterSyncFixedStoreConfig_(6), 'わんわん', { dryRun: true })
+  const diagnostic = c.downloadProductMasterFromPOS_(diagnosticFlow.config, 'わんわん', { dryRun: true })
   assert.equal(diagnostic.success, true)
   assert.equal(diagnostic.dryRun, true)
   assert.equal(diagnostic.syncResult, null)

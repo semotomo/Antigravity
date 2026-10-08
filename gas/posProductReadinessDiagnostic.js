@@ -42,8 +42,19 @@ function diagnoseHontenProductMasterReadiness() {
         }
       }
     }
-  } catch (_) {
+  } catch (error) {
     // 元例外には資格情報やHTMLが含まれ得るため、固定工程・固定コードだけを残す。
+    var exportReasons = ['FORM', 'FORM_NAME', 'FORM_COUNT', 'CONTROL_OWNER',
+      'ATTRIBUTE_DUPLICATE_ID', 'ATTRIBUTE_DUPLICATE_NAME', 'ATTRIBUTE_DUPLICATE_TYPE',
+      'ATTRIBUTE_DUPLICATE_VALUE', 'ATTRIBUTE_DUPLICATE_DISABLED', 'ATTRIBUTE_DUPLICATE_FORM', 'ATTRIBUTE_DUPLICATE_OTHER',
+      'NAVIGATION_COMMAND', 'NAVIGATION_BUTTON_COUNT', 'NAVIGATION_BUTTON_INVALID',
+      'EXPORT_BUTTON_INVALID', 'EXPORT_BUTTON_COUNT', 'CHECKBOX_UNEXPECTED', 'CHECKBOX_INVALID', 'CHECKBOX_MISSING',
+      'DOWNLOAD_NOT_READY'];
+    if (result.stage === 'CSV' && result.code === 'READINESS_CSV_FAILED' && error &&
+        error.productMasterSyncFailure === true && error.code === 'PRODUCT_SYNC_INVALID_DATA' &&
+        exportReasons.indexOf(error.exportFailureReason) !== -1) {
+      result.exportFailureReason = error.exportFailureReason;
+    }
   }
   Logger.log('KENNEL_POS_MASTER_READINESS ' + JSON.stringify(result));
   return result;

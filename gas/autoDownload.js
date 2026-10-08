@@ -1567,68 +1567,119 @@ function isExpectedProductMasterStore_(storeSummary, targetStoreName) {
 
 // 実画面の出力契約を検証し、12列に必要な任意9項目を明示的にONにする。
 // 入力名の推測や未チェック項目を拾う汎用抽出の副作用には依存しない。
-function configureProductMasterExportFields_(html, formName) {
-  function reject() {
-    var error = new Error('PRODUCT_EXPORT_FIELDS_INVALID');
-    error.code = 'PRODUCT_SYNC_INVALID_DATA';
-    error.outcome = 'rejected';
-    error.productMasterSyncFailure = true;
-    throw error;
-  }
-  function attributes(tag) {
-    var result = {};
-    var body = tag.replace(/^<\w+\b/i, '').replace(/\/?\s*>$/, '');
-    var pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
-    var match;
-    while ((match = pattern.exec(body)) !== null) {
-      var key = match[1].toLowerCase();
-      if (Object.prototype.hasOwnProperty.call(result, key)) reject();
-      result[key] = match[2] !== undefined ? match[2] : match[3] !== undefined ? match[3] : match[4];
+function productMasterExportError_(reason) {
+  var error = new Error('PRODUCT_EXPORT_FIELDS_INVALID');
+  error.code = 'PRODUCT_SYNC_INVALID_DATA';
+  error.outcome = 'rejected';
+  error.productMasterSyncFailure = true;
+  // 呼出し元で作る固定分類だけを持たせ、HTML・属性値・資格情報は含めない。
+  error.exportFailureReason = reason;
+  return error;
+}
+
+function productMasterExportAttributes_(tag) {
+  var result = Object.create(null);
+  var body = tag.replace(/^<\w+\b/i, '').replace(/\/?\s*>$/, '');
+  var pattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  var match;
+  while ((match = pattern.exec(body)) !== null) {
+    var key = match[1].toLowerCase();
+    var value = match[2] !== undefined ? match[2] : match[3] !== undefined ? match[3] : match[4];
+    // 同じPOSの編集parserと同様、表示属性は使わず同一typeだけを認める。
+    if (key === 'class' || key === 'style') continue;
+    if (Object.prototype.hasOwnProperty.call(result, key)) {
+      if (key === 'type' && typeof value === 'string' && value && result[key] === value) continue;
+      var known = ['id', 'name', 'type', 'value', 'disabled', 'form'];
+      throw productMasterExportError_('ATTRIBUTE_DUPLICATE_' + (known.indexOf(key) !== -1 ? key.toUpperCase() : 'OTHER'));
     }
-    return result;
+    result[key] = value;
   }
-  if (typeof html !== 'string' || formName !== 'hmma02494Form') reject();
-  var prefix = 'includeChildBody:' + formName + ':';
-  var names = ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk',
-    'goodsNameKanaChk', 'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk'];
+  return result;
+}
+
+function productMasterExportForm_(html, formName, optional) {
+  if (typeof html !== 'string' || ['hmma02405Form', 'hmma02494Form'].indexOf(formName) === -1) {
+    throw productMasterExportError_('FORM');
+  }
   var cleanHtml = html.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '').replace(/<!--[\s\S]*?-->/g, '');
   var forms = cleanHtml.match(/<form\b[^>]*>[\s\S]*?<\/form\s*>/gi) || [];
   var targetForms = forms.filter(function(form) {
     var opening = form.match(/^<form\b[^>]*>/i);
-    var attrs = attributes(opening[0]);
+    var attrs = productMasterExportAttributes_(opening[0]);
     if (attrs.id !== formName) return false;
-    if (attrs.name !== 'includeChildBody:' + formName) reject();
+    if (attrs.name !== 'includeChildBody:' + formName) throw productMasterExportError_('FORM_NAME');
     return true;
   });
-  if (targetForms.length !== 1) reject();
-  var inputs = targetForms[0].match(/<input\b[^>]*>/gi) || [];
+  if (optional && targetForms.length === 0) return null;
+  if (targetForms.length !== 1 || (targetForms[0].match(/<form\b/gi) || []).length !== 1) {
+    throw productMasterExportError_('FORM_COUNT');
+  }
+  return targetForms[0];
+}
+
+function productMasterNavigationFields_(formHtml, formName, command, waitForReady) {
+  var allowed = formName === 'hmma02405Form' ? ['doSearch', 'goHmma02494'] : ['doDownload'];
+  if (allowed.indexOf(command) === -1) throw productMasterExportError_('NAVIGATION_COMMAND');
+  var prefix = 'includeChildBody:' + formName + ':';
+  var buttons = (formHtml.match(/<input\b[^>]*>/gi) || []).map(productMasterExportAttributes_)
+    .filter(function(attrs) { return attrs.name === prefix + command; });
+  if (waitForReady && buttons.length === 0) return null;
+  if (buttons.length !== 1) throw productMasterExportError_('NAVIGATION_BUTTON_COUNT');
+  if ((buttons[0].type || '').toLowerCase() !== 'submit' ||
+      (buttons[0].form !== undefined && buttons[0].form !== formName)) {
+    throw productMasterExportError_('NAVIGATION_BUTTON_INVALID');
+  }
+  if (Object.prototype.hasOwnProperty.call(buttons[0], 'disabled')) {
+    if (waitForReady) return null;
+    throw productMasterExportError_('NAVIGATION_BUTTON_INVALID');
+  }
+  var fields = extractAllFormFields_(formHtml, formName), payload = {};
+  Object.keys(fields).forEach(function(key) {
+    // goHmmaもsubmit。未選択の遷移・出力ボタンを検索やダウンロードへ混ぜない。
+    if (!/:(?:do|go)[A-Z]/.test(key)) payload[key] = fields[key];
+  });
+  payload[prefix + command] = '';
+  return payload;
+}
+
+function configureProductMasterExportFields_(html, formName) {
+  if (formName !== 'hmma02494Form') throw productMasterExportError_('FORM');
+  var formHtml = productMasterExportForm_(html, formName);
+  var prefix = 'includeChildBody:' + formName + ':';
+  var names = ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk',
+    'goodsNameKanaChk', 'goodsPriceChk', 'liveMembersDispChk', 'goodsTaxCdChk', 'goodsCostChk'];
+  var inputs = formHtml.match(/<input\b[^>]*>/gi) || [];
   var found = {};
   var exportButtons = 0;
   inputs.forEach(function(tag) {
-    var attrs = attributes(tag);
+    var attrs = productMasterExportAttributes_(tag);
     if (!attrs.name) return;
+    if (attrs.name.indexOf(prefix) === 0 && attrs.form !== undefined && attrs.form !== formName) {
+      throw productMasterExportError_('CONTROL_OWNER');
+    }
     if (attrs.name === prefix + 'doExport') {
       if ((attrs.type || '').toLowerCase() !== 'submit' ||
-          Object.prototype.hasOwnProperty.call(attrs, 'disabled')) reject();
+          Object.prototype.hasOwnProperty.call(attrs, 'disabled')) throw productMasterExportError_('EXPORT_BUTTON_INVALID');
       exportButtons++;
     }
     var name = attrs.name.indexOf(prefix) === 0 ? attrs.name.substring(prefix.length) : '';
     var required = names.indexOf(name) !== -1;
-    if ((attrs.type || '').toLowerCase() === 'checkbox' && !required) reject();
+    if ((attrs.type || '').toLowerCase() === 'checkbox' && !required) throw productMasterExportError_('CHECKBOX_UNEXPECTED');
     if (!required) return;
     if (found[name] || (attrs.type || '').toLowerCase() !== 'checkbox' || attrs.value !== 'true' ||
-        Object.prototype.hasOwnProperty.call(attrs, 'disabled')) reject();
+        Object.prototype.hasOwnProperty.call(attrs, 'disabled')) throw productMasterExportError_('CHECKBOX_INVALID');
     found[name] = true;
   });
-  if (exportButtons !== 1 || names.some(function(name) { return !found[name]; })) reject();
+  if (exportButtons !== 1) throw productMasterExportError_('EXPORT_BUTTON_COUNT');
+  if (names.some(function(name) { return !found[name]; })) throw productMasterExportError_('CHECKBOX_MISSING');
   // 同じ接頭辞でも別formのhidden/checkbox/ボタンを持ち越さない。
-  var scopedFields = extractAllFormFields_(targetForms[0], formName);
+  var scopedFields = extractAllFormFields_(formHtml, formName);
   var result = {};
   Object.keys(scopedFields).forEach(function(key) {
-    if (!/:do[A-Z]/.test(key)) result[key] = scopedFields[key];
+    if (!/:(?:do|go)[A-Z]/.test(key)) result[key] = scopedFields[key];
   });
   names.forEach(function(name) { result[prefix + name] = 'true'; });
-  return { payload: result, buttonKey: prefix + 'doExport', formHtml: targetForms[0] };
+  return { payload: result, buttonKey: prefix + 'doExport', formHtml: formHtml };
 }
 
 
@@ -1708,64 +1759,20 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
     return { success: false, message: 'セッションが切れました。再度お試しください。' };
   }
 
-  // フォーム名を自動検出（hmma02405Form を期待）
-  var searchFormMatch = searchHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
-  var searchFormName = searchFormMatch ? searchFormMatch[1] : 'hmma02405Form';
+  // 検索画面の実フォームを一意に検査し、別form/古いprefixを採用しない。
+  var searchFormName = 'hmma02405Form';
+  var searchFormHtml = productMasterExportForm_(searchHtml, searchFormName);
   Logger.log('検出フォーム名: ' + searchFormName);
 
 
   // === STEP 3: 店舗グループを設定して「検索」実行 ===
   Logger.log('STEP 3: 店舗グループ設定 → 検索実行');
 
-  var searchFields = extractAllFormFields_(searchHtml, searchFormName);
-  var searchPrefix = 'includeChildBody:' + searchFormName + ':';
+  var searchPayload = productMasterNavigationFields_(searchFormHtml, searchFormName, 'doSearch');
+  applyTenpoParamsGlobal_(searchPayload, searchFormHtml, searchFormName, targetStoreName);
+  Logger.log('検索実行ボタン: doSearch');
 
-  // submitボタン名を除外してから doSearch だけ残す
-  var searchPayload = {};
-  var searchButtons = [];
-  for (var key in searchFields) {
-    if (key.match(/:do[A-Z]/)) {
-      searchButtons.push(key.split(':').pop());
-      continue;
-    }
-    searchPayload[key] = searchFields[key];
-  }
-  Logger.log('検索フォームボタン一覧(' + searchButtons.length + '): ' + searchButtons.join(', '));
-
-  // 店舗グループを設定
-  applyTenpoParamsGlobal_(searchPayload, searchHtml, searchFormName, targetStoreName);
-
-  // 検索ボタンを押す（doSearch を設定）
-  // ボタン名が doSearch / doSchTenpoGroup 等の場合に対応
-  var doSearchKey = null;
-  for (var b = 0; b < searchButtons.length; b++) {
-    if (searchButtons[b].indexOf('doSearch') !== -1 || searchButtons[b] === 'doSearch') {
-      doSearchKey = searchButtons[b];
-      break;
-    }
-  }
-  if (!doSearchKey) {
-    // HTML内のsubmitボタンからも検索
-    var btnRegex = /<(?:input|button)[^>]*name\s*=\s*["']([^"']*doSearch[^"']*)["']/gi;
-    var btnMatch = btnRegex.exec(searchHtml);
-    if (btnMatch) {
-      doSearchKey = btnMatch[1];
-    }
-  }
-
-  if (doSearchKey) {
-    // doSearchがフルパス（includeChildBody:hmma02405Form:doSearch）の場合もあるので対応
-    if (doSearchKey.indexOf(':') === -1) {
-      searchPayload[searchPrefix + doSearchKey] = '';
-    } else {
-      searchPayload[doSearchKey] = '';
-    }
-    Logger.log('検索実行ボタン: ' + doSearchKey);
-  } else {
-    Logger.log('警告: doSearch ボタンが見つかりません。ボタン一覧: ' + searchButtons.join(', '));
-  }
-
-  var searchFormAction = extractFormAction_(searchHtml, searchFormName);
+  var searchFormAction = extractFormAction_(searchFormHtml, searchFormName);
   var searchPostUrl = searchFormAction
     ? resolveUrl_(posConfig.baseUrl, searchFormAction)
     : searchPageUrl;
@@ -1789,68 +1796,35 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   // === STEP 4: 「商品データのエクスポート」ボタンを押す ===
   Logger.log('STEP 4: エクスポート画面へ遷移');
 
-  var exportFields = extractAllFormFields_(searchResultHtml, searchFormName);
-  var exportPayload = {};
-  var exportButtons = [];
-  for (var eKey in exportFields) {
-    if (eKey.match(/:do[A-Z]/)) {
-      exportButtons.push(eKey.split(':').pop());
-      continue;
-    }
-    exportPayload[eKey] = exportFields[eKey];
-  }
-  Logger.log('エクスポート画面遷移ボタン候補(' + exportButtons.length + '): ' + exportButtons.join(', '));
-
-  // doExport ボタンを押す（「商品データのエクスポート」ボタン）
-  var doExportNavKey = null;
-  for (var eb = 0; eb < exportButtons.length; eb++) {
-    if (exportButtons[eb].indexOf('Export') !== -1 || exportButtons[eb].indexOf('export') !== -1) {
-      doExportNavKey = exportButtons[eb];
-      break;
-    }
-  }
-
-  if (doExportNavKey) {
-    exportPayload[searchPrefix + doExportNavKey] = '';
-    Logger.log('エクスポート遷移ボタン: ' + doExportNavKey);
+  var exportPageUrl = searchResultUrl;
+  var exportPageHtml = searchResultHtml;
+  if (productMasterExportForm_(searchResultHtml, 'hmma02494Form', true)) {
+    Logger.log('検索応答はエクスポート画面。不要な再POSTを省略');
   } else {
-    Logger.log('警告: エクスポートボタンが見つかりません。全ボタン: ' + exportButtons.join(', '));
-    // 代替: ボタン名を総当たりで探す
-    for (var eb2 = 0; eb2 < exportButtons.length; eb2++) {
-      Logger.log('  ボタン: ' + exportButtons[eb2]);
-    }
-  }
-
-  // 店舗グループ情報を維持
-  applyTenpoParamsGlobal_(exportPayload, searchResultHtml, searchFormName, targetStoreName);
-
-  var exportFormAction = extractFormAction_(searchResultHtml, searchFormName);
-  var exportPostUrl = exportFormAction
-    ? resolveUrl_(posConfig.baseUrl, exportFormAction)
-    : searchResultUrl;
-
-  var exportNavResponse = fetchWithCookies_(exportPostUrl, 'post', exportPayload, cookies);
-  cookies = mergeCookies_(cookies, exportNavResponse);
-
-  // リダイレクトをフォロー
-  var exportPageUrl = exportPostUrl;
-  if (exportNavResponse.getResponseCode() === 302) {
-    exportPageUrl = resolveUrl_(posConfig.baseUrl, exportNavResponse.getHeaders()['Location']);
-    Logger.log('エクスポート画面リダイレクト');
-    exportNavResponse = fetchWithCookies_(exportPageUrl, 'get', null, cookies);
+    var currentSearchForm = productMasterExportForm_(searchResultHtml, searchFormName);
+    var exportPayload = productMasterNavigationFields_(currentSearchForm, searchFormName, 'goHmma02494');
+    applyTenpoParamsGlobal_(exportPayload, currentSearchForm, searchFormName, targetStoreName);
+    var exportFormAction = extractFormAction_(currentSearchForm, searchFormName);
+    var exportPostUrl = exportFormAction ? resolveUrl_(posConfig.baseUrl, exportFormAction) : searchResultUrl;
+    Logger.log('エクスポート遷移ボタン: goHmma02494');
+    var exportNavResponse = fetchWithCookies_(exportPostUrl, 'post', exportPayload, cookies);
     cookies = mergeCookies_(cookies, exportNavResponse);
+    exportPageUrl = exportPostUrl;
+    if (exportNavResponse.getResponseCode() === 302) {
+      exportPageUrl = resolveUrl_(posConfig.baseUrl, exportNavResponse.getHeaders()['Location']);
+      Logger.log('エクスポート画面リダイレクト');
+      exportNavResponse = fetchWithCookies_(exportPageUrl, 'get', null, cookies);
+      cookies = mergeCookies_(cookies, exportNavResponse);
+    }
+    exportPageHtml = exportNavResponse.getContentText();
   }
-
-  var exportPageHtml = exportNavResponse.getContentText();
-  Logger.log('エクスポート画面: Status=' + exportNavResponse.getResponseCode() + ', Size=' + exportPageHtml.length);
+  Logger.log('エクスポート画面: Size=' + exportPageHtml.length);
 
 
   // === STEP 5: エクスポート画面でチェックボックス設定 → エクスポート実行 ===
   Logger.log('STEP 5: エクスポート出力項目を設定 → エクスポート実行');
 
-  // エクスポート画面のフォーム名を再検出（別画面かもしれない）
-  var expFormMatch = exportPageHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
-  var expFormName = expFormMatch ? expFormMatch[1] : searchFormName;
+  var expFormName = 'hmma02494Form';
   Logger.log('エクスポート画面フォーム名: ' + expFormName);
 
   // 必須3項目はPOS固定出力。任意9項目は実フォーム契約の検証後に指定する。
@@ -1899,11 +1873,18 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
   cookies = mergeCookies_(cookies, initialReloadResponse);
   downloadHtml = initialReloadResponse.getContentText();
 
-  for (var retry = 0; retry < maxRetries; retry++) {
-    if (downloadHtml.indexOf('処理完了') !== -1 || downloadHtml.indexOf('ダウンロード') !== -1) {
+  var dlFormName = 'hmma02494Form';
+  var dlFormHtml, dlPayload = null;
+  for (var retry = 0; retry <= maxRetries; retry++) {
+    dlFormHtml = productMasterExportForm_(downloadHtml, dlFormName);
+    dlPayload = productMasterNavigationFields_(dlFormHtml, dlFormName, 'doDownload', true);
+    // 案内文や無効ボタンは処理中にも存在する。実submitの有効化を待つ。
+    if (dlPayload) {
       Logger.log('エクスポート処理完了を確認 (retry=' + retry + ')');
       break;
     }
+    // 最後に取得した応答も検査し、待機上限では追加通信しない。
+    if (retry === maxRetries) break;
     Logger.log('エクスポート処理中... (retry=' + retry + ')');
     Utilities.sleep(3000); // 3秒待機
 
@@ -1913,37 +1894,9 @@ function downloadProductMasterFromPOS_(posConfig, targetStoreName, options) {
     downloadHtml = reloadResponse.getContentText();
   }
 
-  // ダウンロードボタンを押す
-  var dlFormMatch = downloadHtml.match(/id\s*=\s*["'](hmma\d+Form)["']/i);
-  var dlFormName = dlFormMatch ? dlFormMatch[1] : expFormName;
-  var dlFields = extractAllFormFields_(downloadHtml, dlFormName);
-  var dlPrefix = 'includeChildBody:' + dlFormName + ':';
-
-  var dlPayload = {};
-  var dlButtons = [];
-  for (var dKey in dlFields) {
-    if (dKey.match(/:do[A-Z]/)) {
-      dlButtons.push(dKey.split(':').pop());
-      continue;
-    }
-    dlPayload[dKey] = dlFields[dKey];
-  }
-  Logger.log('ダウンロードボタン候補(' + dlButtons.length + '): ' + dlButtons.join(', '));
-
-  // doDownload ボタンを探す
-  var doDownloadKey = null;
-  for (var db = 0; db < dlButtons.length; db++) {
-    if (dlButtons[db].indexOf('Download') !== -1 || dlButtons[db].indexOf('download') !== -1) {
-      doDownloadKey = dlButtons[db];
-      break;
-    }
-  }
-  if (doDownloadKey) {
-    dlPayload[dlPrefix + doDownloadKey] = '';
-    Logger.log('ダウンロードボタン: ' + doDownloadKey);
-  }
-
-  var dlFormAction = extractFormAction_(downloadHtml, dlFormName);
+  if (!dlPayload) throw productMasterExportError_('DOWNLOAD_NOT_READY');
+  Logger.log('ダウンロードボタン: doDownload');
+  var dlFormAction = extractFormAction_(dlFormHtml, dlFormName);
   var dlPostUrl = dlFormAction
     ? resolveUrl_(posConfig.baseUrl, dlFormAction)
     : downloadPageUrl;

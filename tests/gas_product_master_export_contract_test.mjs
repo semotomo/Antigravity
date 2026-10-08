@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
+import { attachProductMasterCsvFlow } from './helpers/pos_product_csv_flow.mjs'
 
 const read = name => fs.readFileSync(new URL(`../gas/${name}`, import.meta.url), 'utf8')
 const names = ['ofNameChk', 'gdsSalesKbnChk', 'goodsGroupChk', 'goodsGroupNameChk',
@@ -21,6 +22,70 @@ function fixture() {
   context.applyCoordinatedProductMasterSync_ = records => { writes.push(JSON.parse(JSON.stringify(records))); return { success: true, count: records.length } }
   return { context, writes, logs }
 }
+
+test('実抽出で両店舗の検索/遷移/出力/ダウンロードは単一操作と現在フォームの状態だけを送る', () => {
+  for (const storeId of [6, 7]) for (const directExport of [false, true]) {
+    const f = fixture(), flow = attachProductMasterCsvFlow(f.context, { storeId, directExport })
+    const result = f.context.downloadProductMasterFromPOS_(flow.config, storeId === 7 ? '本店' : 'わんわん', { dryRun: true })
+    assert.equal(result.success, true)
+    assert.equal(result.csvRowCount, 1)
+    assert.equal(result.diagnostics.excludedRowCount, 1)
+    assert.deepEqual(flow.posts.map(post => post.commands), directExport
+      ? [['doSearch'], ['doExport'], ['doDownload']] : [['doSearch'], ['goHmma02494'], ['doExport'], ['doDownload']])
+    assert.equal(flow.counts.exports, 1); assert.equal(flow.counts.downloads, 1)
+    assert.equal(flow.counts.driveWrites, 0); assert.equal(flow.counts.dbWrites, 0); assert.equal(f.writes.length, 0)
+    assert.doesNotMatch(JSON.stringify(f.logs), /private-password|private-login|outside-state|search-state-|export-state/)
+  }
+})
+
+test('ダウンロードという表示だけで完了とせず、実ボタンが有効になるまで送信しない', () => {
+  const f = fixture(), flow = attachProductMasterCsvFlow(f.context, { readyAfter: 4 })
+  const result = f.context.downloadProductMasterFromPOS_(flow.config, '本店', { dryRun: true })
+  assert.equal(result.success, true)
+  assert.ok(flow.counts.reloads >= 4)
+  assert.equal(flow.counts.downloads, 1); assert.equal(flow.counts.exports, 1)
+})
+
+test('待機上限の最後の取得で有効になったダウンロードも検査して一度だけ送る', () => {
+  const f = fixture(), flow = attachProductMasterCsvFlow(f.context, { readyAfter: 12 })
+  const result = f.context.downloadProductMasterFromPOS_(flow.config, '本店', { dryRun: true })
+  assert.equal(result.success, true)
+  assert.equal(flow.counts.reloads, 12)
+  assert.equal(flow.counts.downloads, 1); assert.equal(flow.counts.exports, 1)
+  assert.equal(flow.counts.dbWrites, 0); assert.equal(flow.counts.driveWrites, 0)
+})
+
+test('ダウンロード未完了の上限到達は再出力/ダウンロード/DB適用をせず固定拒否する', () => {
+  const f = fixture(), flow = attachProductMasterCsvFlow(f.context, { readyAfter: 13 })
+  assert.throws(() => f.context.downloadProductMasterFromPOS_(flow.config, '本店', { dryRun: true }),
+    error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && error.exportFailureReason === 'DOWNLOAD_NOT_READY')
+  assert.equal(flow.counts.exports, 1); assert.equal(flow.counts.downloads, 0); assert.equal(flow.counts.dbWrites, 0)
+  assert.equal(flow.counts.reloads, 12)
+})
+
+test('検索フォームや既知遷移submitの欠落/重複/無効化は出力送信前に拒否する', () => {
+  for (const change of [html => html.replace('id="hmma02405Form"', 'id="otherSearchForm"'),
+    html => html.replace('name="includeChildBody:hmma02405Form"', 'name="wrongForm"'),
+    html => html.replace('<input type="submit" name="includeChildBody:hmma02405Form:goHmma02494"',
+      '<input disabled type="submit" name="includeChildBody:hmma02405Form:goHmma02494"'),
+    html => html.replace('</form>', '<input type="submit" name="includeChildBody:hmma02405Form:goHmma02494"/></form>')]) {
+    const f = fixture(), flow = attachProductMasterCsvFlow(f.context, { searchHtml: change })
+    assert.throws(() => f.context.downloadProductMasterFromPOS_(flow.config, '本店', { dryRun: true }),
+      error => error.code === 'PRODUCT_SYNC_INVALID_DATA')
+    assert.equal(flow.counts.exports, 0); assert.equal(flow.counts.downloads, 0); assert.equal(flow.counts.dbWrites, 0)
+  }
+})
+
+test('既知POSの同一type/表示class/style重複だけを許可し、業務属性の重複は拒否する', () => {
+  const f = fixture()
+  const html = form().replace('type="checkbox"', 'type="checkbox" type="checkbox" class="a" class="b" style="x" style="y"')
+  assert.equal(Object.keys(f.context.configureProductMasterExportFields_(html, 'hmma02494Form').payload).length, 10)
+  for (const attributes of ['type="checkbox" type="text"', 'type="checkbox" name="duplicate"',
+    'type="checkbox" value="true"', 'type="checkbox" id="first" id="second"']) {
+    assert.throws(() => f.context.configureProductMasterExportFields_(form().replace('type="checkbox"', attributes), 'hmma02494Form'),
+      error => error.code === 'PRODUCT_SYNC_INVALID_DATA' && /^ATTRIBUTE_DUPLICATE_/.test(error.exportFailureReason))
+  }
+})
 
 test('実9項目を未チェックでも明示ONにし、存在しない推測checkboxは送らない', () => {
   const f = fixture(), payload = { [`${prefix}viewState`]: 'private-state' }

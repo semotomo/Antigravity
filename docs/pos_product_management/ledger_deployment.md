@@ -9,18 +9,19 @@
 - `20260910090000_product_master_sync_fence.sql`: 店舗版と同期受付の2テーブル、開始/一括適用RPC、products変更・POS操作受付時の版更新trigger。
 - `20260910120000_pos_product_edit_apply.sql`: 通常編集の固定基準値/反映記録/POSリンク、専用受付・反映RPC、POS内部IDの全店舗共通予約、完了遷移の制約。商品反映はPOS確認後のRPC実行時だけ。
 - `20261004120000_pos_product_edit_dispatch.sql`: 通常編集の固定送信記録/一度だけの消費記録、登録/消費/復旧読取りRPC。業務値だけを保持し、商品・在庫の値や操作状態は変更しない。
-- 元の5本は既存products、棚卸し、在庫、店舗権限の行や既存RLS/GRANTを変更しない。ただしproductsへの以後の書込みには版更新triggerが加わる。追加4本は下記の範囲で商品書込み権限・同期/取消経路を変更するため、全writerの切替順序を確認する。
+- 元の5本は既存products、棚卸し、在庫、店舗権限の行や既存RLS/GRANTを変更しない。ただしproductsへの以後の書込みには版更新triggerが加わる。追加5本は下記の範囲で商品書込み権限・同期/取消経路を変更するため、全writerの切替順序を確認する。
 - `20261005120000_pos_product_operation_cancellation.sql`: 未送信の通常編集だけを本人managerが監査付きで取消し、同じ操作IDの遅延受付も拒否する。送信済み・結果不明は取消しない。
 - `20261005121000_product_master_sync_notifications.sql`: 店舗別の同期拒否/結果不明を永続化し、店舗memberが商品画面で確認する。匿名/直接書込みは拒否。
 - `20261005122000_product_master_write_cutover.sql`: productsへの匿名・通常利用者・serviceの直接書込みと列GRANTを失効。認証済み店舗memberのSELECT、認可済みSECURITY DEFINERの編集/同期/棚卸し停止RPCを維持。CSV欠落JANの自動停止を無効にし、migration自体は商品値を変えない。
 - `20261005123000_product_master_sync_gateway.sql`: 署名request UUIDに一度だけのCSV開始権を束縛し、旧service開始RPCを閉じる。新規開始/状態読取りは専用RPCだけ。
+- `20261008120000_product_master_sync_excluded_code.sql`: 切替後の既知同期RPCへ正規化後999999の再混入拒否を追加。既存商品ID・active・棚卸し/在庫の値は変更しない。22000/23000の後に適用し、未知の元定義には適用しない。
 - 商品IDは監査用snapshotとして保存する。操作受付時とclaim時に、商品ID・store_id・JANを照合する。将来の商品削除で監査を消さない。
 - SQL受付はcreate/update限定。通常編集のDB反映RPCはローカル実装済み。create完了/JAN訂正/削除は未実装。通常編集のAction/UI・GAS送信入口は2026-10-05にローカル接続済みだが、本番には未反映。
 
 ## 本番適用前の確認
 
 1. Supabaseの対象projectを照合し、読み取り専用 `supabase/preflight_pos_product_operation_ledger.sql` の結果を確認する。店舗6/7、既存権限helper、列型、ロールが期待どおりであること。
-2. 対象の9 migrationと本番適用履歴を比較する。既存オブジェクトがある場合、CREATEや置換を繰り返さず定義差分を確認する。別featureの未適用migrationを混ぜない。4本目は未解決の通常編集操作があると適用を拒否する。旧受付からの操作を自動移行/取消しせず、POSの結果を確認してから解決する。
+2. 対象の10 migrationと本番適用履歴を比較する。既存オブジェクトがある場合、CREATEや置換を繰り返さず定義差分を確認する。別featureの未適用migrationを混ぜない。4本目は未解決の通常編集操作があると適用を拒否する。旧受付からの操作を自動移行/取消しせず、POSの結果を確認してから解決する。
 3. 既存スキーマ/GRANT、productsと棚卸し関連、user_store_accessを含む論理バックアップを取得し、件数・復元手順を確認する。資格情報・バックアップ本文はGitへ追加しない。以前のバックアップが現在の状態を含むとは仮定しない。
 4. 通常PostgreSQL/Supabaseの独立した2接続で、同一操作IDの同時受付、同一JANの別操作、同時claim/consume、権限剥奪・期限切れ・登録/消費と対象行ロック待機との競合を検証する。期待値は受付1件、claim trueとconsume accepted trueは各1回、別店舗は独立、監査と予約の整合。
 5. 正確な差分・対象・バックアップ・復旧方針を示して、本番適用承認を得る。
