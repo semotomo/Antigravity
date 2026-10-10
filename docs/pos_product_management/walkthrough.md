@@ -450,13 +450,17 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - POS/GAS/Next回帰358/358、独立型・変更Next対象Lint・26ページ本番build・diff check成功。buildのSupabase公開キーは合成placeholderを使用し、本番service鍵や商品通信は使わない。全体Lintは以前からの3 errors/5 warningsが残る。復旧読取り文言は「署名で確認」を一般の確認済みへ変更し、終端で再送/POS照合/DB反映を増やさない回帰を追加。画面レイアウト/印刷は変更せず、このローカル段階では本番スマホ/印刷/デプロイ確認を行っていない。
 - 本番の新2移行・互換Next Git/Vercel反映・旧操作の実行/3予約解除は未実施。旧Next ee54はnot_sent非対応なので互換NextのReady/認可付き読取り確認後にだけ終端を作る。GAS公開v57・実商品旧名199/95・新同期停止をこの作業では変更しない。公開実行器更新・再保存はその後の別段階で、今回も自動再送/別ID/取消をしていない。primary scratch test_gas.mjs SHA-256は既存値99B91593…C65B0のまま。
 
-## 本番の未送信復旧基盤反映（2026-10-11、段階実行中）
+## 本番の未送信復旧基盤反映（2026-10-11、承認段階完了）
 
 - 本人承認済みの2移行→互換Next→旧1操作の監査付き終端化を開始。日付をまたいだためGAS実行中/停止/遅延0、公開HEAD/11/12/57、GitHub main ee54a7e、対象旧操作・DB契約を再確認した。商品保存とGAS公開更新はこの段階の対象外。
 - 30表を同一READ ONLY snapshotで最新論理退避し、SHA-256 `bb982496f01c713d30f9f76ca3cb57943165372f5a5265f80e422d6ad83db4fe` と型/NOT NULL/PK/全行全列のローカル復元一致を確認。論理退避でありPITRやAuthを含む完全DB復元の検証ではない。固定2移行・既存29履歴・13台帳表・商品4779の一致guardを含む1transactionのbundle SHA-256 `ff6d038014f40c60b15198f3382a39f2166e43ef3e3fd72206a52762aba3a90f` を対象projectへ適用した。
 - 事後READ ONLY監査で履歴31/追加2原文SHA一致、2監査表FORCE RLS/直接DML拒否、legacy RPC service専用、保存開始権契約assert成功。旧操作はuncertain/v2/send1/locks3、events3、consume/apply/proof/closure0、店舗版7=1/6=0を維持。事後17業務表の全行全列hashは退避前と完全一致。移行そのものは商品/在庫/操作のデータを更新していない。
 - POS回帰358/358・DB109/109・独立型・変更Next7ファイルLint・本番build26ページを再確認。通常PG競合29/29は同一SQLの先行結果を継承。全体Lintの既存3 errors/5 warningsは残る。復旧表示は署名のないlegacy監査にも適合する一般の確認済み表現へ揃えた。本人のprimary scratchファイルは既存SHAのまま。
-- 互換NextのGit/Vercel反映と旧操作の終端化は継続中。公開GASが旧v57のためProductionのDISPATCHのみOFFに変更し、新規POS保存を止め、商品読取り/既存操作の復旧は維持する。新商品同期もOFF継続。実POSはセッション切れのため再ログイン後の最新読取りが終端化の残条件であり、以前の値一致だけで確認済みとはしない。
+- semotomoの本人Git認証・GitHub main ee54a7e不変を確認し、対象33ファイルだけbcb22251d912ffafaf2b81894de22d54213b7068として通常push。関係のないprimary未コミットファイルと旧helper2件は含めない。Vercel CDfZ1Pw554z87m7sYNN55a2voRQLのReady/Production/Current/同commit/kennel-dashboard割当、GitHub Vercel successを確認。公開GASが旧v57のためProduction DISPATCHのみfalseで保存し、対応版UIで新規POS保存停止・既存操作の認可付き読取りを確認した。新商品同期もOFF継続。GAS sourceをGitへ登録してもclasp/API/自動公開workflowを呼ぶ経路はなく、実公開版を変更していない。
+- 旧タブを「保存状況を保持して閉じる」から対応版へ再読込し、同じ旧操作IDと固定入力の新名200/100・分類/仕入先IDの復元を確認。ブラウザPOSはセッション切れだったため別タブの本番inspectを1回だけ実行し、07:48:18取得の本店/JAN・旧名199/95・犬おやつ721420885・モリミツ721420424を確認。取得失敗や昔の値一致を確認済みとはせず、実取得成功後にだけ進めた。GAS実行ページをfresh reloadして実行中/停止/遅延0、公開版57不変を再確認。Next consume関連3ファイルは当時ee54a7eと一致、監査SQL hash・公開13ソース集合hashも再一致。
+- 実行直前の32表snapshot SHA-256 `d0f5a05cd74a47d8ebf497d1cb3ee751ca64785f3c9c13743c063b64fc05ed02` を退避し、型付き全行全列復元照合成功。先行30表snapshotと13台帳の全行一致、追加監査2表空を確認。人の確認根拠9項目と理由を保存する単一RPC SQL SHA-256 `45ff898143dd8235acef3018c2cacacbc1f4737937ef6dd33f52c90651c79f0d` は独立レビュー後に1回だけ実行、closed=true/not_sent/v3/send1/legacy_dispatch_not_sent成功。GAS署名の捏造ではなく、元ID/本文/試行回数を残した保守監査であり、商品の保存POSTは呼ばない。
+- 事後32表snapshot SHA-256 `d637c5b52842f3e0a977d79bbe20e12f7bf73da47f40ef0f96164c6bb89aedff`。変更はpos_product_operations/events/locks/legacy_closuresの4表のみ、17業務表を含む28表の全行全列は不変。監査1/イベント4/元3予約0、consume/apply/signed proof0、元dispatch/intent・店舗版7=1/6=0・商品旧名199/95・棚卸し6544明細を保持。契約assert/監査FORCE RLS/DML拒否/service専用RPCも再確認した。
+- 本番UIの解除条件読取りと状態読取りで「POS未保存・予約解放済み」を表示し、同じ操作ID/固定入力を保持。閉じて復旧情報を消したり、新しい操作を準備/再送したりしていない。画面証跡は `local_exports/legacy-recovery-production-ready-20261011.jpg` と `local_exports/legacy-recovery-not-sent-production-20261011.jpg`。primary scratch SHAは99B91593…C65B0のまま。商品は実POS/DBとも旧名199/95であり、新名200/100の実保存とGAS公開実行器更新は次の別承認工程として残る。
 
 ## 確認した一次資料
 

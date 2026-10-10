@@ -1,7 +1,7 @@
 # シフト作成ツール 改善・デプロイ計画
 
 > 生成日: 2026-02-23
-> 最終更新: 2026-10-11 07:43 JST
+> 最終更新: 2026-10-11 07:55 JST
 > ステータス: 計画中
 
 ## 目標
@@ -89,10 +89,10 @@
       - [ ] 通常実行器への画像保持修正の公開反映・保存後照合と、既存unsigned保留eb967cccの安全な扱いは未完了。今回の診断は保留操作の送信前DTOを検証しておらず、解除/再送/別ID作成なし。DB/Git/Vercel・公開保存経路の変更は対象差分確認後の別承認。
         - [x] 2026-10-10 続行後のREAD ONLY監査: 実公開v57を版指定で取得し公開時13/13 hash一致、保存POST前の永続consume必須を独立確認。旧操作はuncertain/version2/send1/consume0/apply0/locks3不変、固定dispatchの店舗/JAN/内部ID・旧名199/95・指定patch新名200/100・本文hashとDB baseline一致。保存開始権等8関数・3migration履歴は実行前backupと一致、receipt変更/削除/TRUNCATE拒否を確認。本人がDB復元/接続先変更なしと回答。今回の本番書込みなし。
         - [x] 旧1操作だけの独立した監査付き終端化をローカル実装・検証 `cc:完了` (2026-10-10、本人の続行承認済み)。別の不変監査/保守RPCを追加し、元ID/固定本文/send1/履歴を維持。店舗→操作→商品ロック内で固定対象/版/3予約/manager/3イベント/DB baseline/監査済み保存開始権契約を検査し、consume/apply/署名証拠があれば拒否。DB109/109（新15）、実PG競合29/29（新5）、POS回帰358/358、型/対象Lint/26ページbuild/diff成功。独立レビューのNULL設定見逃し・商品行待機後の契約変化を修正し拒否回帰追加。全体Lintの既存3 errors/5 warningsは不変。
-        - [ ] 2移行→互換Next本番Ready/読取り→旧1操作の監査付き終端化・3予約解除 `cc:WIP` (2026-10-10、本番実行を本人承認済み)。適用前に商品・棚卸し等17表と操作台帳13表を同じ読取りsnapshotで退避し、運用排他・対象・差分を確認する。商品保存・GAS公開更新はこの承認に含めない。
+        - [x] 2移行→互換Next本番Ready/読取り→旧1操作の監査付き終端化・3予約解除 `cc:完了` (2026-10-11、本番実行を本人承認済み)。30表/32表の読取りsnapshotと型付き復元照合後に実行し、17業務表全行全列不変を確認。商品保存・GAS公開更新はこの承認に含めず未実施。
           - [x] 2026-10-11: 実行中GAS0・公開v57不変・旧対象不変を確認し、30表の最新論理退避/型付き全行全列復元照合後、固定2移行を1transactionで適用。履歴29→31、原文SHA一致、2監査表のFORCE RLS/直接DML拒否・service専用RPC・保存開始権契約を確認。前後の17業務表全行全列は不変、旧操作はuncertain/v2/send1/3予約のまま。
-          - [ ] 互換NextをGitHub main/Vercel Productionへ反映し、Ready・認可付き読取りを確認。GAS公開実行器は旧版のためProduction DISPATCHだけOFFにし、新規POS保存を停止して読取り/復旧を維持する。
-          - [ ] 新しい実POS読取りと運用排他を再確認後、旧1操作だけを監査付きnot_sent/v3へ終端化し3予約を解放。入力/元ID/send1/商品・棚卸し値を保持して事後照合する。
+          - [x] semotomo/Antigravityのmainへ対象33ファイルだけbcb2225を通常push、Vercel CDfZ1Pw554z87m7sYNN55a2voRQLのProduction/Ready/Current/kennel-dashboardを確認。Production DISPATCH=falseが実画面へ反映され、認可付き復旧読取り・旧操作ID/固定入力の再読込保持を確認。GAS公開v57・新同期停止は維持。
+          - [x] 07:48:18の本番inspectで実POS旧名199/95・本店JAN・分類/仕入先を確認し、GAS実行中0・公開57不変・台帳全行一致を再確認。単一RPCで旧1操作をnot_sent/v3/send1へ終端化、監査1/イベント4/予約0/consume・apply・signed proof0。32表中の変更は操作/イベント/元3予約/専用監査の4表だけで17業務表を含む28表全行全列不変。本番UIで未保存・予約解放済みと入力/元ID保持を確認した。実保存・GAS公開更新は次の別承認段階。
     - [x] 2026-10-09: 本店7/JAN4582107173062だけの保存前読取り診断1ファイルを追加・GAS HEAD反映・実行する `cc:完了`（本人承認済み、実保存は未完了）。21:51:14に診断1ファイルのみ追加、再取得14/14 hash一致・既存13/manifest/公開v57不変。21:53:30〜21:53:45の1回診断は14.608秒でIMAGE_GUARD/MOMIJI_IMAGE_GUARD_REJECTEDを再現。店舗/JAN/読取り・full parserは成功、control97/空file1/保存submit1/生成te-conditions1/view-state1、画像control0/entry0のため組立前に安全停止。画像なしの商品か項目名/抽出差異かは未確定。新規11＋関連118/118・構文/123共有関数衝突/独立レビュー成功。consume/保存送信/DB変更/同期/保留操作の再送なし。旧実行の停止code/command.before未検証のため保留を解除せず、画像保持対応と未送信復旧の実装は別承認後に進める。
     - [ ] 2026-10-09 指定1商品の実保存を段階検証 `cc:WIP`: 本人が保存経路有効化と本店4779/JAN4582107173062の名称/200円/100円保存を承認。Vercel ProductionだけへWRITES/DISPATCH/EDIT_GATEWAY/CONSUME/EDIT_EXECUTION=trueとv57 EDIT_GAS_URLを登録し、同じmain ee54a7eのALB2sH8YSjva1T7jw6MvMLP5ZUEbが20:08:30 Ready/Production/Current/kennel-dashboardとなった。最新17表の論理退避と型/NOT NULL/PK/全行全列復元照合、関連保存/consume/復旧118/118成功。20:11:13のfresh POS読取りも旧名199/95・犬おやつ/モリミツを維持。GASの保存/consume用3フラグと固定consume URLの本人保存待ちで、DB受付・POS保存は未実施。新商品同期は停止継続。Next/GAS/SQLコードと主作業ツリーの未コミットファイルは未変更。
       - 20:33追記: 本人がGASの4設定保存を確認。最新読取り・3項目差分確認は成功。読取り2件は135/147秒かかりNext90秒期限を超過、入力を保持して保存前に停止した。元GAS終了後、同じ操作IDで保存準備だけを1回再試行して成功。その準備済み操作の実行を1回開始したが、`eb967ccc-57b6-454c-b722-74c7a7c5885d` はuncertain/version2/sendAttempts1、consume/apply記録0、locks3、本店revision1/わんわん0。GAS実行終了済み、POS再照合は予定値不一致、保存POSTはconsume成功前に停止する実装のため実保存未到達として保留。再送・別ID・取消・DB手動更新なし。20:17:59→20:30:42の17表全行全列hash一致、商品は旧名199/95・有効のまま。固定停止コードを記録していないため、保存前フォーム検証かconsume受付かの切分けが未完了。新同期は停止継続、診断追加・安全な未送信復旧方針は説明・承認後に進める。

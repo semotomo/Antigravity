@@ -124,7 +124,9 @@
 - その後Git CLIを再認証し、アカウントsemotomoと対象semotomo/Antigravityのpush/admin権限、main ac06232を確認。GAS現行6ソースを再取得し、現行manifest保持の12ファイル候補をlocal_exportsに用意した（公開反映は未実施）。Vercelの変数名一覧はCRON_SECRET/GAS_WEBAPP_URL/公開Supabase2キーだけで、新service/署名/機能設定は未登録。キー値は取得/表示していない。
 - 続行で専用ブランチだけe30300dをpushし、Vercel Preview CDEC56xnGqXanr5bxLDthXcFPaSJのReadyを確認。本番ブランチ/Productionは未反映であり、専用設定未登録のまま実保存や新同期が使えるとは扱わない。
 
-## 旧1操作の監査付き終端化（2026-10-10、ローカルのみ）
+## 旧1操作の監査付き終端化（2026-10-10設計、10-11本番完了）
+
+2026-10-11の本人承認段階では、新2移行の本番適用・互換Next bcb2225のProduction Ready・旧1操作の専用RPC実行を完了した。履歴31、旧操作not_sent/v3/send1、監査1/イベント4/元3予約0、consume/apply/signed proof0。32表中の変更は4台帳表だけで17業務表全行全列は不変。元ID/本文/固定入力を保持し、公開GAS v57・新同期OFF・Production DISPATCH=falseを維持する。商品実保存とGAS公開更新は別承認。実行前後の退避/検証/画面証跡は `walkthrough.md` の同日節を参照。
 
 `20261010120000_pos_product_edit_not_sent.sql` の署名付き経路に、旧応答の証拠を後付けしない。後続の `20261010210000_pos_product_edit_legacy_closure.sql` は別の不変監査表・別eventと保守RPCを追加するだけで、適用時に商品・在庫・操作・予約を書き換えない。通常Next/API/UIから保守RPCを呼ぶ経路は設けない。
 
