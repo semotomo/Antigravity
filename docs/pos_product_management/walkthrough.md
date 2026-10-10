@@ -462,6 +462,15 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 事後32表snapshot SHA-256 `d637c5b52842f3e0a977d79bbe20e12f7bf73da47f40ef0f96164c6bb89aedff`。変更はpos_product_operations/events/locks/legacy_closuresの4表のみ、17業務表を含む28表の全行全列は不変。監査1/イベント4/元3予約0、consume/apply/signed proof0、元dispatch/intent・店舗版7=1/6=0・商品旧名199/95・棚卸し6544明細を保持。契約assert/監査FORCE RLS/DML拒否/service専用RPCも再確認した。
 - 本番UIの解除条件読取りと状態読取りで「POS未保存・予約解放済み」を表示し、同じ操作ID/固定入力を保持。閉じて復旧情報を消したり、新しい操作を準備/再送したりしていない。画面証跡は `local_exports/legacy-recovery-production-ready-20261011.jpg` と `local_exports/legacy-recovery-not-sent-production-20261011.jpg`。primary scratch SHAは99B91593…C65B0のまま。商品は実POS/DBとも旧名199/95であり、新名200/100の実保存とGAS公開実行器更新は次の別承認工程として残る。
 
+## 指定1商品の実保存完了（2026-10-11、本人の別承認後）
+
+- GAS所有者と既存公開IDを確認、最新HEAD14ファイルを隔離退避。公開候補との差分はExecution/Gatewayだけ、他12/manifestは完全一致。独立レビュー・POS/GAS回帰・13 JSの構文と共有129 bindings衝突なしを確認し、08:03:48にHEAD反映、再取得14/14 hash一致後に既存公開IDだけv57→v58へ更新した。公開権限/スコープ/設定名/鍵・他3デプロイは変更していない。売上/履歴ソースと商品同期停止を維持。
+- Productionの既存DISPATCH=falseだけをtrueへ戻し、既存ソース260c6bcで再デプロイ。3bxfEuEEKz6DkkB3EUt2e58T1gxhがReady/Production/kennel-dashboard割当、08:06:28作成・build1m3s。Next/GAS/DBコードの追加変更なし。先行の型検査/対象Lint/build成功を継承し、全体Lintの既存3 errors/5 warningsは未解消。
+- 実保存前32表snapshot SHA-256 `40c303349677a68ec472dc8f45fa1619114e15d7e78042419d1917e56750f508` を退避、型/NOT NULL/主キー/全行全列復元照合成功。旧操作not_sent/v3/send1、consume/apply0・予約0・旧商品199/95を保持。旧操作の解除条件をサーバー読取りで確認してから、明示確認によりそのタブ内復旧情報だけ閉じた。旧操作の再送/削除はしていない。
+- 本店7/商品4779/JAN4582107173062を08:08:00に最新POSから読み込み、名称・売価199→200・原価95→100だけの差分を再照合。分類犬おやつ/仕入先モリミツ・店舗/JANは維持。保存確認を1回実行し、新操作 `c21c9eb9-8bd2-4af0-8299-3e08a45bce28` の固定入力を保持した。prepared08:09:29→claim08:09:38→dispatch_returned08:10:20→pos_verified08:10:50→db_completed08:10:53（JST）。dispatch_returnedはGASのvalues_verifiedだけが記録できるため、実保存後のprivate画像状態全値一致と業務値一致も通過した。さらにNextの別POS照合後にのみDB反映した。
+- 事後32表snapshot SHA-256 `9408ab363f66b3d3c075eeeca00d769f7a0e476f7872c61a0ca35a2bbd774d8d` はcompleted/v4/send1、consume1/apply1・予約0、元旧操作/監査不変。型付き全行全列復元照合成功、対象外6702商品の全列と全棚卸し関連表は不変。対象商品変更列はproduct_name/selling_price/cost_price/派生markup_rate/updated_atだけ、別名/内部リンク各1は同店舗4779に束縛。DBと商品一覧で「ミツヤ もみじ焼き」/売価200/原価100/粗利率0.5・犬おやつ/モリミツ/有効を確認した。自動再送/手動商品SQL更新/棚卸し数量変更なし。
+- 画面証跡はGit対象外の `local_exports/real-save-production-ready-20261011.jpg`、`real-save-completed-20261011.jpg`、`real-save-product-result-20261011.jpg`。primary scratch SHAは既存99B91593…C65B0のまま。今回の実証は画像なしの指定1商品の3項目編集までであり、実画像あり商品・追加/JAN訂正/削除・新商品マスタ同期の有効化・本番スマホ再確認は残る。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。
