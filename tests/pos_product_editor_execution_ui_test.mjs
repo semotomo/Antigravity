@@ -395,6 +395,31 @@ test('pointerだけの確定rejectedは対象3項目の読取り確認後のclos
   assert.equal(reopened.state.draft.name, 'POS商品')
 })
 
+test('署名で未送信が確定した操作だけを明示解除でき、保存済み通知や自動再保存をしない', async () => {
+  const terminal = execution({ status: 'not_sent', stage: 'not_sent', nextAction: 'none', sendAttempts: 1,
+    posValuesVerified: null, message: 'POS未保存・予約解放済み' })
+  const ui = harness({ stored: JSON.stringify(pointer), actions: { recoverPosProductEditorAction: async () => ({ success: true, data: terminal }),
+    inspectPosProductEditorRecoveryAction: async () => ({ success: true, data: recoveryState({ state: 'not_sent', canCancel: false, releaseAllowed: true }) }) } })
+  await ui.mount(); await ui.button('保存状態を確認（読取りのみ）').props.onClick(); await settle()
+  assert.equal(ui.state.execution.stage, 'not_sent'); assert.equal(ui.storage.size, 1); assert.equal(ui.saved, 0)
+  assert.equal(ui.calls.some(call => call[0] === 'save'), false)
+  ui.button('取消・解除条件を確認（読取りのみ）').props.onClick(); await settle()
+  assert.equal(ui.state.recoveryCheck.releaseAllowed, true)
+  ui.button('閉じる').props.onClick(); assert.equal(ui.storage.size, 1)
+  ui.button('確認済みの復旧情報を解除して閉じる').props.onClick()
+  assert.equal(ui.storage.size, 0); assert.equal(ui.closes, 1); assert.equal(ui.saved, 0)
+})
+
+test('不正not_sent DTOでは未送信と断定せず、固定入力と操作IDを保持する', async () => {
+  for (const change of [{ status: 'uncertain' }, { sendAttempts: 0 }, { nextAction: 'save' }, { posValuesVerified: true }]) {
+    const data = execution({ status: 'not_sent', stage: 'not_sent', nextAction: 'none', sendAttempts: 1, posValuesVerified: null, ...change })
+    const ui = harness({ stored: JSON.stringify(pointer), actions: { recoverPosProductEditorAction: async () => ({ success: true, data }) } })
+    await ui.mount(); await ui.button('保存状態を確認（読取りのみ）').props.onClick(); await settle()
+    assert.equal(ui.state.executionNeedsRecovery, true); assert.equal(ui.storage.size, 1); assert.equal(ui.saved, 0)
+    assert.equal(ui.calls.some(call => call[0] === 'save'), false)
+  }
+})
+
 test('不正rejected・uncertain・dispatching・復旧失敗はcloseでもpointerを絶対解除しない', async () => {
   for (const data of [execution({ stage: 'rejected', status: 'prepared', nextAction: 'none' }),
     execution({ stage: 'rejected', status: 'rejected', nextAction: 'verify' }),

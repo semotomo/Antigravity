@@ -201,3 +201,110 @@ test('保存アダプターを公開入口/所有者診断/既存同期へ接続
   assert.doesNotMatch(source,/function\s+(?:doGet|doPost|onOpen|onEdit)\b|Logger\.|console\.|DriveApp|SpreadsheetApp/)
   for(const p of ['gas/autoDownload.js','gas/importCSV.js','gas/posProductReadDiagnostic.js','gas/posProductInspection.js'])assert.ok(!read(p).includes('executePosProductEdit_'))
 })
+
+// 実DOMの項目名を使う合成契約。HTML/opaque値は架空で、両店舗の実保存保証ではない。
+const syntheticImageState={
+  'thumbnailImageUrl-30':'',
+  'imageFileCnt-30':'synthetic-private-opaque-count+/=&unchanged',
+  delImageFileUrl:'',
+  goodsImageItemsSave:'synthetic-private-opaque-items+/=&unchanged',
+}
+function syntheticImageForm(store=7,override={},imageOverride={}) {
+  const imageState={...syntheticImageState,...imageOverride}
+  const hidden=Object.entries(imageState).map(([key,value])=>input(key,value,'hidden')).join('')
+  return form(store,override).replace(input('imageFileName','既存画像.png','hidden'),hidden)
+    .replace('method="post"','method="post" enctype="multipart/form-data"')
+    .replace('</form>',input('uploadThumbnailFile','','file')+input('doThumbnailFileUpLoad','合成画像アップロード','submit')+'</form>')
+}
+function imageStateNotPublished(f,result) {
+  assert.doesNotMatch(JSON.stringify(result),/synthetic-private|imageState|imageFileName|thumbnailImageUrl|imageFileCnt|delImageFileUrl|goodsImageItemsSave|Content-Disposition|Cookie|payload|jsessionid/)
+  assert.ok(f.logs.length>0)
+  for(const log of f.logs)assert.match(log,/^extractAllFormFields_: (?:全input数=3, 全select数=0, "hmma00000Form"マッチ=3|全input数=8, 全select数=0, "hmma02400Form"マッチ=8|全input数=1, 全select数=0, "hmma02402Form"マッチ=1)$/)
+  assert.doesNotMatch(f.logs.join('\n'),/synthetic-private|imageState|imageFileName|thumbnailImageUrl|imageFileCnt|delImageFileUrl|goodsImageItemsSave|Content-Disposition|Cookie|payload|jsessionid/)
+}
+
+test('実項目名の合成4hidden契約は両店舗でopaqueを完全保持し、空fileと保存submitだけを送る',async()=>{
+  for(const store of [7,6]) {
+    const before=syntheticImageForm(store),after=syntheticImageForm(store,{name:'新しい名前',state:'synthetic-private-next-framework'})
+    const f=setup({store,before,after}),result=f.execute()
+    assert.equal(result.outcome,'values_verified');assert.equal(result.code,'POS_PRODUCT_EDIT_VALUES_VERIFIED')
+    assert.equal(result.saveRequestStarted,true);assert.equal(result.responseReceived,true)
+    assert.equal(result.inspection.storeId,store);assert.equal(result.inspection.searches.length,2)
+    assert.equal(f.calls.length,19);assert.equal(f.saveCount,1);assert.equal(f.events.filter(e=>e==='consume').length,1)
+    assert.ok(f.events.indexOf('consume')<f.events.indexOf('save'))
+    const save=f.calls.find(c=>typeof c.request.payload==='string')
+    assert.match(save.request.contentType,/^multipart\/form-data; boundary=/)
+    assert.equal(save.request.followRedirects,false)
+    const body=await new Response(save.request.payload,{headers:{'Content-Type':save.request.contentType}}).formData()
+    for(const [key,value] of Object.entries(syntheticImageState))assert.deepEqual(body.getAll(prefix+key),[value])
+    assert.equal(body.get(prefix+'imageFileName'),null)
+    const emptyFile=body.getAll(prefix+'uploadThumbnailFile')
+    assert.equal(emptyFile.length,1);assert.equal(emptyFile[0].name,'');assert.equal(emptyFile[0].size,0)
+    assert.equal(emptyFile[0].type,'application/octet-stream')
+    assert.equal(body.get(prefix+'goodsName'),'新しい名前');assert.equal(body.get(prefix+'gddGoodsCost'),'75')
+    assert.equal(body.getAll(prefix+'doUpdate').length,1)
+    assert.equal(body.get(prefix+'doDelete'),null);assert.equal(body.get(prefix+'doThumbnailFileUpLoad'),null)
+    imageStateNotPublished(f,result)
+  }
+})
+
+test('合成4hiddenの各欠落/重複/型変更/disabledをconsume前に拒否し秘密値を出さない',()=>{
+  const before=syntheticImageForm(),after=syntheticImageForm(7,{name:'新しい名前'})
+  for(const [key,value] of Object.entries(syntheticImageState)) {
+    const control=input(key,value,'hidden')
+    for(const [kind,replacement] of [['missing',''],['duplicate',control+control],['type',input(key,value,'text')],
+      ['disabled',input(key,value,'hidden','disabled')]]) {
+      const f=setup({before,beforeSecond:before.replace(control,replacement),after}),result=f.execute()
+      assert.deepEqual(JSON.parse(JSON.stringify(result)),{outcome:'not_sent',code:'POS_PRODUCT_EDIT_PREPARE_REJECTED',saveRequestStarted:false,responseReceived:false},key+':'+kind)
+      assert.equal(f.saveCount,0);assert.equal(f.events.filter(e=>e==='consume').length,0);assert.equal(f.calls.length,10)
+      imageStateNotPublished(f,result)
+    }
+  }
+})
+
+test('合成4hiddenの空opaque/参照削除指定/別family混在/未知画像名/空file欠落/encoding変更はconsume前に拒否する',()=>{
+  const before=syntheticImageForm(),after=syntheticImageForm(7,{name:'新しい名前'})
+  const invalid=[
+    ...['imageFileCnt-30','goodsImageItemsSave'].map(key=>[key+':empty',html=>html.replace(input(key,syntheticImageState[key],'hidden'),input(key,'','hidden'))]),
+    ...['imageFileCnt-30','goodsImageItemsSave'].flatMap(key=>[['LF','\n'],['CR','\r'],['CRLF','\r\n'],['TAB','\t'],['NUL','\x00'],['DEL','\x7f']].map(([kind,value])=>
+      [key+':'+kind,html=>html.replace(input(key,syntheticImageState[key],'hidden'),input(key,syntheticImageState[key]+value+'synthetic-private-tail','hidden'))])),
+    ['reference',html=>html.replace(input('thumbnailImageUrl-30','','hidden'),input('thumbnailImageUrl-30','synthetic-private-image-reference','hidden'))],
+    ['delete',html=>html.replace(input('delImageFileUrl','','hidden'),input('delImageFileUrl','synthetic-private-image-delete','hidden'))],
+    ['mixed',html=>html.replace('</form>',input('imageFileName','synthetic-private-legacy-image','hidden')+'</form>')],
+    ...['thumbnailImageUrl-31','imageFileCnt-31','goodsImageItemsSaveOther','delImageFileUrlOther','imageUnexpectedState'].map(key=>
+      [key,html=>html.replace('</form>',input(key,'synthetic-private-unknown-image','hidden')+'</form>')]),
+    ['file-missing',html=>html.replace(input('uploadThumbnailFile','','file'),'')],
+    ['encoding',html=>html.replace('enctype="multipart/form-data"','enctype="application/x-www-form-urlencoded"')],
+  ]
+  for(const [kind,change] of invalid) {
+    const f=setup({before,beforeSecond:change(before),after}),result=f.execute()
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{outcome:'not_sent',code:'POS_PRODUCT_EDIT_PREPARE_REJECTED',saveRequestStarted:false,responseReceived:false},kind)
+    assert.equal(f.saveCount,0);assert.equal(f.events.filter(e=>e==='consume').length,0);assert.equal(f.calls.length,10)
+    imageStateNotPublished(f,result)
+  }
+})
+
+test('合成opaque生成差は両検索で比較省略せずconsume前に停止する',()=>{
+  const before=syntheticImageForm(),after=syntheticImageForm(7,{name:'新しい名前'})
+  for(const key of ['imageFileCnt-30','goodsImageItemsSave']) {
+    const second=before.replace(input(key,syntheticImageState[key],'hidden'),input(key,'synthetic-private-generated-difference','hidden'))
+    const f=setup({before,beforeSecond:second,after}),result=f.execute()
+    assert.deepEqual(JSON.parse(JSON.stringify(result)),{outcome:'not_sent',code:'POS_PRODUCT_EDIT_PREPARE_REJECTED',saveRequestStarted:false,responseReceived:false},key)
+    assert.equal(f.saveCount,0);assert.equal(f.events.filter(e=>e==='consume').length,0);assert.equal(f.calls.length,10)
+    imageStateNotPublished(f,result)
+  }
+})
+
+test('合成4hiddenの保存後差分と保存後両検索の差分は再保存せず再確認扱いにする',()=>{
+  const before=syntheticImageForm(),after=syntheticImageForm(7,{name:'新しい名前'})
+  for(const [key,value] of Object.entries(syntheticImageState)) {
+    const changed=after.replace(input(key,value,'hidden'),input(key,'synthetic-private-post-save-difference','hidden'))
+    for(const options of [{after:changed,afterSecond:changed},{after,afterSecond:changed}]) {
+      const f=setup({before,...options}),result=f.execute()
+      assert.deepEqual(JSON.parse(JSON.stringify(result)),{outcome:'verification_required',code:'POS_PRODUCT_EDIT_VERIFY_REQUIRED',saveRequestStarted:true,responseReceived:true},key)
+      assert.equal(f.saveCount,1);assert.equal(f.events.filter(e=>e==='consume').length,1)
+      assert.ok(f.events.indexOf('consume')<f.events.indexOf('save'))
+      imageStateNotPublished(f,result)
+    }
+  }
+})

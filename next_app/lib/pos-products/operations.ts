@@ -1,5 +1,5 @@
 export type ProductOperationStatus = 'prepared' | 'dispatching' | 'verifying' | 'uncertain' |
-  'pos_confirmed' | 'db_pending' | 'completed' | 'rejected'
+  'pos_confirmed' | 'db_pending' | 'completed' | 'rejected' | 'not_sent'
 type OperationIdentity = { operationId: string; actorId: string; storeId: 6 | 7; payloadHash: string }
 export type ProductOperation = OperationIdentity & {
   status: ProductOperationStatus
@@ -17,7 +17,7 @@ const HASH = /^[0-9a-f]{64}$/
 const VERIFIED = ['pos_confirmed', 'db_pending', 'completed']
 const NEXT = {
   prepared: 'dispatch', dispatching: 'wait', verifying: 'verify_pos', uncertain: 'verify_pos',
-  pos_confirmed: 'apply_db', db_pending: 'apply_db', completed: 'none', rejected: 'none',
+  pos_confirmed: 'apply_db', db_pending: 'apply_db', completed: 'none', rejected: 'none', not_sent: 'none',
 } as const
 
 function checkIdentity(state: OperationIdentity) {

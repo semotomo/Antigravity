@@ -14,6 +14,7 @@ import type { ProductEditReview } from './edit-review.server'
 import type { ProductEditInspection } from './inspection.server'
 import type { ProductOperation, ProductOperationStatus } from './operations'
 import type { PosProductChoices } from './types'
+import type { ProductEditDispatch } from './edit-dispatch.server'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const HASH = /^[0-9a-f]{64}$/
@@ -232,6 +233,37 @@ export async function recordProductOperationResult(op: ProductOperation, event: 
   }))
   assertVersion(stored, expected)
   return stored
+}
+
+/** 署名付き未送信証拠の専用経路。汎用eventやブラウザの申告では予約を解除しない。 */
+export async function resolveProductEditNotSent(op: ProductOperation, dispatch: ProductEditDispatch, proofText: string): Promise<ProductOperation> {
+  // 認可やmodule取得のawaitを越えて、呼出元による対象差替えを受け付けない。
+  const fixedOp = { ...op }
+  const fixedDispatch = { operationId: dispatch.command.operationId, actorId: dispatch.command.actorId,
+    storeId: dispatch.command.storeId, dispatchHash: dispatch.dispatchHash, reviewedAt: dispatch.reviewedAt }
+  const args = await authorizeOperation(fixedOp)
+  requireCancellationEnabled()
+  if (typeof proofText !== 'string' || Buffer.byteLength(proofText, 'utf8') > 4096 ||
+      fixedDispatch.operationId !== fixedOp.operationId || fixedDispatch.actorId !== fixedOp.actorId ||
+      fixedDispatch.storeId !== fixedOp.storeId || !HASH.test(fixedDispatch.dispatchHash) || fixedOp.sendAttempts !== 1 ||
+      !['dispatching', 'verifying', 'uncertain', 'not_sent'].includes(fixedOp.status)) throw new Error(RPC_FAILURE)
+  try {
+    // 稀な失敗復旧だけで署名検証をロードする。HMACの検査をDB特権へ委ねない。
+    const { verifyPosProductNotSentProof } = await import('./protocol')
+    const proof = verifyPosProductNotSentProof(JSON.parse(proofText), process.env.POS_PRODUCT_SIGNING_SECRET, {
+      operationId: fixedOp.operationId, actorId: fixedOp.actorId, storeId: fixedOp.storeId,
+      dispatchHash: fixedDispatch.dispatchHash, earliestAt: fixedDispatch.reviewedAt,
+    })
+    requireCancellationEnabled()
+    const result = record(await rpc('resolve_pos_product_edit_not_sent', { ...args,
+      p_dispatch_hash: fixedDispatch.dispatchHash, p_proof_text: JSON.stringify(proof) }))
+    if (Object.keys(result).length !== 2 || typeof result.recovered !== 'boolean') throw new Error(RPC_FAILURE)
+    const stored = decodeOperation(result.operation)
+    assertBound(stored, fixedOp)
+    if (stored.status !== 'not_sent' || stored.sendAttempts !== 1 || stored.verifiedFingerprint !== null ||
+        (result.recovered ? stored.version !== fixedOp.version + 1 : ![fixedOp.version, fixedOp.version + 1].includes(stored.version))) throw new Error(RPC_FAILURE)
+    return stored
+  } catch { throw new Error(RPC_FAILURE) }
 }
 
 export async function getProductOperationStatus(storeId: number, operationId: string): Promise<StatusDto | null> {

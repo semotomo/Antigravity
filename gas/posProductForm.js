@@ -7,6 +7,38 @@ function readPosProductEditForm_(html, storeId, jan) {
   return parsePosProductEditForm_(html, storeId, jan, false).inspection;
 }
 
+/** 画像保持のprivate契約。値はDTO/指紋/ログへ渡さず、opaque状態も完全一致で比較する。 */
+function readPosProductImageState_(parsed) {
+  function reject() { throw new Error('POS_PRODUCT_IMAGE_STATE_REJECTED'); }
+  var submission = parsed && parsed.submission;
+  if (!submission || !submission.controls || !Array.isArray(submission.entries)) reject();
+  var controls = submission.controls, entries = submission.entries;
+  var thumbnailKeys = ['thumbnailImageUrl-30', 'imageFileCnt-30', 'delImageFileUrl', 'goodsImageItemsSave'];
+  var hasThumbnail = thumbnailKeys.some(function(key) { return Object.prototype.hasOwnProperty.call(controls, key); });
+  var keys = hasThumbnail ? thumbnailKeys : ['imageFileName'];
+  // 別方式との混在・未知の画像項目を黙って省略しない。従来filename契約も条件を緩めない。
+  if (Object.keys(controls).some(function(key) {
+    return /image|thumbnail|photo|picture/i.test(key) && keys.indexOf(key) < 0;
+  })) reject();
+  var values = keys.map(function(key) {
+    var field = controls[key], parts = entries.filter(function(entry) { return entry.key === key; });
+    if (!field || field.length !== 1 || field[0].type !== 'hidden' || parts.length !== 1 ||
+        parts[0].name !== 'includeChildBody:hmma02403Form:' + key || parts[0].file ||
+        typeof field[0].value !== 'string' || parts[0].value !== field[0].value) reject();
+    return parts[0].value;
+  });
+  if (hasThumbnail) {
+    // 実画面で確認した画像未登録の契約のみ。画像あり/削除指定は確認できるまで停止する。
+    // imageFileCnt/goodsImageItemsSaveは通信形式が未解明なので解釈・再生成しない。
+    if (values[0] !== '' || values[2] !== '' || !values[1] || !values[3] || submission.encoding !== 'multipart/form-data') reject();
+    // multipartの改行正規化等でopaque値のbytesが変わる入力は送信前に拒否する。
+    if (/[\x00-\x1f\x7f]/.test(values[1]) || /[\x00-\x1f\x7f]/.test(values[3])) reject();
+    var uploads = entries.filter(function(entry) { return entry.name === 'includeChildBody:hmma02403Form:uploadThumbnailFile'; });
+    if (uploads.length !== 1 || uploads[0].file !== true || uploads[0].value !== '') reject();
+  }
+  return { family: hasThumbnail ? 'thumbnail-empty-v1' : 'filename-v1', values: values };
+}
+
 /** 保存準備専用の状態はGAS内部でのみ扱い、読取りDTOには含めない。 */
 function parsePosProductEditForm_(html, storeId, jan, includeSubmission) {
   var phase = 'CONTRACT';

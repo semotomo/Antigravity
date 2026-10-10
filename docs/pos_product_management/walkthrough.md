@@ -364,6 +364,99 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 10/9の読み取り確認でブラウザ連携が復旧。対象GASの本人所有トリガーはonOpenとautoRunProductSalesMonthlyの2件で、商品専用timerはない。実行履歴でも01:18:56の両店診断完了を確認したが、他所有者や旧公開版の外部呼出しまで停止した証明ではない。VercelのProductionはReady/main ac06232、公開GASはv56のまま。Cron設定は全job共通のEnabledだけで、商品だけの個別停止は表示されないため操作していない。毎日04時の/api/cron/syncは生体のquick同期であり、商品同期ではない。週次商品同期以外の売上/履歴job、GAS売上timerは維持する。対象SupabaseへREAD ONLY preflightの実行成功、GitHub semotomoと対象repo/mainの一致を確認。診断・取得・CSV解析・署名同期の関連5ファイルを再検証し66/66成功、skip0。新しい本番書込みは行っていない。
 - 切替直前の独立tsc（incremental false）と変更Next36 TS/TSXファイルのLintは成功。全体Lintは既存3 errors/5 warningsで、該当5ファイルはProduction ac06232と差分なし。初回buildは子プロセスへ公開Supabase設定を渡していなかったためpetsのprerenderで停止したが、既存設定から公開URL/anon keyだけを子プロセスに渡して再実行し、26ページ生成まで成功。ファイルへの設定コピー・秘密値の出力・Sentry token転送・既存違反の緩和はしていない。
 - 既存guardの停止状態はGAS MASTER=true/FENCE=false、新Next MASTER=false・編集/保存/consume OFF。新GASは旧master/full・直接upsert/欠落停止を拒否し、新同期もFENCE不足でDB受付前に拒否する。Nextの旧直接Action/CSV拒否もProductionへ先行反映し、現行URLの既存v56 deploymentを新ソース版へ更新してから実行中処理の終了を確認する。新URL追加だけや全cron停止は使わない。DB適用前の通知テーブル未作成による商品画面の通知取得警告は固定メッセージで扱われ、商品一覧は維持される。本人へ停止用2プロパティの保存を依頼中で、停止完了とはまだ扱わない。
+- 承認済み対象4ファイルだけをee54a7eにcommitし、semotomoとremote main ac06232を照合した後、専用ブランチ/mainへ通常fast-forward push。01:41:45 JSTにVercel `2HaycmVWJkVKqT9osVBTxi2Fk781` がReady/Production/Currentとなり、main ee54a7eとkennel-dashboardの割当を確認。Productionの登録名は公開Supabase2件、既存GAS URL/cron鍵、service鍵/専用3鍵の8件で、新機能フラグは未登録。値は表示していない。認証済み本店JAN検索は1件・指定商品の旧名199/95、わんわん棚卸しは同じsessionの入力済み3/未入力2761/対象2764を表示。数量保存・確定は実行していない。手動商品同期1回の確認は固定拒否/商品未変更/通知保存不可を画面に表示し、最終成功日時10/6 17:31は不変。DBの通知関数/テーブルが未作成のため拒否と通知取得警告が出る停止段階であり、新同期成功とは扱わない。
+- 同時点の単一READ ONLY preflightでPG17.6/既存19履歴・追加13relationなし・店舗6/7・複合unique・商品store6=2764/store7=3939・JAN重複0・指定商品未変更を再確認。anon/authenticated/serviceの直接商品書込み権限はまだ残る。現GASを `local_exports/gas-pre-public-ee54a7e-20261009` に再取得し13/13が直前HEADと一致、既存4deploymentと公開v56を確認。GAS更新前・本人停止設定の保存待ちなので旧公開経路の停止は未完了。新しいDB backup/apply・GAS公開変更・実商品保存は未実施。検証画像2件はGit対象外へ保存した。
+
+## 2026-10-09 旧商品writerの保守停止
+
+- 本人の停止設定保存後、GAS所有者kirikan22・対象script・最新13ソースのhash一致を再確認。manifest/公開権限を保持したv57を作成し、既存Production Web Appの同一deploymentをv56から更新した。旧11/12の削除、資格情報変更、全cron停止、商品保存は行っていない。
+- GAS MASTER=true/FENCE=false・Next同期/保存OFFの組合せで、現行公開URLのGET/POST `mode=master` が `PRODUCT_SYNC_DISABLED/rejected` を約1～2秒で返すことを実通信確認。GAS実行履歴の「実行中」フィルタは0件。v57の本店当日historyも取得成功（深夜のため0件）。本人所有以外の外部呼出しまで不在とは断定せず、DBで旧直接writerを閉じる工程を残す。
+- 02:41 JSTに最新17テーブル/定義/19履歴を単一READ ONLY snapshotで退避。`local_exports/pos-product-cutover-2026-10-08T17-41-27-198Z-edee5583-a426-4840-bc45-16b8d6c5550e.json`、10556871 bytes、SHA-256 `8e15c19901b173e000c26bb13110f476249231b9458146d3420816827eddff41`。17テーブルの型/NOT NULL/主キー/全行全列一致を復元確認した。商品6703/棚卸し明細6544/移動506は前回と同じ。本番履歴列はversion/text、statements/text[]、name/textで、承認10versionは未適用。DB適用はこの時点で未実施。
+
+### 承認10 migrationの本番一括適用・保持確認
+
+- 対象10原文と10履歴INSERTを生成専用helperで一つのBEGIN/COMMITへ束ねた。既存19履歴全内容・必要helper・13新表不存在・指定4779全列の基準値をtransaction内で確認。履歴/productsをSHARE ROW EXCLUSIVEで固定し、lock timeout5秒・statement timeout90秒。原文hash、原文が実行部/履歴部へ各一回だけ含まれること、BEGIN/COMMIT各1・履歴INSERT10・lock2を適用前に確認した。未知SQL/外側transaction制御/再適用は拒否する。
+- `local_exports/pos-product-cutover-apply-2026-10-08T17-49-56-850Z-60c6462c-1e0e-44d7-ab19-10cafdc0fdca.sql`（384972 bytes、SHA-256 `cbb875991d2e3928c919044b419de8d17405c6b99f6cb5b1434edde4e7802205`）を固定projectへSupabase CLIで一回実行し成功。READ ONLYの単一JSON事後監査で履歴29、新13表FORCE RLS、新public16RPC（旧beginだけservice EXECUTEも拒否、残り15はservice専用）、productsのanon/authenticated/service直接table/column/sequence write拒否を確認。member SELECTのみ、店舗版6/7=0、操作/同期run/request=0。欠落停止なし・999999拒否の最終定義も確認した。
+- 適用後backup `local_exports/pos-product-cutover-2026-10-08T17-52-59-670Z-4344fd33-2b4c-4379-aa38-f5ec7d2a71ae.json`（10813822 bytes、SHA-256 `6af7c5826d7824635312218771eef7dec519ba02a2f097acfce55ede82caeb86`）との比較で、17表の全行全列hash・既存19履歴・全既存21関数本文/owner/ACL・315列・非products20policy・18triggerを保持。追加10履歴は原文hash一致、新31関数/13表だけ追加。sequence採番差0。新監査sequenceの標準3列は型/位置/ACL等の完全一致で限定し、未知列/定義変更の拒否7件も確認した。比較helperの初回はこの新sequenceの列許容漏れで拒否したが、既存列を緩和せず既知3列だけを追加して再検証した。
+- 棚卸し7RPCはdefiner/空search_path/authenticated EXECUTE/anon拒否が各7件のまま。認証済みProductionの商品画面から通知取得警告が消え、わんわん棚卸しは同じsessionの入力済み3/未入力2761/対象2764を維持。商品6703・棚卸し明細6544・移動506、指定商品4779の旧名199/95/有効を全列不変で確認。商品同期、新POS編集の有効化、POS実保存はまだ行っていない。Nextのコードは前回検証済みee54a7eから変更なし。
+
+### Productionの署名付き読取り・未保存差分確認
+
+- 本人がGASのPUBLIC_GATEWAY/INSPECTION=trueを保存したとの回答を受け、MASTER=true/FENCE=falseを維持したまま読取りを接続。Vercel Productionだけへ `POS_PRODUCT_EDITOR_ENABLED=true`、`POS_PRODUCT_INSPECTION_ENABLED=true`、既存v57 `/exec` の `POS_PRODUCT_INSPECTION_GAS_URL` を登録した。秘密値は表示せず、Preview/Development・売上/履歴設定・保存/consume/新同期フラグは変更していない。
+- 同じmain ee54a7eを新設定で1回再デプロイし、11:48:50 JSTに `93gg4F7srGGC3t4UBt6h9Vjt6ccV` のReady/Productionとkennel-dashboard割当を確認。インスタンスは `antigravity-qyguzucxu-semotomos-projects.vercel.app`。Next/GASのコード変更・Git push・GAS版更新・追加DB適用はなし。
+- 本店のみ・JAN4582107173062で1商品を検索し、新しい「POS編集」から実読取り成功。11:50:05の業務DTOは旧名「95ミツヤ もみじ焼き」、売価199/原価95、商品グループ犬おやつ（721420885）、仕入先モリミツ（721420424）。認可と店舗別DB照合・署名相関・厳密DTO検証が通り、実GAS/Vercelの編集署名鍵の一致を確認した。POS内部IDをDB商品ID4779やJANで代用していない。
+- 本人指定の「ミツヤ もみじ焼き」/200円/100円を画面に入力し、再読取りによる「変更内容を確認」も成功。差分は名称/売価/原価の3項目だけで、商品グループ/仕入先は維持。未保存の表示・保存ボタン不在を確認し、DB受付・consume・POS保存は行っていない。GAS/Vercelの消費鍵や同期鍵の実一致はこの読取りだけでは証明しない。
+- 独立監査で関連inspectテスト23/23（transport8・form/DTO15）が成功。実読取り後のREAD ONLY監査でmigration29、操作/同期run/request=0、店舗版6/7=0、直接writer拒否、棚卸し7RPCを確認。PCの読取り画面と本番Ready画面をGit対象外に記録。390×844のviewport指定を試したが実画面は1265pxのままで、本番スマホの検証成功とは扱わず再確認を残す（設定はreset済み）。未保存入力を保持した本番タブを引継ぎ用に残し、主作業ツリーの既存test_gas.mjsのSHA-256不変も確認した。
+
+### 保存経路のNext Production設定と直前退避（GAS保存待ち）
+
+- 本人が保存経路の有効化と指定1商品保存を明示承認。Vercel Productionだけへ `POS_PRODUCT_WRITES_ENABLED` / `POS_PRODUCT_DISPATCH_ENABLED` / `POS_PRODUCT_EDIT_GATEWAY_ENABLED` / `POS_PRODUCT_CONSUME_ENABLED` / `POS_PRODUCT_EDIT_EXECUTION_ENABLED` をtrueで登録し、`POS_PRODUCT_EDIT_GAS_URL` に既存v57の `/exec` を設定。既存鍵・inspect設定・Preview/Development・全cronは維持。新商品同期はNext未登録OFF、GAS MASTER=true/FENCE=falseを維持する。
+- 同じmain ee54a7eを1回再デプロイし、20:08:30 JSTに `ALB2sH8YSjva1T7jw6MvMLP5ZUEb` のReady/Production/Currentとkennel-dashboard割当を確認。インスタンスは `antigravity-bvtuwqabp-semotomos-projects.vercel.app`。ソースは未変更で、追加Git push・GAS版更新・DB migrationはしていない。ビルド成功画面をGit対象外へ記録した。
+- 保存直前のREAD ONLY/REPEATABLE READ退避は `local_exports/pos-product-cutover-2026-10-09T11-08-40-055Z-ec46d159-97ac-4c60-8859-cb6b93dd852d.json`（10814344 bytes、SHA-256 `0b5c1ed9a193f0f8654d6d27572e206b86510e0606fa8f2a44ad35fc71741005`）。17表の型/NOT NULL/PK/全行全列の復元一致とhashを確認。商品6703・棚卸し明細6544・棚卸しsessions2・count_changes7・移動507・適用履歴29。移動は朝の506から1件増えているため、以後の保持比較はこの最新snapshotを基準とし、通常業務による増減を今回の保存へ誤帰属しない。
+- fresh DBの4779/本店7/JAN4582107173062は旧名199/95/有効。前回の未保存プレビューだけを明示破棄し、最新Productionを読み直した。20:11:13の新しいsigned inspectも旧名/199/95、犬おやつ・モリミツと一致。まだ保存準備・DB受付・consume・POS保存は行っていない。主作業ツリーの既存test_gas.mjs hashも不変。
+- 独立監査で関連保存/consume/復旧7ファイルを各1回検証し118/118、skip0（全mock・外部/DB接続0）。設定名の不足なし。GASは最新両検索と全業務値/画像名照合→専用消費署名/DB実行権確認→保存POST1回→新しい両検索で照合、Nextは別inspectとconsume receiptを独立照合してからDB反映する。応答不明なら同じ操作IDを保持して読取り復旧し、保存POSTを再送しない。
+- GAS設定画面の秘密値を取得しないため、本人へ `POS_PRODUCT_EDIT_GATEWAY_ENABLED=true` / `POS_PRODUCT_EDIT_EXECUTION_ENABLED=true` / `POS_PRODUCT_CONSUME_ENABLED=true` / `POS_PRODUCT_CONSUME_URL=https://kennel-dashboard.vercel.app/api/pos-products/consume` の4件保存を依頼。確認回答待ち。消費鍵の両側実一致、指定商品の実保存、独立再取得・DB反映・棚卸し保持は未検証。保存時の既存仕様として、DB分類/仕入先ラベルのPOS候補反映、粗利率0.5000の再計算、更新日時と旧名aliasの記録も伴う。店舗/JAN/is_active/税/POS画像/棚卸し数量は変更対象にしない。
+
+### GAS設定保存後の単発保存検証（実保存未完了・データ保持確認）
+
+- 本人がGASの保存/consume3フラグと固定consume URLの保存を確認。秘密値を取得せず既存設定を維持。20:17:59に最新17表をREAD ONLY/REPEATABLE READ退避（`local_exports/pos-product-cutover-2026-10-09T11-17-59-106Z-af44206d-4111-4d14-a923-366971867b8f.json`、SHA-256 `f0abbaa3e3dbb9239697f14cd1a532346d484bd9550acb400da4406501e1ed8c`）。
+- fresh POS値は旧名199/95・犬おやつ/モリミツ。指定3項目だけ入力してレビュー成功。20:18:40のinspectは147.52秒、20:22:42の保存準備用inspectは135.183秒で、Nextの90秒deadlineより長く、DB受付前に停止した。読取り・保存入力は失われず、元のGAS終了を確認してから同じ操作IDの保存準備だけを1回再試行し成功した。
+- 操作ID `eb967ccc-57b6-454c-b722-74c7a7c5885d` の固定入力を維持し、初回実行を明示的に1回だけ開始。20:27:01 GAS doPostは15.407秒で完了、READ ONLY監査はoperation1/uncertain/version2/sendAttempts1、イベントprepared→claim_dispatch→outcome_unknown、consume0/apply0/locks3、店舗revision7=1/6=0。同じIDのrecover読取りも予定値不一致で、再送・別ID作成・取消・DB手動更新はしていない。再送不可の保留を維持した本番タブを引継ぐ。
+- GAS保存POSTは署名付きconsume accepted:trueの後に限定される。対象GASが終了済みでconsume記録0のため、現行コード経路ではPOS保存POST未到達。Nextは正規not_sentでもoutcome_unknownに分類し、consume0のuncertainはnextAction:noneとしてDB反映/解除を許可しない。固定停止コードは記録されておらず、保存前フォーム検証かconsume受付かは未確定。GAS15秒という所要時間だけで原因を断定しない。
+- Vercelの対象project/Production直近30分ログ（20:02〜20:32、No more logs）では20:26:54の保存Action POST /products 200はあるが、同時間帯のPOST /api/pos-products/consumeは表示されない。20:14/20:15のconsume GET→307/loginは別の時刻・別のメソッドなので実行受付に数えない。保存前検証での停止を疑う根拠にはなるが、固定停止code未観測のため確定原因とはしない。保留画面を `local_exports/product-save-held-20261009.jpg` に記録した。
+- 20:30:42の事後17表退避（`local_exports/pos-product-cutover-2026-10-09T11-30-42-216Z-148c86bd-9499-4d79-8c56-9daff566a294.json`、SHA-256 `6ea69b9f59f0417828c9fd5da3acd1c1df9c70c46a7ac84d20e871aeec0b240c`）と直前退避の全行全列を安定JSON/hashで照合し17/17一致。商品6703・alias0・棚卸し明細6544・sessions2・count_changes7・移動507等は不変。4779は本店7/JAN4582107173062・旧名199/95・有効。監査台帳と予約locksだけは実行試行の記録として保持しており、全DB不変とは説明しない。
+- 本番の固定停止コードを秘密値なしで記録する診断追加、および消費記録0/終了済みの未送信操作を安全に復旧する方針を説明・承認してから進める。今回は新しいソース変更・migration・GAS版更新・Git push・同期有効化を行っていない。設定の追加は初期接続・段階別有効化のためであり、通常編集のたびに追加しない。同名キーは既存値を更新する。
+
+## 指定もみじ焼きの保存前診断（2026-10-09 21:55 JST）
+
+- 本人が本店7/JAN4582107173062に限定した読取り専用GAS診断1ファイルの追加・実行を承認。`posProductMomijiDiagnostic.js` の `diagnoseHontenMomijiEditPreparation` は引数不可・固定2検索・フォーム解析・画像保持・指定3項目の本文組立だけを行う。保存送信/consume/DB/Drive/公開入口/トリガー/同期に接続しない。現在フォームの検証であり、旧保留操作のcommand.beforeを検証したり再送を許可したりするものではない。
+- 新規11テストと関連回帰は118/118成功。構文・既存GASと共有123関数の衝突なし。独立レビューで属性重複suffixの識別漏れを検出し、固定工程×固定属性の列挙だけで修正・再現テストを追加。未知例外・HTML・Cookie・資格情報・hidden・画像名・本文・業務指紋はログ/戻り値へ出さない。
+- clasp3.3.0/既存所有者kirikan22で最新13ソースをfresh pull、前回確認コピーと13/13 hash一致。隔離候補へ新診断だけ追加し、14ファイル中の唯一の差分が当該1ファイルであることを確認。21:51:14 HEAD反映、別隔離先への再取得14/14 hash一致。他13ソース/manifestは不変、公開deploymentのHEAD/11/12/57と権限を維持。新診断SHA-256 `f4d95f922fa10d2d36ce83ac5348b08511c251757c350888af95c7ecf3de0a50`。Git/Vercel/DB migration/設定の追加変更なし。本人のprimary scratchファイルhashも前回と一致。
+- 所有者エディタで対象関数とファイルを選択確認し、21:53:30に1回だけ実行。21:53:45完了、diagnostic elapsed14,608ms。最初のJAN検索は1件で本店所属/両JAN照合・読取りparser・full parserまで成功。成功control97、空file1、保存submit1、生成te-conditionsは実input0/script参照1/組立entry1、既知view-stateは実input/組立entry各1。
+- `IMAGE_GUARD/MOMIJI_IMAGE_GUARD_REJECTED`: `imageFileName` のparsed control0/entry0で停止。画像hidden1/entry1を必須とする実行器と同じ拒否条件を再現した。両検索完了/旧値baselineチェック/本文組立までは到達していない（completedSearches0/preparedCount0）。商品に画像がない場合の正規表現か、項目名/抽出の差異かは追加確認が必要であり、推測してguardを外さない。以前の保存試行が同じ理由だったかは、当時の固定code未記録のため直接証明したとは扱わない。
+- 商品保存送信false・consume呼出false・DB更新なし。旧操作 `eb967ccc-57b6-454c-b722-74c7a7c5885d` を再送/別ID/取消/手動更新せず保留継続。公開v57と新同期停止を維持。画像保持の正規条件確認・対応、未送信を証明する復旧経路の実装は別承認待ち。Nextソース変更なしのため型/Lint/本番buildの再実行は今回の診断追加の対象外（先行検証結果を維持）。
+- 設定画面へ切り替わるUI状態を検知後は値欄の取得を停止し、専用エディタへ明示移動・関数/ファイル選択を確認して実行した。診断結果だけを `local_exports/momiji-diagnostic-image-guard-20261009.jpg` に記録し、設定値の画像保存はしていない。診断タブと既存保存保留タブを引継ぎ指定した。
+
+## 署名付き未送信の安全な終了（2026-10-10、ローカル実装と読取り専用HEAD診断）
+
+- 本人が画像保持修正と未送信復旧経路のローカル実装・検証を承認。GAS gatewayはconsume呼出前の固定5停止・保存未開始/未受信だけに、新しい`kennel.pos-product-not-sent.v1`のHMAC証拠を付加する。元要求署名、操作、本人、店舗、固定dispatch hash、停止code、時刻へ束縛し、鍵変更/未知結果/consume呼出後は証拠を生成しない。新しい設定名・キーは不要。
+- Nextは元要求との相関/HMACを検証し、専用DALでも対象と署名を再検査。awaitを越える対象差替えを防ぐ固定copyを追加。新migration `20261010120000_pos_product_edit_not_sent.sql` はservice専用RPCで店舗→操作行をロックし、consume/apply receipt不在を検査、完全証拠を不変監査へ保存して`not_sent/send1`終端化と3予約解放を同transactionで行う。同じ証拠だけ冪等に再取得でき、intent/dispatch/商品/棚卸し値は変更しない。SQLでHMACそのものは検証せず、Nextの検証済み証拠というservice境界を明記した。
+- 旧署名なしnot_sentは従来どおりuncertainに保持する。timeout、GAS終了、期限切れ、receipt0、POS値一致だけでは解除しない。既存保留`eb967ccc-57b6-454c-b722-74c7a7c5885d`へ証拠を捏造せず、実商品の再保存/別ID作成/取消/予約解除は未実施。当時の全保存経路が永続consume必須だった証拠を確定する場合も、旧操作救済は別判断として扱う。
+- 本人の続行承認後、旧テスト1件`pos_product_public_gateway_test.mjs:92`を元応答exact7項目＋結果exact4項目の検査を維持し、新証拠exact10項目・独立HMAC計算・実protocol検証・異なる要求署名拒否を追加する形へ更新。旧350/350、下記画像契約の追加7件込みで最新357/357成功。既存assert/skip/設定緩和なし。GAS→Next→DBの証拠本文bytes契約も一致。
+- 通常DB94/94（新証拠8件を含む）、専用loopback PostgreSQL17.11の複数接続24/24（consume先行・解除先行を含む）成功。テストcluster停止を確認し、専用artifactは保持。型検査・変更7ファイルLint成功、全体Lintの既存3 errors/5 warningsは別機能で不変。buildは公開Supabase設定不足で一度/petsにて停止後、primaryの既存NEXT_PUBLIC二項目だけをprocessへ読み込み成功（service key/保存フラグは読込せず、envファイルを書き換えない）。
+- 本番非接続CSPの合成previewでPC/375px幅の未保存表示・固定入力・操作ID保持・自動再保存/成功通知なしを確認。375pxの横幅はscrollWidth375で横はみ出しなし。画面は`local_exports/not-sent-preview-desktop-20261010.png`と`not-sent-preview-mobile-20261010.png`。UI回帰は正しいnot_sentだけ明示解除でき、偽のstatus/回数/nextAction/検証値では入力とIDを保持する。
+- 本人のPOSログイン後、本店office11053で商品コード/メーカー品番にJAN4582107173062を別々に設定して検索し、各1件の同一商品を未変更編集へ開いた。本店所属11098・旧名199/95・画像表示なし・ファイル未選択を確認。実DOMはmultipartのhmma02403Formに`thumbnailImageUrl-30`（空）、`imageFileCnt-30`（opaque非空）、`delImageFileUrl`（空）、`goodsImageItemsSave`（opaque非空）の4hiddenとuploadThumbnailFileがあり、imageFileNameは0。値/HTMLは保存せず、画面証跡は`local_exports/momiji-image-empty-dom-20261010.jpg`。読み取り・タブ切替だけで保存/削除/アップロードなし。
+- `posProductForm.js`にprivate画像契約を追加し、通常実行器と対象固定診断から共用するローカル修正。旧filename検査は不変のまま実未確認schemaとして保持し、実DOM4項目は別familyとする。唯一hidden/同一entry・空参照/空削除・非空opaque2値・multipart/空fileを要求。欠落/混在/未知画像キー/無効化/型変更は停止し、opaqueは解釈/再生成せず両検索/保存後の全値完全一致を要求する。生成差があっても比較を省略しない。opaque内の制御文字も拒否し、multipart改行正規化による値変更を防ぐ。公開DTO/業務指紋には値を追加しない。実画像ありの商品は今回の新familyの確認対象外として拒否する。
+- 追加合成7ケース（実行器5・診断2、実際のopaque値なし）で4項目保持・空file・consume順序・保存1回・欠落等のconsume前拒否・保存後差のverification_required・秘密値非漏洩を検証。実行器20/20、診断13/13、全回帰357/357・変更3GASファイル構文・diff check成功。今回Next/DBソース変更なしのため、先行の型/対象Lint/build/DB94/競合24を重複実行せず維持。本番GAS push/deploy、DB migration/操作変更、Git push/Vercel反映、新同期有効化は一切していない。primary scratchのSHA-256は既存値と一致。
+- 上記ローカル検証後、本人が診断用2ファイルのHEAD反映と診断1回を承認。所有者kirikan22@gmail.com・対象scriptを確認し、最新14ファイルを`local_exports/gas-pre-image-guard-20261010`へ退避。そのコピーにForm/対象固定診断だけを差し替え、独立確認と直前の全ファイルhash検査後、16:36:06にHEAD反映した。再取得`gas-post-image-guard-20261010`の14/14 hashはcandidateと一致、他12ファイル（manifest/実行器/gatewayを含む）はpreと一致。公開デプロイHEAD/11/12/57は不変。Form SHA-256 `35B91887D846292B662B7BC498C9126CCB49A4AC5BFCE9E31F79F458DCAA005D`、診断SHA-256 `9290A0D1FE16C58875B921348FA5774435F0430AA90F242DF814D2989A1A18F8`。
+- 反映後の所有者エディタを再読込し、未保存変更なし・`diagnoseHontenMomijiEditPreparation`選択を確認して1回だけ実行。16:39:20〜16:39:42、21.398秒で`MOMIJI_EDIT_PREPARATION_INSPECTED/COMPLETE`成功。両JAN検索は各1件・同一商品、各97entry/空file1/更新submit1/実4hidden、`thumbnail-empty-v1`のopaqueを含む全画像値一致、業務値一致・旧名199/95基準一致を確認し、新名200/100のmultipart本文を1回組み立てて破棄した。`productSaveSent:false/consumeCalled:false/heldOperationVerified:false`。画面証跡は`local_exports/momiji-image-guard-success-20261010.jpg`。
+- 実保存・保存後画像保持・旧unsigned保留操作の救済は未検証/未実施。通常実行器と署名付きnot_sent公開経路、DB migration、Git/Vercelは今回変更せず、保留解除/新操作/再送も行わない。次の変更は対象差分と既存保留操作の安全条件を確認してから別承認とする。
+
+## 旧保留操作の復旧条件確認（2026-10-10、READ ONLY）
+
+- 本人の続行後、既存Supabase CLI2.116.0を固定project `wpxewebmezghoulnasre`へ使用し、既存の対象1操作監査と`local_exports/legacy-edit-readiness-audit-20261010.sql`をREAD ONLY/REPEATABLE READ/ROLLBACKで実行。`eb967ccc-57b6-454c-b722-74c7a7c5885d`はuncertain/version2/send1/consume0/apply0/locks3、prepared→claim_dispatch→outcome_unknownの3イベント、店舗版7=1/6=0のまま。元ID・本文・版・店舗/JAN/内部ID・基準旧名199/95・指定patch新名200/100が一致し、DB商品全業務値は固定intent baselineと一致。期限切れは補助観測であり、単独の解除根拠とはしない。
+- 所有者GASの実公開版を`clasp pull --versionNumber 57`で別フォルダ`local_exports/gas-public-v57-audit-20261010`へ取得。公開時`gas-maintenance-publish-20261009`とソース/manifest13/13 hash一致。独立レビューでも、公開実行器139〜142行の相関付きaccepted=true検査後だけ154行の唯一の保存POSTへ進むことを確認。gatewayのconsume応答HMAC/固定URL/要求相関を維持し、Next consume handler/protocol/routeも当時のcommit ee54a7eから変更なし。
+- 実保存前20:17:59のchecksum付きbackupに対して、現在のconsume/対象検査/manager検査/操作ロック/不変監査/操作guard/イベント監査/商品baseline関数の8定義hash・owner、関連3migrationの原文hashが一致。receiptのUPDATE/DELETE/TRUNCATE拒否trigger2本は有効、anon/authenticated/service_roleの直接INSERT/UPDATE/DELETE/TRUNCATEも拒否。署名付きnot_sent migrationは未適用。本人は10/9の試行後にDB復元・接続先変更をしていないと明示回答した。
+- 通常のREAD ONLY監査そのものはconsumeと排他ではない。将来の専用終端化では店舗→旧操作行の同じロック内で対象・版・固定hash・3予約・manager権限・consume/apply記録0を再検査し、consume先行なら拒否、終端化先行なら後続consumeを拒否する必要がある。現在の取消はprepared/send0専用で旧uncertain/send1には使えず、既存signed not_sentの証拠を捏造/後付けしない。
+- 次段階として、旧操作1件に限定した独立監査付き終端化のローカル実装・競合検証を提示する。元操作・試行1・固定本文・履歴を残し、商品/在庫値を書かず、承認後の専用手順だけで予約を解放する設計。ローカル着手の追加承認待ちであり、本番DB migration/実行、予約解除、公開GAS更新、Git/Vercel、再保存は今回行っていない。
+
+## 旧1操作の専用復旧処理（2026-10-10、ローカル実装・検証完了）
+
+- 本人の続行承認により `20261010210000_pos_product_edit_legacy_closure.sql` を追加。既存署名付きnot_sentとは別の不変監査表/保守RPC/eventを設け、本店7・商品4779・JAN4582107173062・旧操作eb967ccc・uncertain版2/send1だけを扱う。元ID/固定本文/試行回数を変えず、成功時は理由・監査根拠と版3終端を記録して元3予約のみ解除する。商品・在庫・別名・POSリンク・受付時基準値は変更しない。適用時のデータ更新やNextからの保守実行経路はない。
+- 店舗→操作→商品ロックで現在manager・固定hash・旧POS前値199/95・指定patch200/100・DB全6基準値・3イベント・正確な3予約・consume/apply/署名証拠0を再検査。公開v57の13ファイル集合・当時Next commit・先行DB監査SQL hashに固定した人の確認申告と15分以内の時刻を保存する。これはGAS署名ではなく外部版/実POS/復元なしも自動確認しない。期限切れ/receipt0/値一致だけの一般救済は設けない。
+- 保存開始権契約7本文hash/owner/言語/volatility/definer/search_pathと、receiptのFORCE RLS・直接DML拒否・正しい不変trigger2本を確認。独立レビューでnullableなproconfigの集約見逃しと商品行待機中の契約変化を検出し、NULL拒否と待機後再検査を追加。カタログDDL/GRANTや外部deploy/restoreの完全排他はDB操作行ロックだけでは保証せず、本番保守手順の必須条件として記載。
+- 合成PGliteで新15ケースと全DB109/109成功。未導入RPC拒否、拒否後の全public表不変、既存署名経路の実行、監査の不変性/権限、基準/対象/本文/予約/証拠/版/設定変更の拒否と同一受付の冪等性を検査。独立レビューで合成署名fixtureも実protocolの配列vectorへ揃え、対象15/15を再確認した。既存assert/skip緩和なし。
+- 通常PostgreSQL17.11の独立backend/実ロック待機で追加5ケース（consume先行、終端化先行、並行終端化commit/rollback、商品値変更、待機中RESET ALL）を含む29/29成功。元の商品/履歴/send1保持と停止を確認し、所有UUID test DBだけを削除、runnerのserver stoppedとpg_ctlのno server runningも確認。本番へは接続しない合成cluster。
+- POS/GAS/Next回帰358/358、独立型・変更Next対象Lint・26ページ本番build・diff check成功。buildのSupabase公開キーは合成placeholderを使用し、本番service鍵や商品通信は使わない。全体Lintは以前からの3 errors/5 warningsが残る。復旧読取り文言は「署名で確認」を一般の確認済みへ変更し、終端で再送/POS照合/DB反映を増やさない回帰を追加。画面レイアウト/印刷は変更せず、このローカル段階では本番スマホ/印刷/デプロイ確認を行っていない。
+- 本番の新2移行・互換Next Git/Vercel反映・旧操作の実行/3予約解除は未実施。旧Next ee54はnot_sent非対応なので互換NextのReady/認可付き読取り確認後にだけ終端を作る。GAS公開v57・実商品旧名199/95・新同期停止をこの作業では変更しない。公開実行器更新・再保存はその後の別段階で、今回も自動再送/別ID/取消をしていない。primary scratch test_gas.mjs SHA-256は既存値99B91593…C65B0のまま。
+
+## 本番の未送信復旧基盤反映（2026-10-11、段階実行中）
+
+- 本人承認済みの2移行→互換Next→旧1操作の監査付き終端化を開始。日付をまたいだためGAS実行中/停止/遅延0、公開HEAD/11/12/57、GitHub main ee54a7e、対象旧操作・DB契約を再確認した。商品保存とGAS公開更新はこの段階の対象外。
+- 30表を同一READ ONLY snapshotで最新論理退避し、SHA-256 `bb982496f01c713d30f9f76ca3cb57943165372f5a5265f80e422d6ad83db4fe` と型/NOT NULL/PK/全行全列のローカル復元一致を確認。論理退避でありPITRやAuthを含む完全DB復元の検証ではない。固定2移行・既存29履歴・13台帳表・商品4779の一致guardを含む1transactionのbundle SHA-256 `ff6d038014f40c60b15198f3382a39f2166e43ef3e3fd72206a52762aba3a90f` を対象projectへ適用した。
+- 事後READ ONLY監査で履歴31/追加2原文SHA一致、2監査表FORCE RLS/直接DML拒否、legacy RPC service専用、保存開始権契約assert成功。旧操作はuncertain/v2/send1/locks3、events3、consume/apply/proof/closure0、店舗版7=1/6=0を維持。事後17業務表の全行全列hashは退避前と完全一致。移行そのものは商品/在庫/操作のデータを更新していない。
+- POS回帰358/358・DB109/109・独立型・変更Next7ファイルLint・本番build26ページを再確認。通常PG競合29/29は同一SQLの先行結果を継承。全体Lintの既存3 errors/5 warningsは残る。復旧表示は署名のないlegacy監査にも適合する一般の確認済み表現へ揃えた。本人のprimary scratchファイルは既存SHAのまま。
+- 互換NextのGit/Vercel反映と旧操作の終端化は継続中。公開GASが旧v57のためProductionのDISPATCHのみOFFに変更し、新規POS保存を止め、商品読取り/既存操作の復旧は維持する。新商品同期もOFF継続。実POSはセッション切れのため再ログイン後の最新読取りが終端化の残条件であり、以前の値一致だけで確認済みとはしない。
 
 ## 確認した一次資料
 

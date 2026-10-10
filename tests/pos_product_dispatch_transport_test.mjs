@@ -3,7 +3,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import * as protocol from '../next_app/lib/pos-products/protocol.ts'
 import * as validation from '../next_app/lib/pos-products/validation.ts'
 import * as identity from '../next_app/lib/pos-products/identity.ts'
@@ -61,6 +61,59 @@ function envelope(record, changes = {}, result = { outcome: 'not_sent', code: 'P
   return { version: 1, success: true, operationId: record.command.operationId, actorId: record.command.actorId, storeId: record.command.storeId, dispatchHash: record.dispatchHash, result, ...changes }
 }
 const rejectSafely = promise => assert.rejects(promise, error => error.message === failure)
+
+function notSentProof(record, request, changes = {}) {
+  const proof = { version: 1, audience: 'kennel.pos-product-not-sent.v1', operationId, actorId,
+    storeId: record.command.storeId, dispatchHash: record.dispatchHash, requestSignature: request.signature,
+    stopCode: 'POS_PRODUCT_EDIT_PREPARE_REJECTED', occurredAt: now + 1000, ...changes }
+  proof.signature = createHmac('sha256', secret).update(JSON.stringify([proof.version, proof.audience, proof.operationId,
+    proof.actorId, proof.storeId, proof.dispatchHash, proof.requestSignature, proof.stopCode, proof.occurredAt])).digest('hex')
+  return proof
+}
+
+test('新GASの未送信証拠はHMACと要求署名を照合し、旧plain応答を証拠へ昇格させない', async () => {
+  for (const storeId of [6, 7]) {
+    const record = fixture(storeId), dispatcher = load().createSignedPosProductDispatcher(config, async (_, options) => {
+      const proof = notSentProof(record, JSON.parse(options.body))
+      return Response.json(envelope(record, { notSentProof: proof }, { outcome: 'not_sent', code: proof.stopCode,
+        saveRequestStarted: false, responseReceived: false }))
+    })
+    const result = await dispatcher.dispatch(record)
+    assert.equal(result.outcome, 'not_sent')
+    assert.equal(JSON.parse(result.proofText).storeId, storeId)
+    assert.equal(JSON.parse(result.proofText).dispatchHash, record.dispatchHash)
+    const legacy = await load().createSignedPosProductDispatcher(config, async () => Response.json(envelope(record))).dispatch(record)
+    assert.equal(Object.hasOwn(legacy, 'proofText'), false)
+  }
+})
+
+test('正しい署名でも別actor/store/操作/本文/要求/時刻/codeの未送信証拠を拒否する', async () => {
+  for (const change of [{ operationId: actorId }, { actorId: operationId }, { storeId: 7 }, { dispatchHash: 'f'.repeat(64) },
+    { requestSignature: 'f'.repeat(64) }, { audience: 'other' }, { occurredAt: now + 999 }, { occurredAt: now + 6001 },
+    { stopCode: 'POS_PRODUCT_EDIT_EXECUTION_RIGHT_UNAVAILABLE' }]) {
+    const record = fixture(), dispatcher = load().createSignedPosProductDispatcher(config, async (_, options) => {
+      const proof = notSentProof(record, JSON.parse(options.body), change)
+      return Response.json(envelope(record, { notSentProof: proof }, { outcome: 'not_sent', code: proof.stopCode,
+        saveRequestStarted: false, responseReceived: false }))
+    })
+    await rejectSafely(dispatcher.dispatch(record))
+  }
+})
+
+test('証拠の署名改竄/追加キー/保存済み結果への添付ではRPC解除に使う証拠を返さない', async () => {
+  for (const mutate of [proof => { proof.signature = 'f'.repeat(64) }, proof => { proof.private = 'synthetic-private' },
+    proof => { proof.occurredAt = '1800000001000' }]) {
+    const record = fixture(), dispatcher = load().createSignedPosProductDispatcher(config, async (_, options) => {
+      const proof = notSentProof(record, JSON.parse(options.body)); mutate(proof)
+      return Response.json(envelope(record, { notSentProof: proof }, { outcome: 'not_sent', code: 'POS_PRODUCT_EDIT_PREPARE_REJECTED', saveRequestStarted: false, responseReceived: false }))
+    })
+    await rejectSafely(dispatcher.dispatch(record))
+  }
+  const record = fixture(), dispatcher = load().createSignedPosProductDispatcher(config, async (_, options) => Response.json(
+    envelope(record, { notSentProof: notSentProof(record, JSON.parse(options.body)) },
+      { outcome: 'verification_required', code: 'POS_PRODUCT_EDIT_VERIFY_REQUIRED', saveRequestStarted: true, responseReceived: true })))
+  await rejectSafely(dispatcher.dispatch(record))
+})
 
 test('両店舗の固定本文を署名POSTし、外側の期限とpayload hashも保存済み本文に束縛する', async () => {
   for (const storeId of [6, 7]) {

@@ -3,7 +3,8 @@ import 'server-only'
 import { createClient } from '@/lib/supabase/server'
 import { requireInventoryManagerAccess } from '@/lib/inventory/auth'
 import { loadProductEditDispatchRecovery, claimProductOperation, recordProductOperationResult,
-  recordProductEditVerification, applyProductEditToDatabase, loadProductEditRecoveryState, cancelProductEditOperation } from './ledger.server'
+  recordProductEditVerification, applyProductEditToDatabase, loadProductEditRecoveryState, cancelProductEditOperation,
+  resolveProductEditNotSent } from './ledger.server'
 import { assertSameProductOperation, productOperationNextStep } from './operations'
 import { fingerprintProductEditSnapshot, serializeProductEditSnapshotFingerprint, verifyProductEditResult } from './edit-review.server'
 import { decodeProductEditInspection } from './inspection.server'
@@ -12,7 +13,7 @@ import { configuredPosProductInspector } from './inspection-transport.server'
 import type { ProductEditExecutionData, ProductEditRecoveryData, ProductEditRecoveryTarget } from './editor'
 import type { ProductOperation } from './operations'
 import type { ProductEditSnapshot } from './edit-review.server'
-import type { PosProductDispatcher } from './dispatch-transport.server'
+import type { PosProductDispatcher, ProductEditDispatchObservation } from './dispatch-transport.server'
 import type { PosProductInspector } from './edit-preparation.server'
 
 type Target = { storeId: 6 | 7; operationId: string }
@@ -50,8 +51,10 @@ function recoveryDto(request: ProductEditRecoveryTarget, saved: Awaited<ReturnTy
   const op = saved.operation
   if (op && (op.operationId !== request.operationId || op.storeId !== request.storeId)) reject()
   const state = saved.cancelled ? 'cancelled' : !op ? 'not_created' :
-    op.status === 'prepared' ? 'prepared' : op.status === 'completed' ? 'completed' : op.status === 'rejected' ? 'rejected' : 'in_progress'
-  const releaseAllowed = saved.cancelled || (op?.status === 'completed' && op.sendAttempts === 1) || (op?.status === 'rejected' && op.sendAttempts === 0)
+    op.status === 'prepared' ? 'prepared' : op.status === 'completed' ? 'completed' : op.status === 'rejected' ? 'rejected' :
+      op.status === 'not_sent' ? 'not_sent' : 'in_progress'
+  const releaseAllowed = saved.cancelled || (op?.status === 'completed' && op.sendAttempts === 1) ||
+    (op?.status === 'rejected' && op.sendAttempts === 0) || (op?.status === 'not_sent' && op.sendAttempts === 1)
   const messages = {
     not_created: '操作の作成は確認できません。遅延した準備を防ぐ取消が完了するまで、新しい操作は開始できません。',
     prepared: 'POS未送信の準備済み操作です。期限切れ・基準値競合でも、この操作を取り消して再読込できます。',
@@ -59,6 +62,7 @@ function recoveryDto(request: ProductEditRecoveryTarget, saved: Awaited<ReturnTy
     completed: 'POS・DB反映完了を確認しました。閉じる操作でこの対象の復旧情報を解除できます。',
     rejected: '未送信の終了と予約解放を確認しました。閉じる操作でこの対象の復旧情報を解除できます。',
     cancelled: '未送信取消と予約解放を確認しました。同じ操作IDの遅延準備も拒否されます。閉じてから再読込できます。',
+    not_sent: 'POSへ保存しなかったことと予約解放を確認しました。入力は保持しています。閉じて再読込してください。',
   }
   return { ...request, state, canCancel: mutationEnabled() && !releaseAllowed && (!op || (op.status === 'prepared' && op.sendAttempts === 0)),
     releaseAllowed, message: messages[state] }
@@ -105,7 +109,7 @@ function bindRecovery(request: Target, value: Recovery, previous?: Recovery): Re
         serializeProductEditSnapshotFingerprint(expected, dispatch.reviewedAt) !== dispatch.expectedFingerprintText) reject()
   }
   if (saved.receiptConsumedAt !== null && (!dispatch || operation.sendAttempts !== 1 || !Number.isSafeInteger(saved.receiptConsumedAt) ||
-      saved.receiptConsumedAt < dispatch.reviewedAt || saved.receiptConsumedAt >= dispatch.command.expiresAt)) reject()
+      saved.receiptConsumedAt < dispatch.reviewedAt || saved.receiptConsumedAt >= dispatch.command.expiresAt || operation.status === 'not_sent')) reject()
   return saved
 }
 async function reload(request: Target, previous?: Recovery): Promise<Recovery> {
@@ -144,6 +148,8 @@ function dto(saved: Recovery, verified: boolean | null = null): ProductEditExecu
     pos_confirmed: 'POSの保存値を確認しました。DB反映を再開できます。',
     db_pending: 'POSの保存値を確認済みです。DB反映だけを再開してください。',
     completed: 'POSとDBへの反映が完了しました。', rejected: '保存前に操作が中止されました。',
+    // 旧1操作の保守監査による終端も読めるため、全not_sentをGAS署名付きと表示しない。
+    not_sent: 'POSへの保存前に停止したことを確認済みです。変更は未保存です。入力を保持し、予約を安全に解除しました。閉じて再読込してください。',
   }
   return { storeId: operation.storeId, operationId: operation.operationId, status, version: operation.version,
     sendAttempts: operation.sendAttempts, stage, nextAction, posValuesVerified: status === 'completed' ? true : verified,
@@ -174,7 +180,7 @@ async function readActual(saved: Recovery, inspector?: PosProductInspector): Pro
 export async function loadProductEditExecution(input: unknown, inspector?: PosProductInspector): Promise<ProductEditExecutionData> {
   try {
     const request = target(input), saved = await reload(request)
-    if (!saved.dispatch || ['prepared', 'completed', 'rejected'].includes(saved.operation.status)) return dto(saved)
+    if (!saved.dispatch || ['prepared', 'completed', 'rejected', 'not_sent'].includes(saved.operation.status)) return dto(saved)
     const actual = await readActual(saved, inspector)
     return dto(saved, actual.verified)
   } catch { reject() }
@@ -221,7 +227,7 @@ export async function executePreparedProductEdit(input: unknown, ports: Ports = 
   try {
     const request = target(input)
     let saved = await reload(request)
-    if (saved.operation.status === 'completed' || saved.operation.status === 'rejected') return dto(saved)
+    if (['completed', 'rejected', 'not_sent'].includes(saved.operation.status)) return dto(saved)
     requireMutation()
     if (!saved.dispatch) reject()
     const dispatch = saved.dispatch
@@ -239,10 +245,23 @@ export async function executePreparedProductEdit(input: unknown, ports: Ports = 
     // claim中に認可/対象/運用フラグが変わっても、保存を開始しない。
     await authorizeTarget(saved)
     if (!sendEnabled()) reject()
-    let valuesObserved = false
-    try { valuesObserved = (await dispatcher.dispatch(dispatch)).outcome === 'values_verified' }
+    let observed: ProductEditDispatchObservation | null = null
+    try { observed = await dispatcher.dispatch(dispatch) }
     catch { /* 保存結果不明。固定操作をuncertainへ進め、自動照合や再送をしない。 */ }
     requireMutation()
+    if (observed?.outcome === 'not_sent' && observed.proofText !== undefined) {
+      await authorizeTarget(saved)
+      requireMutation()
+      try {
+        saved = withOperation(saved, await resolveProductEditNotSent(saved.operation, dispatch, observed.proofText))
+        return dto(await reload(request, saved))
+      } catch {
+        // receiptとの競合/証拠拒否/応答消失では、旧IDを維持し保存・解除を再試行しない。
+        const latest = await reload(request, saved)
+        if (latest.operation.status === 'not_sent') return dto(latest)
+      }
+    }
+    const valuesObserved = observed?.outcome === 'values_verified'
     try { saved = withOperation(saved, await recordProductOperationResult(saved.operation,
       { type: valuesObserved ? 'dispatch_returned' : 'outcome_unknown' })) }
     catch { return dto(await reload(request, saved)) }

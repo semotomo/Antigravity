@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
-import { signPosProductRequest } from '../next_app/lib/pos-products/protocol.ts'
+import { signPosProductRequest, verifyPosProductNotSentProof } from '../next_app/lib/pos-products/protocol.ts'
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
 const plain = value => JSON.parse(JSON.stringify(value))
@@ -91,9 +91,22 @@ test('実doPostから署名付きinspectを両店舗の実private受付へ送り
 
 test('署名dispatchは実ゲートウェイ/実実行器へ接続し、実行器フラグ既定OFFでPOS通信0を維持する', () => {
   for (const storeId of [6, 7]) {
-    const f = fixture(), result = f.post(signed('dispatch', storeId))
-    assert.deepEqual(result, { version: 1, success: true, operationId, actorId, storeId, dispatchHash: hash(command(storeId)),
+    const f = fixture(), body = signed('dispatch', storeId), result = f.post(body)
+    const { notSentProof, ...legacyResult } = result
+    const dispatchHash = hash(command(storeId)), requestSignature = JSON.parse(body).signature
+    assert.deepEqual(legacyResult, { version: 1, success: true, operationId, actorId, storeId, dispatchHash,
       result: { outcome: 'not_sent', code: 'POS_PRODUCT_EDIT_DISABLED', saveRequestStarted: false, responseReceived: false } })
+    assert.deepEqual(Object.keys(result).sort(), ['version', 'success', 'operationId', 'actorId', 'storeId', 'dispatchHash', 'result', 'notSentProof'].sort())
+    assert.deepEqual(Object.keys(notSentProof).sort(), ['version', 'audience', 'operationId', 'actorId', 'storeId', 'dispatchHash',
+      'requestSignature', 'stopCode', 'occurredAt', 'signature'].sort())
+    const audience = 'kennel.pos-product-not-sent.v1', stopCode = 'POS_PRODUCT_EDIT_DISABLED'
+    const signature = createHmac('sha256', secret).update(JSON.stringify([1, audience, operationId, actorId, storeId,
+      dispatchHash, requestSignature, stopCode, now]), 'utf8').digest('hex')
+    assert.deepEqual(notSentProof, { version: 1, audience, operationId, actorId, storeId, dispatchHash,
+      requestSignature, stopCode, occurredAt: now, signature })
+    const expected = { operationId, actorId, storeId, dispatchHash, requestSignature, earliestAt: now }
+    assert.deepEqual(verifyPosProductNotSentProof(notSentProof, secret, expected, now), notSentProof)
+    assert.throws(() => verifyPosProductNotSentProof(notSentProof, secret, { ...expected, requestSignature: '00'.repeat(32) }, now))
     assert.equal(f.configCalls, 1); assert.equal(f.calls.length, 0); noLegacy(f)
   }
 })

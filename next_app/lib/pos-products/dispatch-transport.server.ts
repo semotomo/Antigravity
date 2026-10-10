@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { createHash } from 'node:crypto'
-import { signPosProductRequest } from './protocol'
+import { signPosProductRequest, verifyPosProductNotSentProof } from './protocol'
 import { postPosProductEnvelope } from './inspection-transport.server'
 import { decodeProductEditInspection } from './inspection.server'
 import { serializeProductEditSnapshotFingerprint } from './edit-review.server'
@@ -12,7 +12,7 @@ type NotSentCode = 'POS_PRODUCT_EDIT_DISABLED' | 'POS_PRODUCT_EDIT_CONSUMER_UNAV
   'POS_PRODUCT_EDIT_PREPARE_REJECTED' | 'POS_PRODUCT_EDIT_EXECUTION_WINDOW_CLOSED'
 type VerificationCode = 'POS_PRODUCT_EDIT_EXECUTION_RIGHT_UNAVAILABLE' | 'POS_PRODUCT_EDIT_EXECUTION_WINDOW_CLOSED' | 'POS_PRODUCT_EDIT_VERIFY_REQUIRED'
 export type ProductEditDispatchObservation =
-  | { outcome: 'not_sent'; code: NotSentCode; saveRequestStarted: false; responseReceived: false }
+  | { outcome: 'not_sent'; code: NotSentCode; saveRequestStarted: false; responseReceived: false; proofText?: string }
   | { outcome: 'verification_required'; code: VerificationCode; saveRequestStarted: boolean; responseReceived: boolean }
   | { outcome: 'values_verified'; code: 'POS_PRODUCT_EDIT_VALUES_VERIFIED'; saveRequestStarted: true; responseReceived: boolean; inspection: ProductEditInspection }
 export type PosProductDispatcher = { dispatch(record: ProductEditDispatch): Promise<ProductEditDispatchObservation> }
@@ -87,8 +87,11 @@ function validateDispatch(input: ProductEditDispatch, now: number) {
   return { command, target, dispatchHash: saved.dispatchHash, expectedFingerprint: hash(expectedText) }
 }
 
-function observation(raw: unknown, dispatch: ReturnType<typeof validateDispatch>, sentAt: number): ProductEditDispatchObservation {
-  const envelope = object(raw, ['version', 'success', 'operationId', 'actorId', 'storeId', 'dispatchHash', 'result'])
+function observation(raw: unknown, dispatch: ReturnType<typeof validateDispatch>, sentAt: number,
+  requestSignature: string, secret: string): ProductEditDispatchObservation {
+  const envelope = object(raw)
+  object(envelope, ['version', 'success', 'operationId', 'actorId', 'storeId', 'dispatchHash', 'result',
+    ...(Object.hasOwn(envelope, 'notSentProof') ? ['notSentProof'] : [])])
   if (envelope.version !== 1 || envelope.success !== true || envelope.operationId !== dispatch.command.operationId ||
       envelope.actorId !== dispatch.command.actorId || envelope.storeId !== dispatch.command.storeId || envelope.dispatchHash !== dispatch.dispatchHash) reject()
   const result = object(envelope.result)
@@ -98,8 +101,20 @@ function observation(raw: unknown, dispatch: ReturnType<typeof validateDispatch>
       (!result.saveRequestStarted && result.responseReceived)) reject()
   if (result.outcome === 'not_sent') {
     if (!NOT_SENT_CODES.includes(result.code) || result.saveRequestStarted || result.responseReceived) reject()
-    return { outcome: 'not_sent', code: result.code as NotSentCode, saveRequestStarted: false, responseReceived: false }
+    let proofText: string | undefined
+    if (Object.hasOwn(envelope, 'notSentProof')) {
+      const proof = verifyPosProductNotSentProof(envelope.notSentProof, secret, {
+        operationId: dispatch.command.operationId, actorId: dispatch.command.actorId, storeId: dispatch.command.storeId,
+        dispatchHash: dispatch.dispatchHash, requestSignature, earliestAt: sentAt,
+      }, Date.now())
+      if (proof.stopCode !== result.code) reject()
+      proofText = JSON.stringify(proof)
+    }
+    // 旧GASの署名なし応答は観測だけ。予約解除の根拠へ昇格させない。
+    return { outcome: 'not_sent', code: result.code as NotSentCode, saveRequestStarted: false, responseReceived: false,
+      ...(proofText === undefined ? {} : { proofText }) }
   }
+  if (Object.hasOwn(envelope, 'notSentProof')) reject()
   if (result.outcome === 'verification_required') {
     if (!VERIFICATION_CODES.includes(result.code) || (result.code === 'POS_PRODUCT_EDIT_VERIFY_REQUIRED') !== result.saveRequestStarted) reject()
     return { outcome: 'verification_required', code: result.code as VerificationCode,
@@ -122,10 +137,11 @@ export function createSignedPosProductDispatcher(config: { enabled: boolean; url
     async dispatch(record) {
       try {
         const now = Date.now(), checked = validateDispatch(record, now)
-        const body = JSON.stringify(signPosProductRequest({ action: 'dispatch', operationId: checked.command.operationId,
-          actorId: checked.command.actorId, storeId: checked.command.storeId, payload: checked.command }, secret, now, checked.command.expiresAt - now))
+        const request = signPosProductRequest({ action: 'dispatch', operationId: checked.command.operationId,
+          actorId: checked.command.actorId, storeId: checked.command.storeId, payload: checked.command }, secret, now, checked.command.expiresAt - now)
+        const body = JSON.stringify(request)
         // 応答消失/不正結果でもこの送信へ戻らない。実行権の消費はGASの別ポートが行う。
-        return observation(await postPosProductEnvelope(url, body, fetcher), checked, now)
+        return observation(await postPosProductEnvelope(url, body, fetcher), checked, now, request.signature, secret)
       } catch { reject() }
     },
   }

@@ -1,7 +1,7 @@
 import type { ActionResult, ProductEditExecutionData, ProductEditRecoveryData, ProductEditorData, ProductEditorReviewData } from '@/lib/pos-products/editor'
 import type { PosProductFields } from '@/lib/pos-products/types'
 
-export type PreviewScenario = 'normal' | 'network-error' | 'conflict' | 'save-normal' | 'prepare-response-lost' | 'prepare-before-ledger' | 'prepare-unregistered' | 'save-response-lost' | 'db-pending' | 'save-rejected' | 'prepared-expired' | 'cancel-response-lost'
+export type PreviewScenario = 'normal' | 'network-error' | 'conflict' | 'save-normal' | 'prepare-response-lost' | 'prepare-before-ledger' | 'prepare-unregistered' | 'save-response-lost' | 'db-pending' | 'save-rejected' | 'save-not-sent' | 'prepared-expired' | 'cancel-response-lost'
 let scenario: PreviewScenario = 'normal'
 let loads = 0
 const operations = new Map<string, ProductEditExecutionData>()
@@ -126,7 +126,13 @@ export async function savePosProductEditorAction(input: unknown): Promise<Action
   if (!executionTarget(input)) return { success: false, error: '合成保存対象が一致しません。' }
   const before = operations.get(input.operationId)
   if (!before) return { success: false, error: '合成操作が見つかりません。新しい操作で再送しないでください。' }
-  if (before.stage === 'completed' || before.stage === 'rejected') return { success: true, data: { ...before } }
+  if (['completed', 'rejected', 'not_sent'].includes(before.stage)) return { success: true, data: { ...before } }
+  if (scenario === 'save-not-sent' && before.stage === 'prepared') {
+    const data: ProductEditExecutionData = { ...before, status: 'not_sent', stage: 'not_sent', nextAction: 'none',
+      version: 2, sendAttempts: 1, posValuesVerified: null, message: '合成：保存前に停止した証拠と予約解放を確認しました。変更は未保存です。入力は保持しています。本番非接続です。' }
+    operations.set(input.operationId, data)
+    return { success: true, data: { ...data } }
+  }
   if (scenario === 'save-rejected' && before.stage === 'prepared') {
     const data: ProductEditExecutionData = { ...before, status: 'rejected', stage: 'rejected', nextAction: 'none',
       version: 1, sendAttempts: 0, expiresAt: null, message: '合成操作を送信前に拒否しました。POS送信はありません。' }
@@ -163,9 +169,9 @@ export async function inspectPosProductEditorRecoveryAction(input: unknown): Pro
   if (!target(input) || Object.keys(input).length !== 3) return { success: false, error: '合成取消対象が一致しません。' }
   const op = operations.get(input.operationId)
   const state = cancellations.has(input.operationId) ? 'cancelled' : !op ? 'not_created' : op.stage === 'prepared' ? 'prepared' :
-    op.stage === 'completed' ? 'completed' : op.stage === 'rejected' ? 'rejected' : 'in_progress'
+    op.stage === 'completed' ? 'completed' : op.stage === 'rejected' ? 'rejected' : op.stage === 'not_sent' ? 'not_sent' : 'in_progress'
   return { success: true, data: { ...input, state, canCancel: state === 'not_created' || state === 'prepared',
-    releaseAllowed: ['cancelled', 'completed', 'rejected'].includes(state), message: state === 'cancelled'
+    releaseAllowed: ['cancelled', 'completed', 'rejected', 'not_sent'].includes(state), message: state === 'cancelled'
       ? '合成の未送信取消を確認しました。同じIDの合成準備も拒否します。本番データは変更していません。'
       : state === 'in_progress' ? '合成の送信後操作は取消できません。結果確認を続けてください。' : '合成対象3項目の状態だけを確認しました。未作成は取消完了まで解除できません。' } }
 }

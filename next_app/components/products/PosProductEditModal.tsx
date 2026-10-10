@@ -143,6 +143,7 @@ const STAGE_LABELS: Record<ProductEditExecutionData['stage'], string> = {
   prepared: '保存準備済み', dispatching: 'POS送信処理中・結果未確認', verification_required: 'POS結果の照合が必要',
   pos_confirmed: 'POSの変更を確認済み・DB反映待ち', db_pending: 'POSの変更を確認済み・DB反映待ち',
   completed: 'POS照合・DB反映完了', rejected: '操作が拒否されました',
+  not_sent: 'POS未保存・予約解放済み',
 }
 
 function recoveryKey(storeId: 6 | 7, productId: number) {
@@ -190,7 +191,7 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
   const locked = state.recovery !== null || state.storageBlocked
   const editDisabled = pending !== null || locked || !state.storageReady
   const executionCompleted = !state.executionNeedsRecovery && state.execution?.stage === 'completed'
-  const executionRejected = !state.executionNeedsRecovery && state.execution?.stage === 'rejected'
+  const executionRejected = !state.executionNeedsRecovery && ['rejected', 'not_sent'].includes(state.execution?.stage ?? '')
   const recoveryRelease = !state.storageIdentityAmbiguous && state.recoveryCheck?.releaseAllowed === true
   // 今回のhandler内で束縛した操作以外は、対象3項目のサーバー確認が解除に必要。
   const releaseConfirmed = recoveryRelease || (!state.storageBlocked && baseline !== null && (executionCompleted || executionRejected))
@@ -340,8 +341,9 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
     if (data.storeId !== pointer.storeId || data.operationId !== pointer.operationId ||
         !Object.hasOwn(STAGE_LABELS, data.stage) || !Number.isSafeInteger(data.version) || data.version < 0 ||
         (data.sendAttempts !== 0 && data.sendAttempts !== 1) ||
-        (latestExecution.current && (data.version < latestExecution.current.version || (['completed', 'rejected'].includes(latestExecution.current.stage) && data.stage !== latestExecution.current.stage))) ||
+        (latestExecution.current && (data.version < latestExecution.current.version || (['completed', 'rejected', 'not_sent'].includes(latestExecution.current.stage) && data.stage !== latestExecution.current.stage))) ||
         (data.stage === 'rejected' && (data.status !== 'rejected' || data.nextAction !== 'none' || data.sendAttempts !== 0)) ||
+        (data.stage === 'not_sent' && (data.status !== 'not_sent' || data.nextAction !== 'none' || data.sendAttempts !== 1 || data.posValuesVerified !== null)) ||
         (data.stage === 'completed' && (data.status !== 'completed' || data.posValuesVerified !== true || data.sendAttempts !== 1 || data.nextAction !== 'none'))) {
       throw new Error('保存状態の対象を確認できません。')
     }
@@ -469,9 +471,9 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
 
   function acceptRecoveryCheck(data: ProductEditRecoveryData, pointer: ProductEditorRecovery) {
     if (Object.keys(data).length !== 7 || data.storeId !== pointer.storeId || data.productId !== pointer.productId ||
-        data.operationId !== pointer.operationId || !['not_created', 'prepared', 'in_progress', 'completed', 'rejected', 'cancelled'].includes(data.state) ||
+        data.operationId !== pointer.operationId || !['not_created', 'prepared', 'in_progress', 'completed', 'rejected', 'cancelled', 'not_sent'].includes(data.state) ||
         typeof data.canCancel !== 'boolean' || typeof data.releaseAllowed !== 'boolean' || typeof data.message !== 'string' ||
-        (data.releaseAllowed !== ['completed', 'rejected', 'cancelled'].includes(data.state)) ||
+        (data.releaseAllowed !== ['completed', 'rejected', 'cancelled', 'not_sent'].includes(data.state)) ||
         (data.canCancel && !['prepared', 'not_created'].includes(data.state))) throw new Error('解除状態を確認できません。')
     dispatch({ type: 'recovery-checked', data })
   }

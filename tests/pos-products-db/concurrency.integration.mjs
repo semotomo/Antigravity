@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile } from 'node:fs/promises'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import pg from 'pg'
 import * as validation from '../../next_app/lib/pos-products/validation.ts'
@@ -273,6 +273,161 @@ const syncRow = (x, jan = x.product.jan_code) => ({ store_id: x.command.storeId,
   product_group: '分類', selling_price: 999, cost_price: 499, markup_rate: 0.5005, is_active: true, tags: x.command.storeId === 6 ? 'わんわん' : '本店' })
 const syncArgs = (run, rows) => [run.id, run.storeId, JSON.stringify(rows)]
 const syncBegin = (h, store = 6) => rpc(h.a, 'SELECT public.begin_product_master_sync($1) AS result', [store])
+
+const notSentSql = 'SELECT public.resolve_pos_product_edit_not_sent($1,$2,$3,$4,$5,$6,$7) AS result'
+const legacySql = 'SELECT public.close_legacy_pos_product_edit($1,$2,$3,$4,$5,$6,$7,$8) AS result'
+async function legacyFixture(h, uncertain = true) {
+  await h.observer.query(await migration('20261010120000_pos_product_edit_not_sent.sql'))
+  await h.observer.query(await migration('20261010210000_pos_product_edit_legacy_closure.sql'))
+  const jan = '4582107173062', actor = manager7
+  const p = (await h.observer.query(`INSERT INTO public.products(id,store_id,jan_code,product_name,category,product_group,supplier_name,cost_price,selling_price,brand)
+    VALUES(4779,7,$1,'95ミツヤ もみじ焼き','犬おやつ','犬おやつ','モリミツ',95,199,'保持') RETURNING *`, [jan])).rows[0]
+  const reviewedAt = await now(h.observer)
+  const before = {
+    identity: { posProductId: 'synthetic-legacy-pos-id', officeId: '11053', groupId: '11098', salesKind: 'retail',
+      productCode: jan, manufacturerCode: jan, exclusiveStore: true },
+    fields: { name: '95ミツヤ もみじ焼き', groupId: '721420885', price: '199', cost: '95', supplierId: '721420424' },
+    settings: { nameKana: '', abbreviation: '', taxId: '0', priceScope: 'all', priceMode: 'fixed', supplierScope: 'all', otherSettingsFingerprint: 'c'.repeat(64) },
+    groups: [{ id: '721420885', name: '犬おやつ' }], suppliers: [{ id: '721420424', name: 'モリミツ' }],
+  }
+  const fields = { ...before.fields, name: 'ミツヤ もみじ焼き', price: '200', cost: '100' }
+  const fingerprint = f => JSON.stringify({ version: 'pos-product-edit.v1', storeId: 7, productId: p.id, janCode: jan,
+    identity: before.identity, fields: f, settings: before.settings })
+  const beforeText = fingerprint(before.fields), expectedText = fingerprint(fields)
+  const command = validation.parsePosProductCommand({ kind: 'update', operationId: 'eb967ccc-57b6-454c-b722-74c7a7c5885d',
+    storeId: 7, productId: p.id, expectedFingerprint: hash(beforeText), fields })
+  const x = { actor, product: p, command, before, beforeText, expectedText, reviewedAt,
+    catalog: { groupId: '721420885', groupName: '犬おやつ', supplierId: '721420424', supplierName: 'モリミツ', previousPosName: before.fields.name } }
+  await prepare(h, x)
+  x.dispatchText = canonical({ operationId: x.op.id, actorId: actor, storeId: 7, janCode: jan, before,
+    patch: { goodsName: fields.name, gddGoodsPrice: fields.price, gddGoodsCost: fields.cost }, expiresAt: reviewedAt + 110000 })
+  await rpc(h.a, 'SELECT public.register_pos_product_edit_dispatch($1,$2,$3,$4,$5,$6,$7,$8,$9) AS result',
+    [...opArgs(x.op), x.dispatchText, beforeText, expectedText, reviewedAt])
+  await claim(h, x)
+  if (uncertain) x.op = await rpc(h.a, 'SELECT public.record_pos_product_operation_result($1,$2,$3,$4,$5,$6,$7) AS result', [...opArgs(x.op), 'outcome_unknown', null])
+  return x
+}
+async function legacyArgs(h, x, version = 2) {
+  const evidence = { version: 1, basis: 'operator-reviewed-legacy-consume-barrier.v1', gasVersion: 57,
+    gasSourceSha256: '431e3b1313273c7b4b4869f373e40f17bc0c56c6a4026e78f8a0c4e688a5c287',
+    nextCommit: 'ee54a7e1fe7e1c1fcfafdad4354a8cc4c84e69b9',
+    dbAuditSha256: 'fde2c0737cc3e7f4919e1cfae783a4cbd0b16e7094c31066b54ad002caaf51be',
+    noRestoreConfirmed: true, posBaselineConfirmed: true, reviewedAt: await now(h.observer) }
+  return [x.actor, 7, x.op.id, x.op.payload_hash, version, hash(x.dispatchText), canonical(evidence), '合成環境で監査根拠を再確認した旧操作の終端化']
+}
+const legacyCounts = async (h, x) => ({ closure: await count(h, 'pos_product_edit_legacy_closures', x.op.id),
+  signedProof: await count(h, 'pos_product_edit_not_sent_proofs', x.op.id),
+  locks: await count(h, 'pos_product_operation_locks', x.op.id), events: await count(h, 'pos_product_operation_events', x.op.id),
+  consume: await count(h, 'pos_product_edit_dispatch_receipts', x.op.id), apply: await count(h, 'pos_product_edit_receipts', x.op.id) })
+
+integration('旧操作終端化は先行consumeと結果記録のcommitを待ち、消費記録があれば監査/予約を変更しない', async h => {
+  const x = await legacyFixture(h, false), original = await product(h, x.product.id), args = await legacyArgs(h, x)
+  await begin(h.a)
+  assert.equal((await rpcValue(h.a, consumeSql, consumeArgs(x))).accepted, true)
+  x.op = await rpcValue(h.a, 'SELECT public.record_pos_product_operation_result($1,$2,$3,$4,$5,$6,$7) AS result', [...opArgs(x.op), 'outcome_unknown', null])
+  await begin(h.b); const waiting = pending(rpcValue(h.b, legacySql, args))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('COMMIT')
+  await failure(waiting, '22023', /LEGACY_CLOSURE_REJECTED/); await h.b.query('ROLLBACK')
+  assert.equal((await operation(h, x.op.id)).status, 'uncertain')
+  assert.deepEqual(await legacyCounts(h, x), { closure: 0, signedProof: 0, locks: 3, events: 3, consume: 1, apply: 0 })
+  assert.deepEqual(await product(h, x.product.id), original)
+})
+
+integration('旧操作終端化先行は遅延consumeを同じ行で停止し、署名証拠を作らず元入力/send1を保持する', async h => {
+  const x = await legacyFixture(h), original = await product(h, x.product.id), args = await legacyArgs(h, x)
+  await begin(h.a); const first = await rpcValue(h.a, legacySql, args)
+  assert.equal(first.closed, true); assert.equal(first.operation.status, 'not_sent'); assert.equal(first.operation.row_version, 3)
+  assert.equal(first.operation.send_attempts, 1); assert.equal(first.operation.command_text, x.op.command_text)
+  await begin(h.b); const waiting = pending(rpcValue(h.b, consumeSql, consumeArgs(x)))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('COMMIT')
+  await failure(waiting, '22023', /DISPATCH_REJECTED/); await h.b.query('ROLLBACK')
+  assert.deepEqual(await legacyCounts(h, x), { closure: 1, signedProof: 0, locks: 0, events: 4, consume: 0, apply: 0 })
+  assert.deepEqual(await product(h, x.product.id), original)
+})
+
+integration('同じ旧操作の並行終端化は一度だけ記録し、先行rollbackなら待機側だけが一度記録する', async h => {
+  const x = await legacyFixture(h), original = await product(h, x.product.id), args = await legacyArgs(h, x)
+  // rollback側は永続監査も予約解放も残さない。
+  await begin(h.a); assert.equal((await rpcValue(h.a, legacySql, args)).closed, true)
+  await begin(h.b); const waiting = pending(rpcValue(h.b, legacySql, args))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('ROLLBACK')
+  assert.equal((await success(waiting)).closed, true); await h.b.query('COMMIT')
+  // commit後の並行再受付は、副作用なしの同じ結果。
+  await begin(h.a); assert.equal((await rpcValue(h.a, legacySql, args)).closed, false)
+  await begin(h.b); const replay = pending(rpcValue(h.b, legacySql, args))
+  await blocked(h, h.b, h.a, replay); await h.a.query('COMMIT')
+  assert.equal((await success(replay)).closed, false); await h.b.query('COMMIT')
+  assert.deepEqual(await legacyCounts(h, x), { closure: 1, signedProof: 0, locks: 0, events: 4, consume: 0, apply: 0 })
+  assert.deepEqual(await product(h, x.product.id), original)
+})
+
+integration('旧操作終端化の商品行待機後に基準値変更を検出し、元操作/監査/予約を保持する', async h => {
+  const x = await legacyFixture(h), args = await legacyArgs(h, x)
+  await begin(h.a, false); await h.a.query('UPDATE public.products SET selling_price=201 WHERE id=4779')
+  await begin(h.b); const waiting = pending(rpcValue(h.b, legacySql, args))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('COMMIT')
+  await failure(waiting, '22023', /LEGACY_CLOSURE_REJECTED/); await h.b.query('ROLLBACK')
+  assert.equal((await operation(h, x.op.id)).status, 'uncertain')
+  assert.deepEqual(await legacyCounts(h, x), { closure: 0, signedProof: 0, locks: 3, events: 3, consume: 0, apply: 0 })
+  assert.equal((await product(h, 4779)).selling_price, 201)
+})
+
+integration('旧操作終端化の商品行待機中の関数設定変更を再検査し、不明な保存経路では終端化しない', async h => {
+  const x = await legacyFixture(h), args = await legacyArgs(h, x), original = await product(h, x.product.id)
+  await begin(h.a, false); await h.a.query('SELECT 1 FROM public.products WHERE id=4779 FOR UPDATE')
+  await begin(h.b); const waiting = pending(rpcValue(h.b, legacySql, args))
+  await blocked(h, h.b, h.a, waiting)
+  await h.observer.query('ALTER FUNCTION public.consume_pos_product_edit_dispatch(uuid,integer,uuid,text) RESET ALL')
+  await h.a.query('COMMIT')
+  await failure(waiting, '55000', /LEGACY_CONTRACT_CHANGED/); await h.b.query('ROLLBACK')
+  assert.deepEqual(await legacyCounts(h, x), { closure: 0, signedProof: 0, locks: 3, events: 3, consume: 0, apply: 0 })
+  assert.deepEqual(await product(h, x.product.id), original)
+})
+
+async function notSentArgs(h, x) {
+  const proof = { version: 1, audience: 'kennel.pos-product-not-sent.v1', operationId: x.op.id, actorId: x.actor,
+    storeId: x.command.storeId, dispatchHash: hash(x.dispatchText), requestSignature: 'a'.repeat(64),
+    stopCode: 'POS_PRODUCT_EDIT_PREPARE_REJECTED', occurredAt: await now(h.observer) }
+  // Nextが署名検証した後のSQL契約を合成データで試験し、実GASへの送信は行わない。
+  proof.signature = createHmac('sha256', 'test-only-not-a-key').update(canonical(proof)).digest('hex')
+  return [...opArgs(x.op), hash(x.dispatchText), canonical(proof)]
+}
+
+integration('consume先行の未送信復旧は同じ操作行を待ち、消費commit後に証拠/予約解除を拒否する', async h => {
+  await h.observer.query(await migration('20261010120000_pos_product_edit_not_sent.sql'))
+  const x = await fixture(h); await prepare(h, x); await register(h, x); await claim(h, x)
+  const original = await product(h, x.product.id), args = await notSentArgs(h, x)
+  await begin(h.a); assert.equal((await rpcValue(h.a, consumeSql, consumeArgs(x))).accepted, true)
+  await begin(h.b); const waiting = pending(rpcValue(h.b, notSentSql, args))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('COMMIT')
+  await failure(waiting, '22023', /NOT_SENT_REJECTED/); await h.b.query('ROLLBACK')
+  assert.equal((await operation(h, x.op.id)).status, 'dispatching')
+  assert.equal(await count(h, 'pos_product_edit_dispatch_receipts', x.op.id), 1)
+  assert.equal(await count(h, 'pos_product_edit_not_sent_proofs', x.op.id), 0)
+  assert.equal(await count(h, 'pos_product_operation_locks', x.op.id), 3)
+  assert.equal(await count(h, 'pos_product_operation_events', x.op.id), 2)
+  assert.deepEqual(await product(h, x.product.id), original)
+})
+
+integration('未送信復旧先行のconsumeは同じ操作行を待ち、終端commit後に実行権を発行しない', async h => {
+  await h.observer.query(await migration('20261010120000_pos_product_edit_not_sent.sql'))
+  const x = await fixture(h); await prepare(h, x); await register(h, x); await claim(h, x)
+  const original = await product(h, x.product.id), args = await notSentArgs(h, x)
+  await begin(h.a); const resolved = await rpcValue(h.a, notSentSql, args)
+  assert.equal(resolved.recovered, true); assert.equal(resolved.operation.status, 'not_sent')
+  await begin(h.b); const waiting = pending(rpcValue(h.b, consumeSql, consumeArgs(x)))
+  await blocked(h, h.b, h.a, waiting); await h.a.query('COMMIT')
+  await failure(waiting, '22023', /DISPATCH_REJECTED/); await h.b.query('ROLLBACK')
+  const current = await operation(h, x.op.id)
+  assert.equal(current.status, 'not_sent'); assert.equal(current.send_attempts, 1)
+  assert.equal(await count(h, 'pos_product_edit_dispatch_receipts', x.op.id), 0)
+  assert.equal(await count(h, 'pos_product_edit_not_sent_proofs', x.op.id), 1)
+  assert.equal(await count(h, 'pos_product_operation_locks', x.op.id), 0)
+  assert.equal(await count(h, 'pos_product_operation_events', x.op.id), 3)
+  assert.equal((await rpc(h.b, notSentSql, args)).recovered, false)
+  assert.equal(await count(h, 'pos_product_operation_events', x.op.id), 3)
+  assert.deepEqual(await product(h, x.product.id), original)
+})
 const snapshot = async h => ({ products: (await h.observer.query('SELECT * FROM public.products ORDER BY id')).rows,
   versions: (await h.observer.query('SELECT * FROM public.product_master_store_versions ORDER BY store_id')).rows,
   runs: (await h.observer.query('SELECT * FROM public.product_master_sync_runs ORDER BY id')).rows })

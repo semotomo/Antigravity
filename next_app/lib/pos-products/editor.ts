@@ -25,7 +25,7 @@ export type ProductEditExecutionData = {
   status: import('./operations').ProductOperationStatus
   version: number
   sendAttempts: number
-  stage: 'prepared' | 'dispatching' | 'verification_required' | 'pos_confirmed' | 'db_pending' | 'completed' | 'rejected'
+  stage: 'prepared' | 'dispatching' | 'verification_required' | 'pos_confirmed' | 'db_pending' | 'completed' | 'rejected' | 'not_sent'
   nextAction: 'save' | 'verify' | 'apply_db' | 'none'
   posValuesVerified: boolean | null
   expiresAt: number | null
@@ -35,7 +35,7 @@ export type ProductEditExecutionData = {
 export type ProductEditRecoveryTarget = { storeId: 6 | 7; productId: number; operationId: string }
 /** 対象3項目をサーバー照合した解除判断。not_createdだけでは解除しない。 */
 export type ProductEditRecoveryData = ProductEditRecoveryTarget & {
-  state: 'not_created' | 'prepared' | 'in_progress' | 'completed' | 'rejected' | 'cancelled'
+  state: 'not_created' | 'prepared' | 'in_progress' | 'completed' | 'rejected' | 'cancelled' | 'not_sent'
   canCancel: boolean
   releaseAllowed: boolean
   message: string

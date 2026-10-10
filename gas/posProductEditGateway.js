@@ -6,7 +6,8 @@ function handlePosProductEditDispatch_(body) {
   try {
     var properties = PropertiesService.getScriptProperties();
     if (properties.getProperty('POS_PRODUCT_EDIT_GATEWAY_ENABLED') !== 'true') throw new Error('DISABLED');
-    var request = verifyPosProductRequest_(body, properties.getProperty('POS_PRODUCT_SIGNING_SECRET'));
+    var signingSecret = properties.getProperty('POS_PRODUCT_SIGNING_SECRET');
+    var request = verifyPosProductRequest_(body, signingSecret);
     var command = request.payload;
     posProductEditGatewayRecord_(command, ['operationId', 'actorId', 'storeId', 'janCode', 'before', 'patch', 'expiresAt']);
     // 外側の期限は署名検証後にだけ読む。内部commandの期限延長を認めない。
@@ -16,13 +17,45 @@ function handlePosProductEditDispatch_(body) {
         command.expiresAt > envelope.expiresAt) throw new Error('INVALID_COMMAND');
     var dispatchHash = posProductHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
       posProductEditGatewayCanonical_(command), Utilities.Charset.UTF_8));
-    var consumer = createPosProductEditConsumer_(properties);
-    var result = executePosProductEdit_(getPOSConfig_(), command, consumer);
-    return { version: 1, success: true, operationId: request.operationId, actorId: request.actorId,
+    var consumer = createPosProductEditConsumer_(properties), consumeCalled = false;
+    var result = executePosProductEdit_(getPOSConfig_(), command, function(input) {
+      // consumeの成否によらず、呼出後の結果へ「consume前」の証明を付けない。
+      consumeCalled = true;
+      return consumer(input);
+    });
+    var response = { version: 1, success: true, operationId: request.operationId, actorId: request.actorId,
       storeId: request.storeId, dispatchHash: dispatchHash, result: result };
+    if (!consumeCalled) {
+      var proof = createPosProductNotSentProof_(properties, signingSecret, request, envelope, dispatchHash, result);
+      if (proof) response.notSentProof = proof;
+    }
+    return response;
   } catch (_) {
     return { version: 1, success: false, code: 'POS_PRODUCT_EDIT_DISPATCH_UNAVAILABLE' };
   }
+}
+
+/** consume前の固定停止だけを証明する。本文・hidden・例外原文は証明へ含めない。 */
+function createPosProductNotSentProof_(properties, secret, request, envelope, dispatchHash, result) {
+  try {
+    posProductEditGatewayRecord_(result, ['outcome', 'code', 'saveRequestStarted', 'responseReceived']);
+    var preConsumeCodes = ['POS_PRODUCT_EDIT_DISABLED', 'POS_PRODUCT_EDIT_CONSUMER_UNAVAILABLE',
+      'POS_PRODUCT_EDIT_INVALID_REQUEST', 'POS_PRODUCT_EDIT_PREPARE_REJECTED', 'POS_PRODUCT_EDIT_EXECUTION_WINDOW_CLOSED'];
+    if (result.outcome !== 'not_sent' || result.saveRequestStarted !== false || result.responseReceived !== false ||
+        preConsumeCodes.indexOf(result.code) < 0) return null;
+    var occurredAt = Date.now();
+    if (!Number.isSafeInteger(occurredAt) || occurredAt < 0 ||
+        properties.getProperty('POS_PRODUCT_SIGNING_SECRET') !== secret) return null;
+    var proof = { version: 1, audience: 'kennel.pos-product-not-sent.v1', operationId: request.operationId,
+      actorId: request.actorId, storeId: request.storeId, dispatchHash: dispatchHash,
+      requestSignature: envelope.signature, stopCode: result.code, occurredAt: occurredAt };
+    proof.signature = posProductHex_(Utilities.computeHmacSha256Signature(JSON.stringify([1, proof.audience,
+      proof.operationId, proof.actorId, proof.storeId, proof.dispatchHash, proof.requestSignature,
+      proof.stopCode, proof.occurredAt]), secret, Utilities.Charset.UTF_8));
+    // 署名処理中に運用鍵が変更された場合も、旧鍵の証明を外へ返さない。
+    if (properties.getProperty('POS_PRODUCT_SIGNING_SECRET') !== secret) return null;
+    return proof;
+  } catch (_) { return null; }
 }
 
 /**

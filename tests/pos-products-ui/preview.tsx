@@ -37,6 +37,7 @@ function Preview() {
           <option value="save-response-lost">保存応答消失：状態確認 → POS結果照合（再送なし）</option>
           <option value="db-pending">DB反映待ち：POS確認済み → DB反映だけ再開</option>
           <option value="save-rejected">送信前拒否：拒否確定 → 明示close → 最新値から再編集</option>
+          <option value="save-not-sent">署名付き未送信：入力保持 → 未保存表示 → 明示close</option>
           <option value="prepared-expired">準備期限切れ：未送信取消 → 明示close → 再読込</option>
           <option value="cancel-response-lost">取消応答消失：storage保持 → 読取り確認 → 明示解除</option>
         </select>

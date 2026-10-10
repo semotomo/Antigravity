@@ -61,6 +61,14 @@ function harness(options = {}) {
     recordProductOperationResult: async (op, event) => { calls.push('event:' + event.type); await authorize(); bound(op); if (env.POS_PRODUCT_WRITES_ENABLED !== 'true') throw Error('private-disabled'); const result = advance(event); if (options.eventLost === event.type) throw Error('private-event'); return result },
     recordProductEditVerification: async (op, review, actual, at) => { calls.push('verify'); await authorize(); bound(op); const fingerprint = reviewApi.verifyProductEditResult(review, actual, at); const result = advance({ type: 'pos_verified', fingerprint }); if (options.verificationLost) throw Error('private-verification'); return result },
     applyProductEditToDatabase: async op => { calls.push('apply'); await authorize(); bound(op); if (options.databaseFails) throw Error('private-database'); const result = advance({ type: 'db_completed' }); if (options.databaseLost) throw Error('private-database-response'); return result },
+    resolveProductEditNotSent: async (op, dispatch, proof) => {
+      calls.push('resolve-not-sent'); await authorize(); bound(op)
+      assert.equal(dispatch.dispatchHash, stored.dispatch.dispatchHash); assert.equal(proof, 'synthetic-signed-proof')
+      if (stored.receiptConsumedAt !== null || options.proofRejected) throw Error('private-proof-rejected')
+      stored.operation = { ...stored.operation, status: 'not_sent', version: stored.operation.version + 1 }
+      if (options.proofResponseLost) throw Error('private-response-lost')
+      return plain(stored.operation)
+    },
   }
   const dispatcher = { dispatch: async record => { calls.push('dispatch'); assert.equal(record.dispatchText, stored.dispatch.dispatchText); assert.equal(record.command.expiresAt, now + 120000); if (options.consume !== false) stored.receiptConsumedAt = clock.now;
     options.onDispatch?.({ stored, auth, env, product, calls }); if (options.dispatchFails) throw Error('private-cookie'); return options.observation ?? { outcome: 'values_verified', code: 'POS_PRODUCT_EDIT_VALUES_VERIFIED', saveRequestStarted: true, responseReceived: true, inspection: { private: 'never-trust-this' } } } }
@@ -75,6 +83,44 @@ function harness(options = {}) {
 }
 const mutations = calls => calls.filter(call => ['claim', 'dispatch', 'verify', 'apply'].includes(call) || call.startsWith('event:'))
 const safelyReject = promise => assert.rejects(promise, error => error.message === failure)
+
+test('監査済み終端not_sentの再読込みは署名を断定せず、読取りだけで入力と同じ操作を保つ', async () => {
+  const f = harness()
+  f.status('not_sent'); f.stored.receiptConsumedAt = null
+  const before = plain(f.stored), result = await f.api.loadProductEditExecution(f.request)
+  assert.equal(result.status, 'not_sent'); assert.equal(result.operationId, operationId)
+  assert.equal(result.sendAttempts, 1); assert.equal(result.nextAction, 'none')
+  assert.match(result.message, /保存前に停止したことを確認済み/)
+  assert.doesNotMatch(result.message, /署名/)
+  assert.deepEqual(f.stored, before); assert.deepEqual(f.calls, ['load', 'auth'])
+})
+
+test('署名付き未送信の終了は入力/送信回数を維持し、保存/独立POS検査/DB反映を再実行しない', async () => {
+  for (const proofResponseLost of [false, true]) {
+    const f = harness({ consume: false, proofResponseLost, observation: { outcome: 'not_sent', code: 'POS_PRODUCT_EDIT_PREPARE_REJECTED',
+      saveRequestStarted: false, responseReceived: false, proofText: 'synthetic-signed-proof' } })
+    const dispatchText = f.stored.dispatch.dispatchText, result = await f.api.executePreparedProductEdit(f.request)
+    assert.equal(result.status, 'not_sent'); assert.equal(result.stage, 'not_sent'); assert.equal(result.sendAttempts, 1)
+    assert.equal(result.nextAction, 'none'); assert.equal(result.posValuesVerified, null)
+    assert.equal(f.calls.filter(call => call === 'resolve-not-sent').length, 1)
+    assert.equal(f.calls.includes('inspect'), false); assert.equal(f.calls.includes('apply'), false)
+    assert.equal(f.stored.dispatch.dispatchText, dispatchText)
+    assert.doesNotMatch(JSON.stringify(result), /synthetic-signed-proof|dispatchHash|requestSignature|private/)
+    await f.api.executePreparedProductEdit(f.request); await f.api.loadProductEditExecution(f.request)
+    assert.equal(f.calls.filter(call => call === 'dispatch').length, 1); assert.equal(f.calls.includes('inspect'), false)
+  }
+})
+
+test('未送信証拠の拒否/consume競合ではuncertainと同じ操作IDを維持する', async () => {
+  for (const options of [{ consume: true }, { consume: false, proofRejected: true }]) {
+    const f = harness({ ...options, observation: { outcome: 'not_sent', code: 'POS_PRODUCT_EDIT_PREPARE_REJECTED',
+      saveRequestStarted: false, responseReceived: false, proofText: 'synthetic-signed-proof' } })
+    const result = await f.api.executePreparedProductEdit(f.request)
+    assert.equal(result.status, 'uncertain'); assert.equal(result.sendAttempts, 1); assert.equal(result.operationId, operationId)
+    assert.equal(f.calls.filter(call => call === 'dispatch').length, 1); assert.equal(f.calls.includes('inspect'), false)
+    assert.equal(f.calls.includes('event:reject_before_dispatch'), false)
+  }
+})
 
 test('両店舗で固定記録をclaim一度→送信一度→独立POS検査→台帳確認→DB反映する', async () => {
   for (const storeId of [6, 7]) {

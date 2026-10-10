@@ -100,13 +100,8 @@ function executePosProductEdit_(config, command, consumeDispatch) {
       html = readRequest(listUrl, posReadPayload_(html, 'hmma02400Form', buttons[0].replace('includeChildBody:hmma02400Form:', ''), {}));
       html = readRequest(origin + '/hm-hmma/view/hmma/hmma024/hmma02402.html', posReadPayload_(html, 'hmma02402Form', 'doHmma02403', {}));
       var parsed = parsePosProductEditForm_(html, request.storeId, request.janCode, true), inspection = parsed.inspection;
-      // 現行フォームで確認済みの画像業務値だけをprivateに照合する。通信状態hiddenは比較しない。
-      // 欠落/無効化/型変更は画像保持を確認できないため停止し、値自体はDTOやログへ出さない。
-      var imageControls = parsed.submission.controls.imageFileName;
-      var imageEntries = parsed.submission.entries.filter(function(entry) { return entry.key === 'imageFileName'; });
-      if (!imageControls || imageControls.length !== 1 || imageControls[0].type !== 'hidden' || imageEntries.length !== 1 ||
-          imageEntries[0].value !== imageControls[0].value) reject();
-      images.push(imageEntries[0].value);
+      // 実画像契約はprivate保持。opaque状態の生成差も比較を省略せず安全停止する。
+      images.push(JSON.stringify(readPosProductImageState_(parsed)));
       searches.push({ field: searchField, count: 1, inspected: true, internalId: inspection.identity.posProductId,
         internalIdPresent: true, salesKind: '2', storeGroupId: inspection.identity.groupId,
         productCodeMatches: inspection.identity.productCode === request.janCode,
@@ -114,13 +109,13 @@ function executePosProductEdit_(config, command, consumeDispatch) {
       forms.push(html);
     });
     if (canonical(searches[0].formInspection) !== canonical(searches[1].formInspection) || images[0] !== images[1]) reject();
-    return { html: forms[1], imageFileName: images[1], data: { storeId: request.storeId, janCode: request.janCode, capturedAt: Date.now(), searches: searches } };
+    return { html: forms[1], imageState: images[1], data: { storeId: request.storeId, janCode: request.janCode, capturedAt: Date.now(), searches: searches } };
   }
 
   function executableNow() {
     return Date.now() < request.expiresAt && PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_EDIT_EXECUTION_ENABLED') === 'true';
   }
-  var prepared, expected, beforeImageFileName;
+  var prepared, expected, beforeImageState;
   try {
     var loginHtml = readRequest(config.baseUrl);
     var loginPayload = posReadPayload_(loginHtml, 'hmma00000Form', 'doLogin', { loginId: config.loginId, password: config.password });
@@ -128,7 +123,7 @@ function executePosProductEdit_(config, command, consumeDispatch) {
     if (!/^https:\/\/cg8\.power-k\.jp\/(?:0D890OGI|hm-hmma\/view\/hmma\/hmma000\/hmma00000\.html(?:;jsessionid=[A-Za-z0-9_.-]+)?)(?:\?te-uniquekey=[A-Za-z0-9_-]+)?$/.test(loginAction)) reject();
     readRequest(loginAction, loginPayload);
     var before = inspect();
-    beforeImageFileName = before.imageFileName;
+    beforeImageState = before.imageState;
     prepared = buildPosProductEditSubmission_(before.html, request.storeId, request.janCode, request.before, request.patch);
     expected = JSON.parse(canonical(request.before));
     Object.keys(request.patch).forEach(function(key) { expected.fields[fieldsMap[key]] = key === 'gddSupplierCd' && request.patch[key] === '' ? null : request.patch[key]; });
@@ -164,7 +159,7 @@ function executePosProductEdit_(config, command, consumeDispatch) {
   try {
     // 成功画面/保存応答HTMLは読まず、固定の一覧から新しく両検索する。
     var after = inspect();
-    if (unexpectedResponse || after.data.capturedAt <= sentAt || after.imageFileName !== beforeImageFileName ||
+    if (unexpectedResponse || after.data.capturedAt <= sentAt || after.imageState !== beforeImageState ||
         canonical(after.data.searches[1].formInspection) !== canonical(expected)) reject();
     return result('values_verified', 'POS_PRODUCT_EDIT_VALUES_VERIFIED', after.data);
   } catch (_) { return result('verification_required', 'POS_PRODUCT_EDIT_VERIFY_REQUIRED'); }
