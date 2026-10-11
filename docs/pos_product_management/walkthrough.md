@@ -521,6 +521,7 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 本人の「反映を進めて」でDB migration1件/GAS2ファイル/Git/Vercelの反映を承認。worker有効化・トリガー・実商品保存は対象外。認証semotomo/kirikan22@gmail.comとmain8537d6e/公開v60を再確認した。
 - 本番project wpxewebmezghoulnasreを読取り専用32表snapshotで退避し、型/NOT NULL/主キー/全行全列復元照合成功。SHA-256 `334ca85dd6095e9568075f29be37971e69bd83f44ffbc9d365d8a0263c8b81d9`。履歴31件/既存3関数hash/未完了操作0をguardしたtransactionで20261012120000を適用、事後SHA-256 `7b299ca59817a39bda582323a429259939ab560c1699956b79a16857adb36cf6`。既存32表全列不変（商品6703・棚卸し6544項目等）、新規3表空、migration原文一致、公開34表の復元照合成功。
 - 最新GAS14ファイルを退避し、execution1件変更/worker1件追加だけの15ファイルをHEADへ反映。再取得15/15一致、既存manifest/他13ファイル/Momiji診断を保持。既存Web Appをv61へ更新し、他3公開・設定・トリガーは維持。GASプロパティ名欄とVercel一覧で新BGフラグ未登録（既定OFF）を確認。Git/Vercelの反映と公開後確認は進行中。
+- GitHub mainへ対象28ファイルの5fbac7c、公開後に検出した専用POST接続漏れの最小修正1c18c19を通常push。Vercel `CBnUTruKS5XdRekr3CbHjBUvRdt5` Ready/Production/本番ドメイン/対象SHA、無署名worker POSTの停止中503 JSON・他経路の未ログイン拒否、本番商品一覧の正常表示を確認。関連59/59・独立型・対象Lint・30ページbuild成功、全回帰576/579（同じ既存3失敗）。原本の未コミット3ファイルはhash不変。承認範囲の反映完了、新機能OFF・トリガー/実商品保存なし。
 
 ## 確認した一次資料
 
