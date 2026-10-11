@@ -9,7 +9,7 @@ import type { ProductSyncStoreResult } from '@/lib/product-sync/notifications'
 
 // 商品マスタ同期ボタン
 // POSポータルから商品マスタCSVをダウンロードし、Supabase productsテーブルに同期する
-export function ProductMasterSyncButton() {
+export function ProductMasterSyncButton({ syncEnabled, storeId }: { syncEnabled: boolean; storeId?: 6 | 7 }) {
   const router = useRouter()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
@@ -18,13 +18,15 @@ export function ProductMasterSyncButton() {
   const [needsCheck, setNeedsCheck] = useState(false)
 
   async function handleSync() {
+    // 非表示/disabledだけに依存せず、停止中や結果不明の操作は送信しない。
+    if (!syncEnabled || pending || needsCheck) return
     setPending(true)
     setMessage('')
     setIsError(false)
     setResults([])
 
     try {
-      const response = await fetch('/api/gas/sync-products', {
+      const response = await fetch(storeId ? `/api/gas/sync-products?store=${storeId}` : '/api/gas/sync-products', {
         method: 'POST',
       })
 
@@ -55,18 +57,18 @@ export function ProductMasterSyncButton() {
       <button
         type="button"
         onClick={handleSync}
-        disabled={pending || needsCheck}
+        disabled={!syncEnabled || pending || needsCheck}
         className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:bg-indigo-50/50 disabled:text-indigo-400"
       >
         {pending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-        {pending ? '同期中...' : needsCheck ? '同期状態の確認が必要' : '商品マスタ同期'}
+        {!syncEnabled ? '商品同期は停止中' : pending ? '同期中...' : needsCheck ? '同期状態の確認が必要' : '商品マスタ同期'}
       </button>
 
       {message ? (
         <p role={isError ? 'alert' : 'status'} className={`text-xs ${isError ? 'text-red-600' : 'text-emerald-600'}`}>{message}</p>
       ) : null}
       {results.map(result => <div key={result.storeId} role="alert" className="max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950"><p className="font-semibold">{result.store}</p><p>{result.message}</p><p className="mt-1">次の対応: {result.nextStep}</p></div>)}
-      {needsCheck ? <Link href="/products" className="text-xs text-indigo-700 underline">商品マスタ画面で同期状態・通知を確認</Link> : null}
+      {needsCheck ? <Link href="/options/product-sync" className="text-xs text-indigo-700 underline">商品同期管理で同期状態・通知を確認</Link> : null}
     </div>
   )
 }

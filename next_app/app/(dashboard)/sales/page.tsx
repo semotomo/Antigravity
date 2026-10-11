@@ -181,14 +181,14 @@ export default async function SalesPage({
           <div className="text-sm font-medium text-gray-500">全 {salesData.length} 件</div>
           <div className="flex items-center gap-3">
             <SalesHistoryModal />
-            <div className="flex flex-col items-center gap-1">
-              <ProductMasterSyncButton />
+            {process.env.POS_PRODUCT_MASTER_SYNC_ENABLED === 'true' ? <div className="flex flex-col items-center gap-1">
+              <ProductMasterSyncButton syncEnabled={true} />
               {productSyncTime && (
                 <span className="text-[10px] text-gray-400 font-medium select-none">
                   最終同期: {productSyncTime}
                 </span>
               )}
-            </div>
+            </div> : null}
             <div className="flex flex-col items-center gap-1">
               <SalesImportButton />
               {salesImportTime && (

@@ -138,7 +138,7 @@ test('商品適用成功と通知だけの保存失敗を区分し、再送不�
   assert.doesNotMatch(result.message, /店舗の商品マスタ同期に失敗/)
 })
 
-function routeFixture({ user = true, allowed = [7, 6], view = 'all', success = true, throwPrivate = false } = {}) {
+function routeFixture({ user = true, allowed = [7, 6], view = 'all', success = true, throwPrivate = false, enabled = true } = {}) {
   const calls = []
   const notifications = load('lib/product-sync/notifications.ts')
   const validation = load('lib/inventory/validation.ts', {}, { URL })
@@ -166,11 +166,41 @@ function routeFixture({ user = true, allowed = [7, 6], view = 'all', success = t
     '@/lib/product-sync/notifications.server': { updateProductSyncSuccessHistory: async () => calls.push(['history']) },
     '@/lib/pos-products/master-sync-transport.server': { configuredProductMasterSyncTransport: () => ({ sync: async () => { throw Error('Unexpected send') } }) },
   }
-  const globals = { process: { env: { CRON_SECRET: 'test-secret' } }, URL }
+  const globals = { process: { env: { CRON_SECRET: 'test-secret', POS_PRODUCT_MASTER_SYNC_ENABLED: enabled ? 'true' : 'false' } }, URL }
   return { calls, manual: load('app/api/gas/sync-products/route.ts', imports, globals), cron: load('app/api/cron/products/sync/route.ts', imports, globals) }
 }
 
 const manualRequest = () => new Request('http://localhost/api/gas/sync-products', { method: 'POST', headers: { Origin: 'http://localhost' } })
+
+test('同期OFFでも認証・店舗認可を維持し、手動/cronは実行・記録・成功日時更新をしない', async () => {
+  for (const method of ['manual', 'cron']) {
+    const f = routeFixture({ enabled: false })
+    const response = method === 'manual' ? await f.manual.POST(manualRequest()) : await f.cron.GET(new Request('http://localhost/', { headers: { Authorization: 'Bearer test-secret' } }))
+    assert.equal(response.status, 409)
+    assert.equal(response.body.success, false)
+    assert.equal(response.body.disabled, true)
+    assert.ok(response.body.results.every(row => row.code === 'PRODUCT_SYNC_DISABLED' && row.outcome === 'rejected'))
+    assert.equal(f.calls.some(row => row[0] === 'run' || row[0] === 'history' || row[0] === 'refresh'), false)
+  }
+  const denied = routeFixture({ enabled: false, allowed: [] })
+  assert.equal((await denied.manual.POST(manualRequest())).status, 403)
+  assert.equal((await denied.cron.GET(new Request('http://localhost/'))).status, 401)
+})
+
+test('管理画面の指定店舗はCookie表示と独立して再認可し、不正値・重複指定を送信しない', async () => {
+  const request = query => new Request(`http://localhost/api/gas/sync-products?${query}`, { method: 'POST', headers: { Origin: 'http://localhost' } })
+  const f = routeFixture({ allowed: [6], view: 'all' })
+  assert.equal((await f.manual.POST(request('store=6'))).status, 200)
+  assert.deepEqual(Array.from(f.calls.find(row => row[0] === 'run')[1]), [6])
+  const denied = routeFixture({ allowed: [6] })
+  assert.equal((await denied.manual.POST(request('store=7'))).status, 403)
+  assert.equal(denied.calls.some(row => row[0] === 'run'), false)
+  for (const query of ['store=5', 'store=', 'store=all', 'store=6&store=7', 'store=06']) {
+    const invalid = routeFixture()
+    assert.equal((await invalid.manual.POST(request(query))).status, 400)
+    assert.equal(invalid.calls.length, 0)
+  }
+})
 
 test('手動同期のOrigin欠落・別サイト・不正Originは認証/DB/GASより前に403で拒否する', async () => {
   for (const origin of [null, 'https://other.example', 'not-an-origin', 'null', 'http://localhost/path', 'http://user:password@localhost', 'http://localhost/', 'http://localhost https://other.example']) {
@@ -220,7 +250,7 @@ test('ルートの未知の例外は原文を返さず、同期状態確認と�
   assert.doesNotMatch(JSON.stringify(response), /private/)
 })
 
-function readFixture({ user = true, allowed = [{ store_id: 7, role: 'viewer' }] } = {}) {
+function readFixture({ user = true, allowed = [{ store_id: 7, role: 'manager' }] } = {}) {
   const calls = []
   const notices = load('lib/product-sync/notifications.ts')
   const row = { attempt_id: runId, store_id: 7, source: 'cron', outcome: 'unknown', code: 'PRODUCT_SYNC_UNKNOWN',
@@ -245,7 +275,7 @@ function readFixture({ user = true, allowed = [{ store_id: 7, role: 'viewer' }] 
   return { api, calls }
 }
 
-test('通知読取りは本人/店舗memberを検査し、viewerにも自店舗だけを返す', async () => {
+test('管理用通知読取りは本人と店舗managerを検査し、担当店舗だけを返す', async () => {
   const anonymous = readFixture({ user: false })
   await assert.rejects(anonymous.api.readProductSyncNotifications(7))
   assert.equal(anonymous.calls.length, 0)

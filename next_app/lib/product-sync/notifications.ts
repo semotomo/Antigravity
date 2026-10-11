@@ -36,7 +36,7 @@ export const PRODUCT_SYNC_STORES: ProductSyncStore[] = [
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const REASONS: Record<ProductSyncFailureCode, { reason: string; nextStep: string }> = {
   PRODUCT_SYNC_PENDING_EDIT: { reason: '処理中の商品編集があるため、同期全体を拒否しました。', nextStep: '商品編集の状態を確認し、完了または取消後に新しいCSVを取得してください。' },
-  PRODUCT_SYNC_PENDING_SYNC: { reason: '進行中または未確認の同期があるため、新しい同期全体を拒否しました。', nextStep: '再送せず、商品マスタ画面で前回の同期状態を確認してください。完了または未適用を確認後、新しいCSVを取得してください。' },
+  PRODUCT_SYNC_PENDING_SYNC: { reason: '進行中または未確認の同期があるため、新しい同期全体を拒否しました。', nextStep: '再送せず、商品同期管理で前回の同期状態を確認してください。完了または未適用を確認後、新しいCSVを取得してください。' },
   PRODUCT_SYNC_STALE: { reason: 'CSV取得中に商品編集または別の同期が行われたため、同期全体を拒否しました。', nextStep: '商品編集の完了を確認し、新しいCSVを取得して同期してください。' },
   PRODUCT_SYNC_INVALID_DATA: { reason: 'CSVの店舗・重複商品・金額などの検査に失敗し、同期全体を拒否しました。', nextStep: '店舗設定とCSVの内容を管理者に確認してもらい、修正後に新しいCSVを取得してください。' },
   PRODUCT_SYNC_EXPIRED: { reason: 'CSV取得の有効期限を過ぎたため、同期全体を拒否しました。', nextStep: '商品編集の状態を確認し、新しいCSVを取得して同期してください。' },

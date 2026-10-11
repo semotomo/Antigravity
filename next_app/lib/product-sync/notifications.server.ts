@@ -44,15 +44,15 @@ export async function readProductSyncNotifications(storeId: unknown) {
   const client = await createUserClient()
   const { data: { user }, error: authError } = await client.auth.getUser()
   if (authError || !user) throw new Error('ログインが必要です。')
-  // 通知の閲覧はviewerにも許可する。Cookieやuser metadataを店舗権限として信用しない。
+  // 運用通知と状態照合は担当店舗のmanagerだけに許可する。metadataやCookieは権限に使わない。
   const { data: access, error: accessError } = await client.from('user_store_access').select('store_id,role')
-    .eq('user_id', user.id).in('role', ['manager', 'staff', 'viewer']).in('store_id', [6, 7])
+    .eq('user_id', user.id).in('role', ['manager']).in('store_id', [6, 7])
   if (accessError) throw new Error('通知の店舗権限を確認できませんでした。')
-  const allowed = ((access ?? []) as Array<{ store_id: number; role: string }>).map(row => row.store_id)
+  const allowed = ((access ?? []) as Array<{ store_id: number; role: string }>).filter(row => row.role === 'manager').map(row => row.store_id)
     .filter((id): id is ProductSyncStoreId => id === 6 || id === 7)
   if (storeId !== null && !allowed.includes(storeId)) throw new Error('この店舗の通知を表示する権限がありません。')
   const stores: ProductSyncStoreId[] = storeId === null ? allowed : [storeId]
-  if (!stores.length) return { notifications: [], unresolvedCount: 0 }
+  if (!stores.length) return { notifications: [], unresolvedCount: 0, managedStoreIds: stores }
   // 状態確認は同じrunのDB正本だけを見る。未受付なら遅延開始権を閉じ、商品同期は送信しない。
   await Promise.all(stores.map(id => getProductSyncNotificationGate(id).catch(() => null)))
   const readClient = client as unknown as SupabaseClient<NotificationDatabase>
@@ -66,5 +66,5 @@ export async function readProductSyncNotifications(storeId: unknown) {
   if (open.error || resolved.error) throw new Error('商品同期通知を取得できませんでした。')
   const notifications = [...(open.data ?? []), ...(resolved.data ?? [])].map(decodeProductSyncNotification)
   if (notifications.some(row => row === null)) throw new Error('商品同期通知を確認できませんでした。')
-  return { notifications: notifications.filter(row => row !== null), unresolvedCount: open.count ?? 0 }
+  return { notifications: notifications.filter(row => row !== null), unresolvedCount: open.count ?? 0, managedStoreIds: stores }
 }

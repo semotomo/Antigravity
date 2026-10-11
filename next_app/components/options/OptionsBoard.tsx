@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { UserPlus, Settings, Save, Shield, KeyRound, Mail, CheckCircle2, AlertCircle, Loader2, Building } from 'lucide-react'
 import { createUserAction, updateStoreSettingsAction } from '@/lib/actions/options'
 
@@ -119,6 +120,12 @@ export function OptionsBoard({ initialStores }: OptionsBoardProps) {
             </p>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-balance text-lg font-semibold text-gray-900">商品同期管理</h2>
+        <p className="mt-2 text-pretty text-sm text-gray-600">担当店舗の同期状態・実行記録を管理者用画面で確認できます。</p>
+        <Link href="/options/product-sync" className="mt-3 inline-block text-sm text-indigo-700 underline">商品同期管理を開く</Link>
       </section>
 
       <div className="grid gap-8 md:grid-cols-2">
