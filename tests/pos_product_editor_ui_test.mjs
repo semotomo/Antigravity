@@ -187,7 +187,9 @@ test('フラグONの全店・他店行は編集拒否し、OFFでは既存モー
     const writes = []
     const values = ['検索語', [product], false, dialog, false]
     const ui = compile('next_app/components/products/ProductsBoard.tsx', {
-      react: { useEffect: () => {}, useState: () => [values[index++], value => writes.push(value)] },
+      react: { useEffect: () => {}, useState: () => [values[index++], value => writes.push(value)], useRef: value => ({ current: value }) },
+      'next/navigation': { useRouter: () => ({ refresh: () => {} }) },
+      '@/components/products/BackgroundProductEditModal': { BackgroundProductEditModal: blankComponent, isBackgroundEditIntake: () => false },
       '@/components/orders/JanCodeScannerField': { JanCodeScannerField: blankComponent },
       '@/components/products/ProductFormModal': { ProductFormModal: Legacy },
       '@/components/products/PosProductEditModal': { PosProductEditModal: Pos },

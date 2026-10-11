@@ -508,6 +508,20 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 独立差分レビューでブロッカーなしを確認し、本人semotomoとmain 76d4a59を再確認後、承認7ファイルだけを0096fdc9c3a591bd15c30bd6000f017be888e758で通常push。Vercel GuEnP1VtdCbjbQdDqQ7GHBTk761eは24秒buildのReady/Production/kennel-dashboardドメイン一致、GitHub Vercel successを確認。公開後17:48:03の本番UIで本店ARCの名前/1600/800/分類・仕入先候補の取得に成功し、変更なしのため保存確認はdisabled。前の応答検証エラーはこの試行で再現せず、再発原因は未確定として保持する。証跡はGit対象外の`local_exports/arc-inspection-success-production-0096fdc-20261011.png`、`response-diagnostics-production-0096fdc-20261011.png`。DB変更・商品保存・商品マスタ同期ONは行っていない。
 - 一度だけ同じ商品を再取得し、17:49:29に2回目も成功。再取得確認の名前/分類/1600/800/仕入先未設定が同じであり、「入力を保持して最新値を基準にする」を選択して入力不変・新取得日時・変更確認disabledを確認。自動再送や実保存ではなく、承認対象の明示読取りだけ。未コミットscratchのSHA-256は99B91593…C65B0一致、旧untracked helper2件は未変更・Git対象外を維持。
 
+## 商品編集の永続受付・裏側反映（2026-10-12、ローカル検証）
+
+- 本人の「お願い」でローカル実装を承認。商品名/売価/原価だけをDB基準値と同一IDで永続受付し、受付APIのPOS通信0回・confirmed商品値不変を検証した。専用GAS workerは新鮮なフォームを保持して照合後に短期限dispatchを生成し、既存一度だけconsume/POS保存/結果照合/冪等DB反映に接続する。
+- 受付応答消失・同時クリック・古い表示値・店舗/権限/署名/lease不一致を拒否し、希望値とIDを保持。未送信取消・同ID再確認・未受付IDの恒久取消証跡を追加。送信済み再確認は保存POST0回、読取り/DB反映のみ。旧商品全体同期と旧prepareも未完了受付を迂回できない。
+- 新規関連52/52、全回帰575/578（従来3失敗）、DB統合122/122、実PostgreSQL 17.11並行7/7（ロック待ち6回）成功。独立型・対象Lint・30ページ本番build成功。全体Lintの従来3 errors/5 warningsは保持。専用PostgreSQLと合成UIサーバーは停止済み。
+- 実モーダルを本番非接続の合成データで確認。PCと390×844スマホで保存受付後に閉じ、商品Aの希望150円/確定126円を分離したまま商品Bを編集できた。スマホdialog358px/文書390pxで横溢れなし。証跡 `local_exports/background-edit-mobile.png` はGit対象外。
+- scratch/旧helper2件のSHA-256不変。stage/commit/push、本番DB/GAS/Vercel、実商品保存は未実施。反映順序・worker実時間/クォータ/監視・本番検証の残件は `background_edit_plan.md` に記録した。
+
+## 永続受付基盤の本番DB/GAS反映（2026-10-12、別承認済み）
+
+- 本人の「反映を進めて」でDB migration1件/GAS2ファイル/Git/Vercelの反映を承認。worker有効化・トリガー・実商品保存は対象外。認証semotomo/kirikan22@gmail.comとmain8537d6e/公開v60を再確認した。
+- 本番project wpxewebmezghoulnasreを読取り専用32表snapshotで退避し、型/NOT NULL/主キー/全行全列復元照合成功。SHA-256 `334ca85dd6095e9568075f29be37971e69bd83f44ffbc9d365d8a0263c8b81d9`。履歴31件/既存3関数hash/未完了操作0をguardしたtransactionで20261012120000を適用、事後SHA-256 `7b299ca59817a39bda582323a429259939ab560c1699956b79a16857adb36cf6`。既存32表全列不変（商品6703・棚卸し6544項目等）、新規3表空、migration原文一致、公開34表の復元照合成功。
+- 最新GAS14ファイルを退避し、execution1件変更/worker1件追加だけの15ファイルをHEADへ反映。再取得15/15一致、既存manifest/他13ファイル/Momiji診断を保持。既存Web Appをv61へ更新し、他3公開・設定・トリガーは維持。GASプロパティ名欄とVercel一覧で新BGフラグ未登録（既定OFF）を確認。Git/Vercelの反映と公開後確認は進行中。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。

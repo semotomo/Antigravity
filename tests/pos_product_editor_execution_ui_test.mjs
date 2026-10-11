@@ -594,7 +594,9 @@ test('ページは6フラグ全てexact trueのときだけ保存を公開し、
   const Pos = () => null
   const blank = () => null
   const board = compile('next_app/components/products/ProductsBoard.tsx', {
-    react: { useState: () => { const current = index++; return [values[current], value => writes.push([current, typeof value === 'function' ? value(values[current]) : value])] }, useEffect: (_fn, deps) => dependencies.push(deps) },
+    react: { useState: () => { const current = index++; return [values[current], value => writes.push([current, typeof value === 'function' ? value(values[current]) : value])] }, useRef: value => ({ current: value }), useEffect: (_fn, deps) => { if (deps.length === 3) dependencies.push(deps) } },
+    'next/navigation': { useRouter: () => ({ refresh: () => {} }) },
+    '@/components/products/BackgroundProductEditModal': { BackgroundProductEditModal: blank, isBackgroundEditIntake: () => false },
     '@/components/orders/JanCodeScannerField': { JanCodeScannerField: blank },
     '@/components/products/ProductFormModal': { ProductFormModal: blank }, '@/components/products/PosProductEditModal': { PosProductEditModal: Pos },
     '@/components/products/ProductsSubnav': { ProductsSubnav: blank }, '@/components/ui/DataTable': { DataTable: blank },

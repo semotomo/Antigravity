@@ -1,10 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Search, SquarePen, Loader2 } from 'lucide-react'
 import { JanCodeScannerField } from '@/components/orders/JanCodeScannerField'
 import { ProductFormModal } from '@/components/products/ProductFormModal'
 import { PosProductEditModal } from '@/components/products/PosProductEditModal'
+import { BackgroundProductEditModal, isBackgroundEditIntake } from '@/components/products/BackgroundProductEditModal'
+import type { ProductEditIntakeData } from '@/lib/pos-products/background-edit'
 import { ProductsSubnav } from '@/components/products/ProductsSubnav'
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable'
 import { BarcodeToggle } from '@/components/ui/BarcodeToggle'
@@ -21,21 +24,112 @@ type ProductsBoardProps = {
   products: ProductListRow[]
   posEditorEnabled?: boolean
   posSaveEnabled?: boolean
+  backgroundEditEnabled?: boolean
   selectedStoreId?: 6 | 7 | null
 }
 
 type DialogState = {
   product: ProductListRow
   nonce: number
+  legacy?: boolean
 } | null
 
-export function ProductsBoard({ products: _initialProducts, posEditorEnabled = false, posSaveEnabled = false, selectedStoreId = null }: ProductsBoardProps) {
+export function ProductsBoard({ products: _initialProducts, posEditorEnabled = false, posSaveEnabled = false, backgroundEditEnabled = false, selectedStoreId = null }: ProductsBoardProps) {
+  const router = useRouter()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ProductListRow[]>([])
   const [loading, setLoading] = useState(false)
   const [dialogState, setDialogState] = useState<DialogState>(null)
   const [includeInactive, setIncludeInactive] = useState(false)
   const [searchRevision, setSearchRevision] = useState(0)
+  const [backgroundEntries, setBackgroundEntries] = useState<Record<string, ProductEditIntakeData>>({})
+  const [statusRevision, setStatusRevision] = useState(0)
+  const previousStatus = useRef<Record<string, ProductEditIntakeData['status']>>({})
+  const refreshedOperations = useRef(new Set<string>())
+  const editingWithPos = posEditorEnabled || backgroundEditEnabled
+  const statusTargets = JSON.stringify(results.filter(product => product.store_id === 6 || product.store_id === 7)
+    .map(product => ({ store: product.store_id, id: product.id, jan: product.jan_code })))
+
+  // 可視商品の状態だけを店舗別・100件以内で取得する。希望値はproductsへ混ぜない。
+  useEffect(() => {
+    if (!backgroundEditEnabled) return
+    const targets = JSON.parse(statusTargets) as { store: 6 | 7; id: number; jan: string }[]
+    if (!targets.length) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let running = false
+    async function refreshStatuses() {
+      if (controller.signal.aborted || running || document.visibilityState === 'hidden') return
+      running = true
+      try {
+        const rows: ProductEditIntakeData[] = []
+        for (const store of [6, 7] as const) {
+          const ids = targets.filter(target => target.store === store).map(target => target.id)
+          for (let start = 0; start < ids.length; start += 100) {
+            const batch = ids.slice(start, start + 100)
+            const params = new URLSearchParams({ store: String(store), products: batch.join(',') })
+            const response = await fetch(`/api/pos-products/background-edit?${params}`, { signal: controller.signal, cache: 'no-store' })
+            const body = await response.json()
+            if (!response.ok || body.success !== true || !Array.isArray(body.data)) throw new Error('受付状況を確認できません。')
+            for (const data of body.data) {
+              const target = targets.find(target => target.store === store && target.id === data?.productId)
+              if (!target || !isBackgroundEditIntake(data, { storeId: store, productId: target.id, janCode: target.jan })) throw new Error('受付状況を確認できません。')
+              rows.push(data)
+            }
+          }
+        }
+        if (controller.signal.aborted) return
+        let completed = false
+        for (const data of rows) {
+          const previous = previousStatus.current[data.operationId]
+          if (data.status === 'completed' && previous && previous !== 'completed' && !refreshedOperations.current.has(data.operationId)) {
+            refreshedOperations.current.add(data.operationId); completed = true
+          }
+          previousStatus.current[data.operationId] = data.status
+        }
+        setBackgroundEntries(previous => {
+          const next = { ...previous }
+          for (const target of targets) delete next[`${target.store}:${target.id}`]
+          for (const data of rows) next[`${data.storeId}:${data.productId}`] = data
+          return next
+        })
+        if (completed) { router.refresh(); setSearchRevision(value => value + 1) }
+        if (rows.some(data => data.status === 'queued' || data.status === 'working')) timer = setTimeout(() => void refreshStatuses(), 30_000)
+      } catch {
+        if (!controller.signal.aborted) timer = setTimeout(() => void refreshStatuses(), 30_000)
+      } finally { running = false }
+    }
+    function onVisible() {
+      if (document.visibilityState === 'visible') { clearTimeout(timer); void refreshStatuses() }
+    }
+    void refreshStatuses()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { controller.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [backgroundEditEnabled, statusTargets, statusRevision, query, includeInactive, router])
+
+  function acceptEdit(data: ProductEditIntakeData) {
+    // 受付ACK消失中に完了した操作も、同じIDの確認後に確定値を一度だけ再取得する。
+    if (data.status === 'completed' && !refreshedOperations.current.has(data.operationId)) {
+      refreshedOperations.current.add(data.operationId)
+      router.refresh()
+      setSearchRevision(value => value + 1)
+    }
+    previousStatus.current[data.operationId] = data.status
+    setBackgroundEntries(previous => ({ ...previous, [`${data.storeId}:${data.productId}`]: data }))
+    setStatusRevision(value => value + 1)
+  }
+
+  function hasLegacyPointer(product: ProductListRow) {
+    try {
+      return ['kennel-pos-edit-execution:v1', 'kennel-pos-edit-intent:v1', 'kennel-pos-edit-phase:v1']
+        .some(prefix => window.sessionStorage.getItem(`${prefix}:${product.store_id}:${product.id}`) !== null)
+    } catch { return true }
+  }
+
+  function backgroundStatus(product: ProductListRow) {
+    const data = backgroundEditEnabled ? backgroundEntries[`${product.store_id}:${product.id}`] : undefined
+    return data && ['queued', 'working', 'needs_review'].includes(data.status) ? data : undefined
+  }
 
   // 300ms のデバウンス付きでサーバーサイド検索APIを呼び出す
   useEffect(() => {
@@ -84,6 +178,15 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
       render: (product) => (
         <div className="min-w-[240px]">
           <p className="font-semibold text-gray-900">{product.product_name ?? '商品名未設定'}</p>
+          {backgroundStatus(product) ? <div className="mt-2 space-y-1 text-xs">
+            <StatusBadge variant={backgroundStatus(product)?.status === 'needs_review' ? 'warning' : 'info'}>
+              {backgroundStatus(product)?.status === 'needs_review' ? '要確認' : '反映待ち'}
+            </StatusBadge>
+            <p role="status" className="text-pretty text-gray-600">{backgroundStatus(product)?.status === 'needs_review'
+              ? backgroundStatus(product)?.message : '変更を受け付けました。POSへ反映中です。'}</p>
+            <p className="text-pretty text-gray-600">反映予定：{Object.entries(backgroundStatus(product)!.patch).map(([field, value]) =>
+              `${({ name: '商品名', price: '売価', cost: '原価' } as Record<string, string>)[field]} ${value}`).join(' / ')}</p>
+          </div> : null}
           <p className="mt-1 text-xs text-gray-500">
             {product.category || 'カテゴリ未設定'}
             {product.product_group ? ` / ${product.product_group}` : ''}
@@ -146,19 +249,20 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
       render: (product) => (
         <button
           type="button"
-          disabled={posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId)}
-          title={posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId) ? '編集する店舗を一つ選択してください。' : undefined}
+          disabled={editingWithPos && (selectedStoreId === null || product.store_id !== selectedStoreId)}
+          title={editingWithPos && (selectedStoreId === null || product.store_id !== selectedStoreId) ? '編集する店舗を一つ選択してください。' : undefined}
           onClick={() => {
-            if (posEditorEnabled && (selectedStoreId === null || product.store_id !== selectedStoreId)) return
+            if (editingWithPos && (selectedStoreId === null || product.store_id !== selectedStoreId)) return
             setDialogState({
               product,
               nonce: Date.now(),
+              legacy: backgroundEditEnabled && hasLegacyPointer(product),
             })
           }}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <SquarePen className="h-4 w-4" />
-          {posEditorEnabled ? 'POS編集' : '編集'}
+          {backgroundEditEnabled ? backgroundStatus(product) ? '受付内容' : '編集' : posEditorEnabled ? 'POS編集' : '編集'}
         </button>
       ),
     },
@@ -168,7 +272,7 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
     <>
       <div className="space-y-6">
         <ProductsSubnav />
-        {posEditorEnabled && selectedStoreId === null ? (
+        {editingWithPos && selectedStoreId === null ? (
           <p role="status" className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             POS商品を編集する店舗を「本店のみ」または「わんわん」から選択してください。
           </p>
@@ -251,8 +355,20 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
       </div>
 
       {dialogState ? (
-        posEditorEnabled ? (
+        editingWithPos ? (
           selectedStoreId !== null && dialogState.product.store_id === selectedStoreId ? (
+            backgroundEditEnabled && !dialogState.legacy ? (
+            <BackgroundProductEditModal
+              key={`${dialogState.product.id}-${dialogState.nonce}`}
+              product={dialogState.product}
+              storeId={selectedStoreId}
+              existingOperation={backgroundStatus(dialogState.product)}
+              onAccepted={acceptEdit}
+              onAbandoned={() => { router.refresh(); setSearchRevision(value => value + 1); setStatusRevision(value => value + 1) }}
+              onClose={() => setDialogState(null)}
+              onAdvanced={() => setDialogState(value => value ? { ...value, legacy: true } : null)}
+            />
+            ) : (
             <PosProductEditModal
               key={`${dialogState.product.id}-${dialogState.nonce}`}
               product={dialogState.product}
@@ -261,6 +377,7 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
               onSaved={() => setSearchRevision(value => value + 1)}
               onClose={() => setDialogState(null)}
             />
+            )
           ) : null
         ) : (
           <ProductFormModal

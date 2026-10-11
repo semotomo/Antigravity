@@ -5,6 +5,11 @@
  * Nodeの既存claimを二度呼ぶだけではこの契約を満たさない。hidden/本文/資格情報は永続化しない。
  */
 function executePosProductEdit_(config, command, consumeDispatch) {
+  return executePosProductEditWithSession_(config, command, consumeDispatch, null);
+}
+
+// 保持済みフォームは同じGAS実行内のprivate workerだけが渡す。公開commandへ含めない。
+function executePosProductEditWithSession_(config, command, consumeDispatch, retainedSession) {
   var saveRequestStarted = false, responseReceived = false;
   function result(outcome, code, inspection) {
     var value = { outcome: outcome, code: code, saveRequestStarted: saveRequestStarted, responseReceived: responseReceived };
@@ -56,73 +61,18 @@ function executePosProductEdit_(config, command, consumeDispatch) {
         typeof config.password !== 'string' || !config.password || config.password.length > 4096) reject();
   } catch (_) { return result('not_sent', 'POS_PRODUCT_EDIT_INVALID_REQUEST'); }
 
-  var origin = 'https://cg8.power-k.jp', cookies = '', fieldsMap = {
+  var fieldsMap = {
     goodsName: 'name', goodsGroup: 'groupId', gddGoodsPrice: 'price', gddGoodsCost: 'cost', gddSupplierCd: 'supplierId',
   };
-  function url(value) {
-    if (typeof value !== 'string' || !/^https:\/\/cg8\.power-k\.jp\/(?:0D890OGI|hm-hmma\/view\/hmma\/hmma(?:000\/hmma00000|030\/hmma03000|024\/hmma0240[023])\.html(?:;jsessionid=[A-Za-z0-9_-]{1,128}(?:\.[A-Za-z0-9_-]{1,32})?)?)(?:\?te-uniquekey=[A-Za-z0-9_-]{1,128})?$/.test(value)) reject();
-    return value;
-  }
-  function absolute(value) { return url(typeof value === 'string' && value[0] === '/' ? origin + value : value); }
-  function readRequest(target, payload) {
-    for (var redirects = 0; redirects < 4; redirects++) {
-      var response = UrlFetchApp.fetch(url(target), { method: payload ? 'post' : 'get', payload: payload || undefined,
-        headers: { Cookie: cookies }, followRedirects: false, muteHttpExceptions: true });
-      cookies = mergeCookies_(cookies, response);
-      var code = response.getResponseCode();
-      if (code === 302 || code === 303) {
-        var headers = response.getHeaders();
-        target = absolute(headers.Location || headers.location);
-        payload = null; // 転送はGETだけ。Cookie/本文を外部ホストへ送らない。
-        continue;
-      }
-      if (code !== 200) reject();
-      var html = response.getContentText();
-      if (typeof html !== 'string' || html.length > 2000000) reject();
-      return html;
-    }
-    reject();
-  }
-  function inspect() {
-    var listUrl = origin + '/hm-hmma/view/hmma/hmma024/hmma02400.html', searches = [], forms = [], images = [];
-    ['schGoodsId', 'schMakerCd'].forEach(function(searchField) {
-      var html = readRequest(listUrl);
-      var filters = { schOfficeCd: request.storeId === 7 ? '11053' : '11054', schTenpoGroupNoSingle: request.storeId === 7 ? '11098' : '11099',
-        schGoodsId: '', schMakerCd: '', schGoodsName: '' };
-      filters[searchField] = request.janCode;
-      html = readRequest(listUrl, posReadPayload_(html, 'hmma02400Form', 'doSerchNormal', filters));
-      var text = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<[^>]*>/g, '');
-      var count = text.match(/([\d,]+)\s*件中/);
-      if (!count || Number(count[1].replace(/,/g, '')) !== 1) reject();
-      var listForm = posReadForm_(html, 'hmma02400Form'), fields = extractAllFormFields_(listForm, 'hmma02400Form');
-      var buttons = Object.keys(fields).filter(function(key) { return /^includeChildBody:hmma02400Form:goodsItems:\d+:doHmma02402$/.test(key); });
-      if (buttons.length !== 1) reject();
-      html = readRequest(listUrl, posReadPayload_(html, 'hmma02400Form', buttons[0].replace('includeChildBody:hmma02400Form:', ''), {}));
-      html = readRequest(origin + '/hm-hmma/view/hmma/hmma024/hmma02402.html', posReadPayload_(html, 'hmma02402Form', 'doHmma02403', {}));
-      var parsed = parsePosProductEditForm_(html, request.storeId, request.janCode, true), inspection = parsed.inspection;
-      // 実画像契約はprivate保持。opaque状態の生成差も比較を省略せず安全停止する。
-      images.push(JSON.stringify(readPosProductImageState_(parsed)));
-      searches.push({ field: searchField, count: 1, inspected: true, internalId: inspection.identity.posProductId,
-        internalIdPresent: true, salesKind: '2', storeGroupId: inspection.identity.groupId,
-        productCodeMatches: inspection.identity.productCode === request.janCode,
-        manufacturerCodeMatches: inspection.identity.manufacturerCode === request.janCode, formInspection: inspection });
-      forms.push(html);
-    });
-    if (canonical(searches[0].formInspection) !== canonical(searches[1].formInspection) || images[0] !== images[1]) reject();
-    return { html: forms[1], imageState: images[1], data: { storeId: request.storeId, janCode: request.janCode, capturedAt: Date.now(), searches: searches } };
-  }
-
   function executableNow() {
-    return Date.now() < request.expiresAt && PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_EDIT_EXECUTION_ENABLED') === 'true';
+    return Date.now() < request.expiresAt && PropertiesService.getScriptProperties().getProperty('POS_PRODUCT_EDIT_EXECUTION_ENABLED') === 'true' &&
+      (!retainedSession || retainedSession.executionAllowed());
   }
-  var prepared, expected, beforeImageState;
+  var prepared, expected, beforeImageState, session;
   try {
-    var loginHtml = readRequest(config.baseUrl);
-    var loginPayload = posReadPayload_(loginHtml, 'hmma00000Form', 'doLogin', { loginId: config.loginId, password: config.password });
-    var loginAction = absolute(posReadDecode_(extractFormAction_(posReadForm_(loginHtml, 'hmma00000Form'), 'hmma00000Form') || ''));
-    if (!/^https:\/\/cg8\.power-k\.jp\/(?:0D890OGI|hm-hmma\/view\/hmma\/hmma000\/hmma00000\.html(?:;jsessionid=[A-Za-z0-9_.-]+)?)(?:\?te-uniquekey=[A-Za-z0-9_-]+)?$/.test(loginAction)) reject();
-    readRequest(loginAction, loginPayload);
-    var before = inspect();
+    session = retainedSession || createPosProductEditSession_(config, request.storeId, request.janCode);
+    if (session.storeId !== request.storeId || session.janCode !== request.janCode) reject();
+    var before = retainedSession ? session.before : session.inspect();
     beforeImageState = before.imageState;
     prepared = buildPosProductEditSubmission_(before.html, request.storeId, request.janCode, request.before, request.patch);
     expected = JSON.parse(canonical(request.before));
@@ -146,21 +96,101 @@ function executePosProductEdit_(config, command, consumeDispatch) {
   // 保存POSTはこの1箇所だけ。例外/転送/不明結果でも再送ループへ戻らない。
   saveRequestStarted = true;
   try {
-    var saveResponse = UrlFetchApp.fetch(url(prepared.url), { method: 'post', contentType: prepared.contentType, payload: prepared.payload,
-      headers: { Cookie: cookies }, followRedirects: false, muteHttpExceptions: true });
+    var saveResponse = session.save(prepared);
     responseReceived = true;
-    cookies = mergeCookies_(cookies, saveResponse);
+    session.acceptSaveResponse(saveResponse);
     var saveCode = saveResponse.getResponseCode();
     if (saveCode === 302 || saveCode === 303) {
       var saveHeaders = saveResponse.getHeaders();
-      absolute(saveHeaders.Location || saveHeaders.location); // 転送先は検査だけ。保存本文を再送しない。
+      session.absolute(saveHeaders.Location || saveHeaders.location); // 転送先は検査だけ。保存本文を再送しない。
     } else if (saveCode !== 200) reject();
   } catch (_) { unexpectedResponse = responseReceived; }
   try {
     // 成功画面/保存応答HTMLは読まず、固定の一覧から新しく両検索する。
-    var after = inspect();
+    var after = session.inspect();
     if (unexpectedResponse || after.data.capturedAt <= sentAt || after.imageState !== beforeImageState ||
         canonical(after.data.searches[1].formInspection) !== canonical(expected)) reject();
     return result('values_verified', 'POS_PRODUCT_EDIT_VALUES_VERIFIED', after.data);
   } catch (_) { return result('verification_required', 'POS_PRODUCT_EDIT_VERIFY_REQUIRED'); }
+}
+
+/** 認証・両検索・画像opaqueは同一実行内だけに保持し、worker署名payloadへ出さない。 */
+function createPosProductEditSession_(config, storeId, janCode, assertReadAllowed, executionAllowed) {
+  function reject() { throw new Error('POS_PRODUCT_EDIT_SESSION_REJECTED'); }
+  if (!config || config.baseUrl !== 'https://cg8.power-k.jp/0D890OGI' ||
+      typeof config.loginId !== 'string' || !config.loginId || config.loginId.length > 4096 ||
+      typeof config.password !== 'string' || !config.password || config.password.length > 4096 ||
+      (storeId !== 6 && storeId !== 7) || typeof janCode !== 'string' || !/^(\d{8}|\d{12}|\d{13})$/.test(janCode)) reject();
+  var origin = 'https://cg8.power-k.jp', cookies = '';
+  function url(value) {
+    if (typeof value !== 'string' || !/^https:\/\/cg8\.power-k\.jp\/(?:0D890OGI|hm-hmma\/view\/hmma\/hmma(?:000\/hmma00000|030\/hmma03000|024\/hmma0240[023])\.html(?:;jsessionid=[A-Za-z0-9_-]{1,128}(?:\.[A-Za-z0-9_-]{1,32})?)?)(?:\?te-uniquekey=[A-Za-z0-9_-]{1,128})?$/.test(value)) reject();
+    return value;
+  }
+  function absolute(value) { return url(typeof value === 'string' && value[0] === '/' ? origin + value : value); }
+  function canonical(value) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+    if (typeof value === 'number' && Number.isSafeInteger(value)) return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+    if (!value || typeof value !== 'object') reject();
+    return '{' + Object.keys(value).sort().map(function(key) { return JSON.stringify(key) + ':' + canonical(value[key]); }).join(',') + '}';
+  }
+  function readRequest(target, payload) {
+    for (var redirects = 0; redirects < 4; redirects++) {
+      if (assertReadAllowed) assertReadAllowed();
+      var response = UrlFetchApp.fetch(url(target), { method: payload ? 'post' : 'get', payload: payload || undefined,
+        headers: { Cookie: cookies }, followRedirects: false, muteHttpExceptions: true });
+      cookies = mergeCookies_(cookies, response);
+      var code = response.getResponseCode();
+      if (code === 302 || code === 303) {
+        var headers = response.getHeaders();
+        target = absolute(headers.Location || headers.location);
+        payload = null; // 転送はGETだけ。Cookie/本文を外部ホストへ送らない。
+        continue;
+      }
+      if (code !== 200) reject();
+      var html = response.getContentText();
+      if (typeof html !== 'string' || html.length > 2000000) reject();
+      return html;
+    }
+    reject();
+  }
+  function inspect() {
+    var listUrl = origin + '/hm-hmma/view/hmma/hmma024/hmma02400.html', searches = [], forms = [], images = [];
+    ['schGoodsId', 'schMakerCd'].forEach(function(searchField) {
+      var html = readRequest(listUrl);
+      var filters = { schOfficeCd: storeId === 7 ? '11053' : '11054', schTenpoGroupNoSingle: storeId === 7 ? '11098' : '11099',
+        schGoodsId: '', schMakerCd: '', schGoodsName: '' };
+      filters[searchField] = janCode;
+      html = readRequest(listUrl, posReadPayload_(html, 'hmma02400Form', 'doSerchNormal', filters));
+      var text = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<[^>]*>/g, ''), count = text.match(/([\d,]+)\s*件中/);
+      if (!count || Number(count[1].replace(/,/g, '')) !== 1) reject();
+      var fields = extractAllFormFields_(posReadForm_(html, 'hmma02400Form'), 'hmma02400Form');
+      var buttons = Object.keys(fields).filter(function(key) { return /^includeChildBody:hmma02400Form:goodsItems:\d+:doHmma02402$/.test(key); });
+      if (buttons.length !== 1) reject();
+      html = readRequest(listUrl, posReadPayload_(html, 'hmma02400Form', buttons[0].replace('includeChildBody:hmma02400Form:', ''), {}));
+      html = readRequest(origin + '/hm-hmma/view/hmma/hmma024/hmma02402.html', posReadPayload_(html, 'hmma02402Form', 'doHmma02403', {}));
+      var parsed = parsePosProductEditForm_(html, storeId, janCode, true), inspection = parsed.inspection;
+      // 画像opaqueの生成差も比較を省略せず安全停止する。
+      images.push(JSON.stringify(readPosProductImageState_(parsed)));
+      searches.push({ field: searchField, count: 1, inspected: true, internalId: inspection.identity.posProductId,
+        internalIdPresent: true, salesKind: '2', storeGroupId: inspection.identity.groupId,
+        productCodeMatches: inspection.identity.productCode === janCode, manufacturerCodeMatches: inspection.identity.manufacturerCode === janCode,
+        formInspection: inspection });
+      forms.push(html);
+    });
+    if (canonical(searches[0].formInspection) !== canonical(searches[1].formInspection) || images[0] !== images[1]) reject();
+    return { html: forms[1], imageState: images[1], data: { storeId: storeId, janCode: janCode, capturedAt: Date.now(), searches: searches } };
+  }
+  var loginHtml = readRequest(config.baseUrl);
+  var loginPayload = posReadPayload_(loginHtml, 'hmma00000Form', 'doLogin', { loginId: config.loginId, password: config.password });
+  var loginAction = absolute(posReadDecode_(extractFormAction_(posReadForm_(loginHtml, 'hmma00000Form'), 'hmma00000Form') || ''));
+  if (!/^https:\/\/cg8\.power-k\.jp\/(?:0D890OGI|hm-hmma\/view\/hmma\/hmma000\/hmma00000\.html(?:;jsessionid=[A-Za-z0-9_.-]+)?)(?:\?te-uniquekey=[A-Za-z0-9_-]+)?$/.test(loginAction)) reject();
+  readRequest(loginAction, loginPayload);
+  return { storeId: storeId, janCode: janCode, inspect: inspect, absolute: absolute,
+    executionAllowed: executionAllowed || function() { return true; },
+    acceptSaveResponse: function(response) { cookies = mergeCookies_(cookies, response); },
+    save: function(prepared) {
+      return UrlFetchApp.fetch(url(prepared.url), { method: 'post', contentType: prepared.contentType, payload: prepared.payload,
+        headers: { Cookie: cookies }, followRedirects: false, muteHttpExceptions: true });
+    } };
 }
