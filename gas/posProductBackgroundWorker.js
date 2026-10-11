@@ -7,7 +7,33 @@ function runPosProductBackgroundWorker() {
   if (properties.getProperty('POS_PRODUCT_BACKGROUND_EDIT_ENABLED') !== 'true') return { processed: false, code: 'DISABLED' };
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1)) return { processed: false, code: 'BUSY' };
-  var startedAt = Date.now(), intake = null, storeId = null, call = null, recoveryRequired = false;
+  var startedAt = Date.now(), reservation = null, result = null;
+  try {
+    reservation = beginPosProductBackgroundHealth_(properties, startedAt);
+    result = reservation.paused ? { processed: false, code: 'BUDGET_PAUSED' }
+      : executePosProductBackgroundJob_(properties, startedAt);
+    return result;
+  } finally {
+    try {
+      if (reservation) finishPosProductBackgroundHealth_(properties, reservation, result, Date.now());
+    } finally { lock.releaseLock(); }
+  }
+}
+
+/** 時間トリガー専用。固定エラーだけを投げ、GASの失敗通知を有効にする。 */
+function runScheduledPosProductBackgroundWorker() {
+  var result;
+  try { result = runPosProductBackgroundWorker(); }
+  catch (_) { throw new Error('POS_PRODUCT_BACKGROUND_ATTENTION_REQUIRED'); }
+  if (['WORKER_RESPONSE_FAILED', 'POS_READ_FAILED', 'POS_PREPARE_FAILED', 'REVIEW_REQUIRED', 'EXECUTION_DISABLED', 'BUDGET_PAUSED'].indexOf(result.code) >= 0) {
+    throw new Error('POS_PRODUCT_BACKGROUND_ATTENTION_REQUIRED');
+  }
+  return result;
+}
+
+/** 既存の保存・再送制御は監視処理と分離し、同じScriptLock内で実行する。 */
+function executePosProductBackgroundJob_(properties, startedAt) {
+  var intake = null, storeId = null, call = null, recoveryRequired = false;
   function current() {
     // 新たな通信開始を5分までに制限し、6分上限の結果通知用余裕を残す。
     if (Date.now() - startedAt >= 300000 || properties.getProperty('POS_PRODUCT_BACKGROUND_EDIT_ENABLED') !== 'true') {
@@ -141,7 +167,66 @@ function runPosProductBackgroundWorker() {
   } catch (_) {
     fail('WORKER_RESPONSE_FAILED');
     return { processed: intake !== null, code: 'WORKER_RESPONSE_FAILED' };
-  } finally { lock.releaseLock(); }
+  }
+}
+
+/** 過去24時間の予約を含む実時間。破損・時計逆行・履歴過大は推測で初期化しない。 */
+function readPosProductBackgroundHealth_(properties, now) {
+  if (!Number.isSafeInteger(now) || now < 0) throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  var raw = properties.getProperty('POS_PRODUCT_BACKGROUND_WORKER_HEALTH');
+  if (raw === null) return { version: 1, runs: [], last: null };
+  if (typeof raw !== 'string' || raw.length > 8000) throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  var state;
+  try { state = JSON.parse(raw); } catch (_) { throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID'); }
+  posProductBackgroundRecord_(state, ['version', 'runs', 'last']);
+  if (state.version !== 1 || !Array.isArray(state.runs) || state.runs.length > 300) throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  state.runs.forEach(function(run) {
+    if (!Array.isArray(run) || run.length !== 2 || !Number.isSafeInteger(run[0]) || run[0] < 0 || run[0] > now ||
+        !Number.isSafeInteger(run[1]) || run[1] < 0 || run[1] > 360000) throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  });
+  if (state.last !== null) {
+    posProductBackgroundRecord_(state.last, ['startedAt', 'completedAt', 'durationMs', 'code', 'processed']);
+    var last = state.last;
+    if (!Number.isSafeInteger(last.startedAt) || last.startedAt < 0 || last.startedAt > now || typeof last.processed !== 'boolean' ||
+        ['RUNNING', 'EMPTY', 'COMPLETED', 'REVIEW_REQUIRED', 'WORKER_RESPONSE_FAILED', 'POS_READ_FAILED', 'POS_PREPARE_FAILED', 'EXECUTION_DISABLED', 'BUDGET_PAUSED'].indexOf(last.code) < 0 ||
+        (last.code === 'RUNNING' ? last.completedAt !== null || last.durationMs !== null :
+          !Number.isSafeInteger(last.completedAt) || last.completedAt < last.startedAt || last.completedAt > now ||
+          !Number.isSafeInteger(last.durationMs) || last.durationMs !== last.completedAt - last.startedAt)) {
+      throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+    }
+  }
+  // 実行開始直前の6分を予約。途中で強制終了してfinallyが動かなくても消費を忘れない。
+  // 強制終了の実終了時刻は不明なので、6分余分に保持して24h境界で過小計上しない。
+  state.runs = state.runs.filter(function(run) { return run[0] > now - 86760000; });
+  return state;
+}
+
+function beginPosProductBackgroundHealth_(properties, startedAt) {
+  var state = readPosProductBackgroundHealth_(properties, startedAt);
+  var used = state.runs.reduce(function(sum, run) { return sum + run[1]; }, 0);
+  var paused = used + 360000 > 2700000 || state.runs.length >= 300;
+  if (!paused) state.runs.push([startedAt, 360000]);
+  state.last = { startedAt: startedAt, completedAt: null, durationMs: null, code: 'RUNNING', processed: false };
+  var raw = JSON.stringify(state);
+  if (raw.length > 8000) throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  properties.setProperty('POS_PRODUCT_BACKGROUND_WORKER_HEALTH', raw);
+  return { state: state, raw: raw, startedAt: startedAt, paused: paused };
+}
+
+function finishPosProductBackgroundHealth_(properties, reservation, result, completedAt) {
+  if (!Number.isSafeInteger(completedAt) || completedAt < reservation.startedAt || completedAt - reservation.startedAt > 360000 ||
+      properties.getProperty('POS_PRODUCT_BACKGROUND_WORKER_HEALTH') !== reservation.raw) {
+    throw new Error('POS_PRODUCT_BACKGROUND_HEALTH_INVALID');
+  }
+  var state = reservation.state, duration = completedAt - reservation.startedAt;
+  if (!reservation.paused) state.runs[state.runs.length - 1][1] = duration;
+  state.last = { startedAt: reservation.startedAt, completedAt: completedAt, durationMs: duration,
+    code: result ? result.code : 'WORKER_RESPONSE_FAILED', processed: result ? result.processed : false };
+  var raw = JSON.stringify(state);
+  // 固定summary以外（商品名・JAN・操作ID・鍵・例外本文）は記録しない。
+  readPosProductBackgroundHealth_({ getProperty: function() { return raw; } }, completedAt);
+  properties.setProperty('POS_PRODUCT_BACKGROUND_WORKER_HEALTH', raw);
+  logPosProductBackgroundHealth_(state.last);
 }
 
 /** 固定Next URLへ各要求を一度だけ送る。転送先へ鍵・本文を渡さない。 */

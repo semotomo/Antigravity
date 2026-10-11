@@ -1,6 +1,6 @@
 # 商品編集を「保存受付 → 裏側でPOS反映」に変える計画
 
-調査日: 2026-10-12 JST。状態: **本番反映承認済み・DB/GAS反映完了、Git/Vercel公開確認中**。新機能の有効化/実商品保存は別確認。
+調査日: 2026-10-12 JST。状態: **基盤の本番反映完了、有効化承認済み・設定切替中**。実商品を使う保存テストは別確認。
 
 ## 目的・利用者の操作
 
@@ -101,3 +101,13 @@ GASは時間主導トリガーを毎分設定できるが、即時開始/正確�
 - GASのプロパティ名37欄とVercelのProject環境変数一覧で `POS_PRODUCT_BACKGROUND_EDIT_ENABLED` が未登録であることを確認（秘密値は取得/表示しない）。既定OFFのため、今回のコード反映だけで受付/workerを開始しない。Git/Vercelの対象差分反映・公開後確認は進行中。
 - 対象28ファイルを `5fbac7c` でmainへ通常pushし、Vercelの公開成功を確認。公開後の無署名・空JSON POSTがworker専用APIではなく通常ログインへ307転送される接続漏れを検出した。完全一致POSTだけを専用HMAC handlerへ通す最小修正を追加し、GET/他verb/末尾slash/子path/類似path/ブラウザ受付/control/商品/棚卸しのCookie認証を維持する回帰を先に失敗確認してから修正。consume関連7/7・独立型・対象Lint・30ページbuild成功、全回帰576/579（同じ既存3失敗）。修正の公開後は503の既定OFF応答とブラウザ側認証を確認する。停止設定・トリガー・商品値は変更しない。
 - 接続修正を `1c18c19` でmainへ通常pushし、Vercel `CBnUTruKS5XdRekr3CbHjBUvRdt5` のReady/Production・kennel-dashboardドメイン・対象commitを確認。公開後のworker POSTは503 JSON `POS_PRODUCT_BACKGROUND_UNAVAILABLE`/no-storeで転送なし、worker GET/ブラウザ受付GET/control POST/商品GETは未ログインなら/loginへ拒否した。ログイン済みの本番商品一覧は正常表示・常設通知0。新旧関連59/59成功、元scratch/旧untracked helper2件はhash不変で混入なし。有効化・トリガー・実POS保存は未実施で、上記承認範囲の本番反映は完了した。
+
+## 有効化・運用監視（2026-10-12、承認済み）
+
+- 本人の「進めて」で専用workerの有効化・処理間隔・監視を承認。初期設定は所有者のHead時間主導トリガー `runScheduledPosProductBackgroundWorker` を5分間隔、1回最大1商品。既存 `onOpen` / `autoRunProductSalesMonthly` の2トリガーと全体商品同期の停止状態を維持する。トリガー時刻・反映完了までの分数は保証しない。複数件は順番に反映する。
+- 同一ScriptLock内で開始時刻・終了時刻・所要時間・固定結果code・processedだけを `POS_PRODUCT_BACKGROUND_WORKER_HEALTH` に自動記録。本文・JAN・商品名・操作ID・鍵・元例外は監視へ渡さない。時間トリガーの異常は固定エラーを投げ、所有者のGAS標準失敗通知を利用する。
+- worker専用の過去24時間＋6分の実行予算45分。開始前に6分を予約し、終了時に実時間へ精算。強制終了・破損・差替え・時計異常では予約を消して進めない。次の6分を予約できない場合は受付入力を保持して処理を休止する。他プロジェクト/既存トリガーのGoogleアカウント合算クォータを保証する設定ではない。
+- 管理者はGASの実行履歴と読取り専用 `showPosProductBackgroundWorkerHealth` の固定summaryを確認する。最終開始から15分超過/長いRUNNING/予算停止/固定失敗は、担当店舗の受付状態と合わせて調査する。失敗メールだけでは「トリガーが実行されない」状態を検出できない。結果不明を成功や再保存許可に読み替えない。
+- 停止はまずGASの `POS_PRODUCT_BACKGROUND_EDIT_ENABLED=false`、次にNext/Vercelの同名フラグをfalseにして再デプロイ。受付・操作・監査を削除せず、送信済みの再確認は同一操作IDで行う。設定復帰だけで不明結果を再保存しない。
+- 監視/予算16件とworker16件が成功。全回帰592/595、失敗は従来の棚卸しsource契約2件・Sentry/CMS秘密名検査1件で変更なし。独立型・対象Lint・30ページ本番build成功。最新GAS15ソースを退避し、worker変更/health追加だけを反映して16/16再取得一致。既存WebAppをv62へ更新、他3deploymentとmanifest/remote-only診断を保持。
+- Vercel Productionだけに同名の非機密フラグをtrueで登録済み。新しい公開への適用、GASのON設定/専用トリガー、空受付稼働確認と画面確認は続行中。実商品保存テスト、商品全体同期ON、DB移行、データ削除はこの工程に含めない。

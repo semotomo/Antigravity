@@ -107,7 +107,7 @@ function setup(options = {}) {
       return { getResponseCode: () => 200, getHeaders: () => ({}), getContentText: () => html, getAllHeaders: () => ({ 'Set-Cookie': 'synthetic-private=session; Path=/' }) }
     } } })
   vm.runInContext(['gas/autoDownload.js', 'gas/posProductReadDiagnostic.js', 'gas/posProductForm.js', 'gas/posProductSubmission.js',
-    'gas/posProductProtocol.js', 'gas/posProductEditGateway.js', 'gas/posProductEditExecution.js', 'gas/posProductBackgroundWorker.js'].map(read).join('\n'), context)
+    'gas/posProductProtocol.js', 'gas/posProductEditGateway.js', 'gas/posProductEditExecution.js', 'gas/posProductBackgroundWorker.js', 'gas/posProductBackgroundHealth.js'].map(read).join('\n'), context)
   context.getPOSConfig_ = () => ({ baseUrl: 'https://cg8.power-k.jp/0D890OGI', loginId: 'synthetic-private-user', password: 'synthetic-private-password' })
   return { context, calls, messages, logs, properties, run: () => plain(context.runPosProductBackgroundWorker()),
     get saveCount() { return saveCount }, get consumeCount() { return consumeCount }, get releases() { return releases } }
