@@ -495,7 +495,9 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 公開後の本店JAN4969735300013はFORM_CONTRACT/EDIT_PARSE。本人がログインしたPOSで本店/所属・両JANの一致と売価1,600/原価800を読取りだけで確認し、数字だけを許すparserが正しい桁区切りを拒否する再現テストを追加した。正しい3桁区切りだけを1〜9桁の数字へ正規化し、不正区切り/負値/全角/単位/小数等は拒否する。送信用の元値と非対象設定指紋の保持、他店舗/JAN拒否も検証した。
 - Form1ファイルの追加公開を本人が承認。最新v59を14ファイル退避し、候補はFormだけ差分、他13/manifest不変、13JS構文・129 bindings衝突なしを確認。17:32:33反映後の14/14一致を確認し、既存公開IDをv60へ更新。他3 deployment・権限・設定は変更なし。退避/候補/再取得はGit対象外の`local_exports/gas-pre-grouped-money-20261011`、`gas-grouped-money-candidate-20261011`、`gas-post-grouped-money-20261011`に保存。
 - v60後の本番UI読取りはRESPONSE_INVALID/TRANSPORTで停止、名前/1600/800の入力を保持して未照合保存を拒否。17:34:04のGAS doPostは22.799秒で完了したが業務読取り成功の証拠ではない。POSの分類候補9/仕入先候補26件を確認、応答上限超過等を推測で断定しない。
-- Next読取り通信1ファイルに固定の検査工程名だけを追加するGit/Vercel公開を本人が別承認。成功DTOへの検査は緩和せず、公開入口の固定失敗も失敗のまま工程だけ区別する。鍵・HTML・応答本文・Location実値は返さない。通信/dispatchの回帰とPOS関連371/371、独立型検査・対象Lint成功、全回帰515件中512成功/既存3失敗/skip0を確認した。公開後の実読取りは次の検証として残る。DB変更・商品保存・商品マスタ同期ONは行っていない。
+- Next読取り通信1ファイルに固定の検査工程名だけを追加するGit/Vercel公開を本人が別承認。成功DTOへの検査は緩和せず、公開入口の固定失敗も失敗のまま工程だけ区別する。鍵・HTML・応答本文・Location実値は返さない。通信/dispatchの回帰とPOS関連371/371、独立型検査・対象Lint・26ページ本番build成功、全回帰515件中512成功/既存3失敗/skip0を確認した。
+- 独立差分レビューでブロッカーなしを確認し、本人semotomoとmain 76d4a59を再確認後、承認7ファイルだけを0096fdc9c3a591bd15c30bd6000f017be888e758で通常push。Vercel GuEnP1VtdCbjbQdDqQ7GHBTk761eは24秒buildのReady/Production/kennel-dashboardドメイン一致、GitHub Vercel successを確認。公開後17:48:03の本番UIで本店ARCの名前/1600/800/分類・仕入先候補の取得に成功し、変更なしのため保存確認はdisabled。前の応答検証エラーはこの試行で再現せず、再発原因は未確定として保持する。証跡はGit対象外の`local_exports/arc-inspection-success-production-0096fdc-20261011.png`、`response-diagnostics-production-0096fdc-20261011.png`。DB変更・商品保存・商品マスタ同期ONは行っていない。
+- 一度だけ同じ商品を再取得し、17:49:29に2回目も成功。再取得確認の名前/分類/1600/800/仕入先未設定が同じであり、「入力を保持して最新値を基準にする」を選択して入力不変・新取得日時・変更確認disabledを確認。自動再送や実保存ではなく、承認対象の明示読取りだけ。未コミットscratchのSHA-256は99B91593…C65B0一致、旧untracked helper2件は未変更・Git対象外を維持。
 
 ## 確認した一次資料
 
