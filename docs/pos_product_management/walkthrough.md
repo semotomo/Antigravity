@@ -6,7 +6,8 @@
 - 停止中は売上一覧の同期操作を出さず、管理画面ボタンとhandlerも送信を拒否。手動API/cronは従来認証・店舗manager再認可後に409/disabledを返し、同期実行・通知追加・成功日時更新なし。管理画面の店舗指定は6/7の単一値だけ受理し、DB権限を再検証する。
 - 既存の通知・unknownの同一run照合・再送拒否は保持し、確認導線/再検証先を管理画面へ変更。DB移行、履歴削除、GAS更新、全体同期ON、商品保存はなし。
 - 先行テストで旧処理の2件失敗と新UI契約の9件失敗を確認後、関連26/26成功。通常回帰523/526（既存の棚卸し静的抽出2件とCMS secret検査1件のみ失敗、skip0）。独立tsc、変更10コードファイルLint、27ページ本番build成功。全体Lintは既存3 errors/5 warningsのまま。
-- Git/Vercel Productionと実画面検証は反映後に追記する。未追跡SQL/補助テスト2件と元ルートscratchは対象外。
+- semotomo本人・既存main一致を確認して対象15ファイルを `deb2b5bad3b3e42b22f7a5810f7b67f9ff25fbfe` で通常push。Vercel `AttRfs9qK1WEBmMmemknxjfHH5AQ` は29秒build、Ready/Production/Current/`kennel-dashboard.vercel.app` 一致。PCと390px本番商品一覧は通知0、スマホ横溢れなし。設定→管理画面に担当2店舗・停止ボタン2件・10/10旧拒否履歴を保持。売上一覧では商品同期ボタン0、入出庫履歴と売上取込を維持。実非managerログインの検証は行わず、権限回帰は合成テストで確認。
+- 確認画像はignored `local_exports/product-notices-removed-production-deb2b5b-20261011.jpg`、`product-notices-removed-mobile-production-deb2b5b-20261011.jpg`、`product-sync-manager-production-deb2b5b-20261011.jpg`。元の入力中タブを再読込せず、確認用タブで検証した。未追跡SQL/補助テスト2件と元ルートscratchは対象外、事後hash一致を確認。
 
 日付: 2026-09-10 JST
 
