@@ -102,3 +102,36 @@ test('GAS専用POSTの完全一致だけCookieログインを使わず、隣接A
  const route=load('next_app/app/api/pos-products/consume/route.ts',{'@/lib/pos-products/consume-handler.server':{handleProductEditConsumeRequest:async()=>({disabled:true})}})
  assert.equal(route.runtime,'nodejs');assert.equal(route.maxDuration,30);assert.equal((await route.POST(new Request('https://fixture.local'))).disabled,true)
 })
+
+test('background-workerの完全一致POSTだけ署名APIへ通し、ブラウザ受付と隣接経路のCookie認証を維持する',async()=>{
+ const calls=[]
+ const middleware=load('next_app/lib/supabase/middleware.ts',{'@supabase/ssr':{createServerClient:()=>{calls.push('client');return{auth:{getUser:async()=>({data:{user:null}})}}}},'next/server':{NextResponse:{next:()=>({kind:'next'}),redirect:url=>({kind:'redirect',path:url.pathname})}}})
+ const run=(path,method)=>middleware.updateSession({method,nextUrl:{pathname:path,clone:()=>new URL('https://kennel-dashboard.vercel.app'+path)},cookies:{getAll:()=>[],set:()=>{}}})
+ for(const path of ['/api/pos-products/consume','/api/pos-products/background-worker']) {
+  assert.equal((await run(path,'POST')).kind,'next')
+  assert.equal(calls.length,0)
+ }
+ const protectedPaths=[
+  ['/api/pos-products/background-worker','GET'],
+  ['/api/pos-products/background-worker','PUT'],
+  ['/api/pos-products/background-worker','DELETE'],
+  ['/api/pos-products/background-worker','OPTIONS'],
+  ['/api/pos-products/background-worker/','POST'],
+  ['/api/pos-products/background-worker/other','POST'],
+  ['/api/pos-products/background-worker-extra','POST'],
+  ['/api/pos-products/background-edit','GET'],
+  ['/api/pos-products/background-edit','POST'],
+  ['/api/pos-products/background-edit/control','POST'],
+  ['/api/pos-products/consume','GET'],
+  ['/products','GET'],
+  ['/inventory','GET'],
+ ]
+ for(const [path,method] of protectedPaths) {
+  assert.deepEqual(JSON.parse(JSON.stringify(await run(path,method))),{kind:'redirect',path:'/login'})
+ }
+ assert.equal(calls.length,protectedPaths.length)
+ const route=load('next_app/app/api/pos-products/background-worker/route.ts',{'@/lib/pos-products/background-worker-handler.server':{handleBackgroundWorkerRequest:async()=>({disabled:true})}})
+ assert.equal(route.runtime,'nodejs');assert.equal(route.maxDuration,30)
+ assert.deepEqual(Object.keys(route).sort(),['POST','maxDuration','runtime'])
+ assert.equal((await route.POST(new Request('https://fixture.local'))).disabled,true)
+})

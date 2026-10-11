@@ -6,9 +6,12 @@ export async function updateSession(request: NextRequest) {
     request,
   })
 
-  // 外部ジョブとGAS専用POSTは各APIで認証する。商品consume以外の店舗認証は変更しない。
+  // 外部ジョブと完全一致のGAS専用POSTは各APIで認証する。ブラウザ側の店舗認証は維持する。
   if (request.nextUrl.pathname.startsWith('/api/cron/') ||
-      (request.nextUrl.pathname === '/api/pos-products/consume' && request.method === 'POST')) {
+      (request.method === 'POST' && (
+        request.nextUrl.pathname === '/api/pos-products/consume' ||
+        request.nextUrl.pathname === '/api/pos-products/background-worker'
+      ))) {
     return supabaseResponse
   }
 
