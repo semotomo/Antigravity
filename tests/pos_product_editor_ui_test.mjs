@@ -48,6 +48,38 @@ const loaded = () => reduce(initial(), { type: 'loaded', data: fixture() })
 const edited = () => reduce(loaded(), { type: 'changed', field: 'name', value: '変更後の商品名' })
 const review = () => ({ operationId, reviewedAt: 1800000000001000, changes: [{ field: 'name', label: '商品名', before: 'POSの商品名', after: '変更後の商品名' }] })
 
+test('未照合のDB値は即時入力用とし、初回POS読取りは編集した項目だけ保持する', () => {
+  let state = api.initialProductEditorState({ ...product, selling_price: 1600, cost_price: 800 })
+  assert.equal(state.baseline, null)
+  assert.equal(state.draft.name, product.product_name)
+  assert.equal(state.draft.price, '1600')
+  assert.equal(state.draft.cost, '800')
+  assert.equal(api.hasProductEditorChanges(state), false)
+  state = reduce(state, { type: 'changed', field: 'name', value: '待機中に入力した名前' })
+  state = reduce(state, { type: 'changed', field: 'cost', value: '0' })
+  assert.equal(api.hasProductEditorChanges(state), true)
+  const result = reduce(state, { type: 'loaded', data: fixture() })
+  assert.equal(result.baseline.fingerprint, fixture().fingerprint)
+  assert.equal(result.draft.name, '待機中に入力した名前')
+  assert.equal(result.draft.cost, '0')
+  assert.equal(result.draft.price, '126')
+  assert.equal(result.draft.groupId, 'group7')
+  assert.equal(result.refreshed, null)
+})
+
+test('初回照合失敗でも下書きを保持し、固定された復旧入力はDB表示値で置換しない', () => {
+  let state = api.initialProductEditorState({ ...product, selling_price: 1600, cost_price: 800 })
+  state = reduce(state, { type: 'changed', field: 'price', value: '1200' })
+  const failed = reduce(state, { type: 'failed', error: '読取り失敗' })
+  assert.equal(failed.draft.price, '1200')
+  assert.equal(failed.baseline, null)
+  const pointer = { storeId: 7, productId: 42, operationId }
+  const command = { kind: 'update', ...pointer, expectedFingerprint: fixture().fingerprint, fields: fixture().fields }
+  const recovered = reduce(reduce(failed, { type: 'execution-started', pointer }), { type: 'execution-command', command })
+  assert.deepEqual(structuredClone(recovered.draft), command.fields)
+  assert.equal(reduce(recovered, { type: 'loaded', data: fixture() }), recovered)
+})
+
 test('POS読込は現在値をそのまま使い、原価50パーセントやDB値へ置換しない', () => {
   const data = fixture()
   const state = reduce(initial(), { type: 'loaded', data })
@@ -101,7 +133,7 @@ test('確認後の入力変更はレビューを無効化し、仕入先未設�
 function hooks(state, { pending = null, busy = false, updates = [] } = {}) {
   let refs = 0
   let states = 0
-  return { useReducer: () => [state, event => updates.push(event)], useEffect: () => {}, useId: () => 'dialog-id',
+  return { useReducer: () => [state, event => updates.push(event)], useEffect: () => {}, useCallback: fn => fn, useId: () => 'dialog-id',
     useRef: value => ({ current: refs++ === 1 ? busy : value }),
     useState: value => [states++ === 0 ? pending : value, value => updates.push(value)] }
 }

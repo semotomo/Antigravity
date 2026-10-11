@@ -5,7 +5,7 @@ import { runRealtimeHistoryCron } from '@/lib/realtimeHistoryCron'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// 16時台にわんわんを取得し、本店の15時台取得と合わせて17時までの更新を目指す
+// 日本時間17:00にわんわんを取得。実行精度はVercelの契約プランに従う。
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {

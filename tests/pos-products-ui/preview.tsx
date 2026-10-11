@@ -17,17 +17,19 @@ function Preview() {
   const [nonce, setNonce] = useState(0)
   const [completed, setCompleted] = useState(false)
   const [newSaveEnabled, setNewSaveEnabled] = useState(true)
-  const savingEnabled = !['normal', 'network-error', 'conflict'].includes(scenario)
+  const savingEnabled = !['normal', 'slow-inspection', 'inspection-error', 'network-error', 'conflict'].includes(scenario)
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 p-6 text-gray-900">
       <h1 className="text-balance text-2xl font-bold">POS商品編集の表示検証</h1>
       <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 font-semibold text-amber-900">検証用・合成データ・本番非接続</p>
-      <p className="text-pretty text-sm text-gray-600">シナリオを選び、モーダルを開いて「POSから読み込む」から操作してください。保存シナリオも合成状態だけで動き、本番には接続しません。未完了操作は開き直しても同じIDで復旧確認します。ページ全体の再読込では合成サーバー状態は失われるため、復旧失敗と入力凍結を確認できます。</p>
+      <p className="text-pretty text-sm text-gray-600">モーダルを開くとPOS照合を自動で開始します。名前・金額・原価は照合待ちでも入力できます。保存シナリオも合成状態だけで動き、本番には接続しません。未完了操作は開き直しても同じIDで復旧確認します。ページ全体の再読込では合成サーバー状態は失われるため、復旧失敗と入力凍結を確認できます。</p>
       <label className="block space-y-2">
         <span className="text-sm font-medium">検証シナリオ</span>
         <select value={scenario} disabled={open} onChange={event => setScenario(event.target.value as PreviewScenario)} className="w-full rounded-xl border border-gray-300 p-3 focus:outline-2 focus:outline-sky-600">
           <option value="normal">正常：読込 → 編集 → 変更確認</option>
+          <option value="slow-inspection">15秒の照合待ち：先行入力 → 入力を保持して照合完了</option>
+          <option value="inspection-error">初回照合失敗：入力を保持・未照合保存不可</option>
           <option value="network-error">通信失敗：読込成功 → 変更確認失敗</option>
           <option value="conflict">競合：変更確認失敗 → 再取得で最新値表示</option>
           <option value="save-normal">合成保存：確認 → 明示保存 → 照合・DB反映完了</option>

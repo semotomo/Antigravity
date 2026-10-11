@@ -18,12 +18,12 @@ const config={enabled:true,url,secret}
 const dto={storeId:7,janCode:target.janCode,capturedAt:Date.now(),searches:[]}
 const envelope=(changes={})=>({version:1,success:true,...target,data:dto,...changes})
 const request=(action='inspect',payload={operationId:target.operationId,storeId:target.storeId,janCode:target.janCode})=>JSON.stringify(protocol.signPosProductRequest({...target,action,payload},secret))
-function gasFixture({enabled=true,signingSecret=secret,fail=false}={}) {
+function gasFixture({enabled=true,signingSecret=secret,fail=false,failureCode='private-cookie'}={}) {
   const calls=[]
   const context=vm.createContext({Date,Utilities:{Charset:{UTF_8:'utf8'},DigestAlgorithm:{SHA_256:'sha256'},newBlob:s=>({getBytes:()=>[...Buffer.from(s)]}),
     computeDigest:(_,s)=>[...createHash('sha256').update(s).digest()],computeHmacSha256Signature:(s,k)=>[...createHmac('sha256',k).update(s).digest()]},
     PropertiesService:{getScriptProperties:()=>({getProperty:n=>n==='POS_PRODUCT_INSPECTION_ENABLED'?(enabled?'true':null):signingSecret})},
-    getPOSConfig_:()=>({baseUrl:'https://cg8.power-k.jp/0D890OGI'}),inspectPosProductEdit_:(c,store,jan)=>{calls.push([store,jan]);if(fail)throw Error('private-cookie');return dto}})
+    getPOSConfig_:()=>({baseUrl:'https://cg8.power-k.jp/0D890OGI'}),inspectPosProductEdit_:(c,store,jan,onStage)=>{calls.push([store,jan]);onStage?.('EDIT_PARSE');if(fail)throw Error(failureCode);return dto}})
   vm.runInContext(read('gas/posProductProtocol.js')+'\n'+read('gas/posProductInspection.js'),context)
   return {calls,run:body=>JSON.parse(JSON.stringify(context.handlePosProductInspection_(body)))}
 }
@@ -94,4 +94,36 @@ test('署名inspectは専用公開分岐だけへ接続し、トリガー・保�
   assert.match(read('gas/autoDownload.js'),/POS_PRODUCT_PUBLIC_GATEWAY_ENABLED/)
   assert.match(read('gas/autoDownload.js'),/handlePosProductInspection_/)
   assert.doesNotMatch(read('next_app/lib/pos-products/inspection-transport.server.ts'),/['"]use server['"]|dispatch|claimProductOperation/)
+})
+
+test('検証済み要求の読取り失敗は相関と固定工程を返し、例外原文を漏らさない', async()=>{
+  for (const [failureCode,expected] of [['POS_PRODUCT_FORM_REJECTED_FIELD_PRIVATE','FORM_CONTRACT'],['POS_READ_IDENTITY_MISMATCH','IDENTITY'],['private-secret-cookie','UNAVAILABLE']]) {
+    const result=gasFixture({fail:true,failureCode}).run(request())
+    assert.equal(result.success,false);assert.equal(result.code,expected);assert.equal(result.stage,'EDIT_PARSE')
+    assert.equal(result.operationId,target.operationId);assert.equal(result.actorId,target.actorId)
+    assert.ok(Number.isSafeInteger(result.elapsedMs));assert.ok(!JSON.stringify(result).includes('private'))
+    let calls=0
+    const inspector=api.createSignedPosProductInspector(config,async()=>{calls++;return Response.json(result)})
+    await assert.rejects(()=>inspector.inspect(target),error=>error.code===expected&&error.stage==='EDIT_PARSE'&&!error.message.includes(failureCode))
+    assert.equal(calls,1)
+  }
+})
+
+test('不正・他店舗の失敗診断は採用せず、timeoutを区別して再送しない',async()=>{
+  const failed=gasFixture({fail:true}).run(request())
+  for (const change of [{storeId:6},{operationId:target.actorId},{stage:'private-cookie'},{elapsedMs:-1},{code:'private-secret'},{extra:'private'}]) {
+    const inspector=api.createSignedPosProductInspector(config,async()=>Response.json({...failed,...change}))
+    await assert.rejects(()=>inspector.inspect(target),error=>error.code==='RESPONSE_INVALID')
+  }
+  let calls=0
+  const inspector=api.createSignedPosProductInspector(config,async()=>{calls++;const error=new Error('private-secret');error.name='TimeoutError';throw error})
+  await assert.rejects(()=>inspector.inspect(target),error=>error.code==='TIMEOUT'&&!error.message.includes('private'))
+  assert.equal(calls,1)
+})
+
+test('旧公開版の固定エラーは工程不明として保持し、署名や設定不備と断定しない',async()=>{
+  let calls=0
+  const inspector=api.createSignedPosProductInspector(config,async()=>{calls++;return Response.json({version:1,success:false,code:'POS_PRODUCT_INSPECTION_UNAVAILABLE'})})
+  await assert.rejects(()=>inspector.inspect(target),error=>error.code==='GATEWAY_UNAVAILABLE'&&error.stage==='UNKNOWN')
+  assert.equal(calls,1)
 })

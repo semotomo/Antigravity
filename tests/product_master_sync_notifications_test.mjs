@@ -18,6 +18,25 @@ function load(path, imports = {}, globals = {}) {
 const store = { id: 7, name: '本店', tenpoGroupId: '11098', tenpoGroupName: 'からつケンネル本店' }
 const runId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
+test('同期停止の現在状態は通知0件でも表示し、過去拒否と結果不明を区別する', () => {
+  const require = createRequire(new URL('../next_app/package.json', import.meta.url))
+  const api = load('components/products/ProductSyncNotificationList.tsx', { 'react/jsx-runtime': require('react/jsx-runtime') })
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const empty = renderToStaticMarkup(api.ProductSyncNotificationList({ notifications: [], unresolvedCount: 0, syncEnabled: false }))
+  assert.match(empty, /現在.*停止中/)
+  assert.doesNotMatch(empty, /同期を拒否/)
+  const notices = load('lib/product-sync/notifications.ts')
+  const record = code => notices.decodeProductSyncNotification({ attempt_id: runId, store_id: 7, source: 'manual', outcome: code === 'PRODUCT_SYNC_DISABLED' ? 'rejected' : 'unknown', code,
+    run_id: null, started_at: '2026-10-10T02:50:00Z', created_at: '2026-10-10T02:50:00Z', resolved_at: null, resolution_outcome: null })
+  const markup = renderToStaticMarkup(api.ProductSyncNotificationList({ notifications: [record('PRODUCT_SYNC_DISABLED'), record('PRODUCT_SYNC_UNKNOWN')], unresolvedCount: 2, syncEnabled: false }))
+  assert.match(markup, /過去の実行記録/)
+  assert.match(markup, /当時の通知/)
+  assert.match(markup, /結果確認が必要/)
+  assert.match(markup, /role="alert"/)
+  assert.match(markup, /再送せず/)
+  assert.doesNotMatch(markup, /適用確認済み/)
+})
+
 test('店舗に束縛された確定拒否だけ商品未変更と表示し、原文は公開しない', () => {
   const api = load('lib/product-sync/notifications.ts')
   for (const code of ['PRODUCT_SYNC_PENDING_EDIT', 'PRODUCT_SYNC_PENDING_SYNC', 'PRODUCT_SYNC_STALE', 'PRODUCT_SYNC_INVALID_DATA', 'PRODUCT_SYNC_EXPIRED', 'PRODUCT_SYNC_DISABLED', 'PRODUCT_SYNC_UNAVAILABLE']) {

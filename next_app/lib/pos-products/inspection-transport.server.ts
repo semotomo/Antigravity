@@ -6,8 +6,15 @@ import type { PosProductInspector } from './edit-preparation.server'
 const FAILURE = 'POSの商品情報を取得できません。入力を保持して取得し直してください。'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const MAX_BYTES = 524_288
+const GAS_FAILURE_CODES = ['FORM_CONTRACT', 'IDENTITY', 'SEARCH', 'HTTP', 'REDIRECT', 'UNAVAILABLE'] as const
+const INSPECTION_STAGES = ['CONFIG', 'VERIFY', 'POS_CONFIG', 'LOGIN_GET', 'LOGIN_PAYLOAD', 'LOGIN_ACTION', 'LOGIN_POST', 'LIST_GET', 'SEARCH_PAYLOAD', 'SEARCH_POST', 'SEARCH_PARSE', 'DETAIL_POST', 'EDIT_POST', 'EDIT_PARSE']
+type InspectionFailureCode = typeof GAS_FAILURE_CODES[number] | 'CONFIGURATION' | 'TRANSPORT' | 'TIMEOUT' | 'RESPONSE_INVALID' | 'GATEWAY_UNAVAILABLE'
 
-function reject(): never { throw new Error(FAILURE) }
+export class PosProductInspectionError extends Error {
+  constructor(readonly code: InspectionFailureCode, readonly stage: string = 'TRANSPORT', readonly elapsedMs: number | null = null) { super(FAILURE) }
+}
+
+function reject(): never { throw new PosProductInspectionError('RESPONSE_INVALID') }
 function destination(value: unknown): string {
   if (typeof value !== 'string' || !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{20,256}\/exec$/.test(value)) reject()
   return value
@@ -65,8 +72,9 @@ export async function postPosProductEnvelope(destinationUrl: string, body: strin
 
 /** サーバー設定からだけ生成する。利用者のURL/秘密鍵を受け付ける公開Actionではない。 */
 export function createSignedPosProductInspector(config: { enabled: boolean; url: string; secret: string }, fetcher: typeof fetch = fetch): PosProductInspector {
-  if (!config.enabled || !/^[0-9a-f]{64}$/.test(config.secret)) reject()
-  const url = destination(config.url)
+  if (!config.enabled || !/^[0-9a-f]{64}$/.test(config.secret)) throw new PosProductInspectionError('CONFIGURATION', 'CONFIG')
+  let url: string
+  try { url = destination(config.url) } catch { throw new PosProductInspectionError('CONFIGURATION', 'CONFIG') }
   const secret = config.secret
   return {
     async inspect(target) {
@@ -80,13 +88,27 @@ export function createSignedPosProductInspector(config: { enabled: boolean; url:
         const value = await postPosProductEnvelope(url, body, fetcher)
         if (!value || typeof value !== 'object' || Array.isArray(value)) reject()
         const result = value as Record<string, unknown>
+        if (result.version === 1 && result.success === false) {
+          // 旧公開版は読取り工程の失敗も同じ固定応答になるため、署名失敗などと断定しない。
+          if (Object.keys(result).length === 3 && result.code === 'POS_PRODUCT_INSPECTION_UNAVAILABLE') throw new PosProductInspectionError('GATEWAY_UNAVAILABLE', 'UNKNOWN')
+          const failureKeys = ['version', 'success', 'operationId', 'actorId', 'storeId', 'janCode', 'code', 'stage', 'elapsedMs']
+          if (Object.keys(result).length !== failureKeys.length || failureKeys.some(key => !Object.hasOwn(result, key)) ||
+              result.operationId !== target.operationId || result.actorId !== target.actorId || result.storeId !== target.storeId || result.janCode !== target.janCode ||
+              !GAS_FAILURE_CODES.includes(result.code as typeof GAS_FAILURE_CODES[number]) || typeof result.stage !== 'string' || !INSPECTION_STAGES.includes(result.stage) ||
+              !Number.isSafeInteger(result.elapsedMs) || Number(result.elapsedMs) < 0 || Number(result.elapsedMs) > 360_000) reject()
+          throw new PosProductInspectionError(result.code as typeof GAS_FAILURE_CODES[number], result.stage, result.elapsedMs as number)
+        }
         const keys = ['version', 'success', 'operationId', 'actorId', 'storeId', 'janCode', 'data']
         if (Object.keys(result).length !== keys.length || keys.some(key => !Object.hasOwn(result, key)) ||
             result.version !== 1 || result.success !== true || result.operationId !== target.operationId || result.actorId !== target.actorId ||
             result.storeId !== target.storeId || result.janCode !== target.janCode) reject()
         // 業務DTO自体の厳格検査は、DB対象と結び付けるdecodeProductEditInspectionが行う。
         return result.data
-      } catch { reject() }
+      } catch (error) {
+        if (error instanceof PosProductInspectionError) throw error
+        const timedOut = error && typeof error === 'object' && 'name' in error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        throw new PosProductInspectionError(timedOut ? 'TIMEOUT' : 'TRANSPORT')
+      }
     },
   }
 }

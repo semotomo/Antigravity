@@ -5,7 +5,7 @@ import { runRealtimeHistoryCron } from '@/lib/realtimeHistoryCron'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-// 18時台にわんわんを取得し、本店の17時台取得と合わせて19時までの更新を目指す
+// 既存URLを維持し、日本時間18:50にわんわんを取得する。
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const result = await runRealtimeHistoryCron(HISTORY_STORES.wanwan)
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
-    console.error('[Cron History Wanwan 19] 自動更新エラー:', error)
+    console.error('[Cron History Wanwan 18:50] 自動更新エラー:', error)
     return NextResponse.json(
       { success: false, error: error instanceof Error ? error.message : '自動更新に失敗しました。' },
       { status: 500 },

@@ -59,8 +59,8 @@ function deferred() {
   const promise = new Promise(done => { resolve = done })
   return { promise, resolve }
 }
-function harness({ actions = {}, stored = null, storedIntent = null, storedPhase = null, savingEnabled = true, storageError = false } = {}) {
-  let state = api.initialProductEditorState()
+function harness({ actions = {}, stored = null, storedIntent = null, storedPhase = null, savingEnabled = true, storageError = false, automatic = false } = {}) {
+  let state = api.initialProductEditorState(automatic ? { ...product, selling_price: 1600, cost_price: 800 } : undefined)
   let refsIndex = 0, statesIndex = 0, effectsIndex = 0, closes = 0, saved = 0
   const refs = [], states = [], effects = [], calls = [], storageWrites = []
   const storage = new Map(stored === null ? [] : [['kennel-pos-edit-execution:v1:7:42', stored]])
@@ -85,7 +85,7 @@ function harness({ actions = {}, stored = null, storedIntent = null, storedPhase
     useReducer: () => [state, event => { state = reduce(state, event) }],
     useState: initial => { const index = statesIndex++; if (!(index in states)) states[index] = initial; return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value }] },
     useRef: initial => { const index = refsIndex++; refs[index] ??= { current: initial }; return refs[index] },
-    useEffect: fn => { const index = effectsIndex++; effects[index] ??= fn }, useId: () => 'dialog-id',
+    useEffect: fn => { const index = effectsIndex++; if (automatic) effects[index] = fn; else effects[index] ??= fn }, useCallback: fn => fn, useId: () => 'dialog-id',
   }
   const ui = compile(modalPath, { react, '@/app/actions/posProducts': mockActions, '@/app/actions/posProductExecution': mockActions },
     { window, queueMicrotask, crypto: { randomUUID: () => operationId } })
@@ -95,16 +95,48 @@ function harness({ actions = {}, stored = null, storedIntent = null, storedPhase
   }
   function button(label) { const result = elements(render()).find(element => element.type === 'button' && element.props.children === label); assert.ok(result, `Button missing: ${label}`); return result }
   async function mount() { render(); effects.forEach(effect => effect()); await settle() }
+  async function commitEffects() { render(); effects.forEach(effect => effect()); await settle() }
   async function readAndReview() {
-    await button('POSから読み込む').props.onClick()
+    await button('POS照合を再試行').props.onClick()
     elements(render()).find(element => element.type === 'input' && element.props.value === 'POS商品').props.onChange({ target: { value: '変更後' } })
     elements(render()).find(element => element.type === 'form').props.onSubmit({ preventDefault() {} })
     await settle()
   }
   function confirmSave() { button('POSへ保存...').props.onClick(); const confirm = button('確認した内容をPOSへ保存する'); confirm.props.onClick(); return confirm }
-  return { render, button, mount, readAndReview, confirmSave, calls, storage, storageWrites,
+  return { render, button, mount, commitEffects, readAndReview, confirmSave, calls, storage, storageWrites,
     get state() { return state }, get closes() { return closes }, get saved() { return saved } }
 }
+
+test('新規編集は復旧検査後に一度だけ自動照合し、待機中の入力を戻さず未照合保存を拒否する', async () => {
+  const read = deferred(), calls = []
+  const h = harness({ automatic: true, actions: { loadPosProductEditorAction: async input => { calls.push(input); return read.promise } } })
+  await h.mount(); await h.commitEffects()
+  assert.equal(calls.length, 1)
+  let tree = h.render()
+  const fieldset = elements(tree).find(e => e.type === 'fieldset')
+  assert.equal(fieldset.props.disabled, false)
+  const name = elements(tree).find(e => e.type === 'input' && e.props.value === product.product_name)
+  name.props.onChange({ target: { value: '待機中の変更' } })
+  assert.equal(h.button('POS照合待ち（入力は保持）').props.disabled, true)
+  elements(tree).find(e => e.type === 'form').props.onSubmit({ preventDefault() {} })
+  assert.equal(h.calls.length, 0)
+  await h.commitEffects(); assert.equal(calls.length, 1)
+  read.resolve({ success: true, data: fixture }); await settle()
+  assert.equal(h.state.draft.name, '待機中の変更')
+  assert.equal(h.state.draft.price, '126')
+  assert.equal(h.state.baseline.fingerprint, fixture.fingerprint)
+  await h.commitEffects(); assert.equal(calls.length, 1)
+  assert.equal(h.calls.some(([type]) => type === 'prepare' || type === 'save'), false)
+})
+
+test('復旧pointerまたは不正storageがある表示では自動POS照合も新保存も開始しない', async () => {
+  for (const stored of [JSON.stringify(pointer), 'broken-private-pointer']) {
+    const h = harness({ automatic: true, stored })
+    await h.mount(); await h.commitEffects(); await h.commitEffects()
+    assert.equal(h.calls.length, 0)
+    assert.equal(h.button('POS照合を再試行').props.disabled, true)
+  }
+})
 
 test('破損intentでも元pointerを保持し、明示サーバー照合→取消確認→closeだけで解除する', async () => {
   const ui = harness({ stored: JSON.stringify(pointer), storedIntent: '{broken', storedPhase: 'prepare' })
@@ -334,8 +366,8 @@ test('reload後はpointerだけを復元し、明示recover前に新読込/新�
   assert.deepEqual(structuredClone(ui.state.recovery), pointer)
   assert.equal(ui.state.draft, null)
   assert.equal(ui.calls.length, 0)
-  assert.equal(ui.button('POSから読み込む').props.disabled, true)
-  await ui.button('POSから読み込む').props.onClick()
+  assert.equal(ui.button('POS照合を再試行').props.disabled, true)
+  await ui.button('POS照合を再試行').props.onClick()
   assert.equal(ui.calls.length, 0)
   await ui.button('保存状態を確認（読取りのみ）').props.onClick(); await settle()
   assert.deepEqual(ui.calls, [['recover', { storeId: 7, operationId }]])
@@ -381,7 +413,7 @@ test('pointerだけの確定rejectedは対象3項目の読取り確認後のclos
   await ui.mount(); await ui.button('保存状態を確認（読取りのみ）').props.onClick(); await settle()
   assert.equal(ui.state.execution.stage, 'rejected')
   assert.equal(ui.storage.size, 1)
-  assert.equal(ui.button('POSから読み込む').props.disabled, true)
+  assert.equal(ui.button('POS照合を再試行').props.disabled, true)
   assert.equal(ui.saved, 0)
   ui.button('取消・解除条件を確認（読取りのみ）').props.onClick(); await settle()
   ui.button('閉じる').props.onClick()
@@ -390,7 +422,7 @@ test('pointerだけの確定rejectedは対象3項目の読取り確認後のclos
   assert.equal(ui.storage.size, 0)
   assert.equal(ui.closes, 1)
   const reopened = harness({ stored: ui.storage.get('kennel-pos-edit-execution:v1:7:42') ?? null })
-  await reopened.mount(); await reopened.button('POSから読み込む').props.onClick()
+  await reopened.mount(); await reopened.button('POS照合を再試行').props.onClick()
   assert.equal(reopened.state.recovery, null)
   assert.equal(reopened.state.draft.name, 'POS商品')
 })
@@ -440,7 +472,7 @@ test('不正pointer・storage保存失敗・別対象の応答は外部保存せ
   const bad = harness({ stored: JSON.stringify({ ...pointer, productId: 1 }) })
   await bad.mount()
   assert.equal(bad.state.storageBlocked, true)
-  await bad.button('POSから読み込む').props.onClick()
+  await bad.button('POS照合を再試行').props.onClick()
   assert.equal(bad.calls.length, 0)
   const blocked = harness({ storageError: true })
   await blocked.mount(); await blocked.readAndReview(); blocked.confirmSave(); await settle()
@@ -454,7 +486,7 @@ test('不正pointer・storage保存失敗・別対象の応答は外部保存せ
 
 test('別対象の読込/レビュー・不正完了DTOは成功と扱わず、完了通知を出さない', async () => {
   const loadMismatch = harness({ actions: { loadPosProductEditorAction: async () => ({ success: true, data: { ...fixture, storeId: 6 } }) } })
-  await loadMismatch.mount(); await loadMismatch.button('POSから読み込む').props.onClick()
+  await loadMismatch.mount(); await loadMismatch.button('POS照合を再試行').props.onClick()
   assert.equal(loadMismatch.state.draft, null)
   const reviewMismatch = harness({ actions: { reviewPosProductEditorAction: async () => ({ success: true, data: { ...review, operationId: 'different' } }) } })
   await reviewMismatch.mount(); await reviewMismatch.readAndReview()

@@ -3,7 +3,7 @@ import 'server-only'
 import { createClient } from '@/lib/supabase/server'
 import { requireInventoryManagerAccess } from '@/lib/inventory/auth'
 import { parsePosProductCommand } from './validation'
-import { configuredPosProductInspector } from './inspection-transport.server'
+import { configuredPosProductInspector, PosProductInspectionError } from './inspection-transport.server'
 import { decodeProductEditInspection } from './inspection.server'
 import { buildProductEditReview } from './edit-review.server'
 import type { ProductEditInspection } from './inspection.server'
@@ -46,7 +46,17 @@ async function readInspection(input: Target, inspector?: PosProductInspector): P
     const reader = inspector ?? configuredPosProductInspector()
     const raw = await reader.inspect({ storeId: input.storeId, operationId: input.operationId, janCode: product.jan_code, actorId })
     return decodeProductEditInspection({ storeId: input.storeId, productId: input.productId, janCode: product.jan_code }, raw)
-  } catch { throw new ProductEditorError('POSの商品情報を取得・照合できません。入力を保持して取得し直してください。') }
+  } catch (error) {
+    const diagnostic = typeof PosProductInspectionError === 'function' && error instanceof PosProductInspectionError ? error : null
+    const details = diagnostic ? ` [${diagnostic.code}/${diagnostic.stage}]` : ''
+    const reason = diagnostic?.code === 'CONFIGURATION' ? 'POS読取りの接続設定が未完了です。管理者に確認してください。'
+      : diagnostic?.code === 'TIMEOUT' ? 'POS照合が時間内に完了しませんでした。取得処理が終了してから再試行してください。'
+      : diagnostic?.code === 'GATEWAY_UNAVAILABLE' ? 'GASから読取り工程の診断を取得できません。管理者に受付設定と公開版の確認を依頼してください。'
+      : diagnostic?.code === 'FORM_CONTRACT' ? 'POSの商品フォームを安全に読み取れません。管理者に表示形式の確認を依頼してください。'
+      : diagnostic?.code === 'IDENTITY' || diagnostic?.code === 'SEARCH' ? '店舗・JAN・POS商品の一致を確認できません。対象を管理者に確認してください。'
+      : 'POSの商品情報を取得・照合できません。取得状況を確認してから再試行してください。'
+    throw new ProductEditorError(`${reason} 入力は保持しています。${details}`)
+  }
 }
 
 export async function loadProductEditor(input: unknown, inspector?: PosProductInspector): Promise<ProductEditorData> {

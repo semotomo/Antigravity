@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Calendar, Loader2, RefreshCcw, X, Download } from 'lucide-react'
 
 // Next.js API ルート経由でGASを呼び出すため、直接URLは不要
@@ -20,24 +20,29 @@ export function SalesHistoryModal() {
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isLiveRefresh, setIsLiveRefresh] = useState(false)
-  const [hasLoadedCache, setHasLoadedCache] = useState(false)
   const [hasCache, setHasCache] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<HistoryRow[]>([])
   const [fetchedAt, setFetchedAt] = useState<string | null>(null)
   
-  // デフォルトは今日
+  const [savedPeriod, setSavedPeriod] = useState<{ start: string; end: string } | null>(null)
+  const manualPeriod = useRef(false)
+  const requestSequence = useRef(0)
+
+  // 端末のタイムゾーンによらず、営業日を日本時間で扱う。
   const getToday = () => {
-    const d = new Date()
-    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+    const value = (type: string) => parts.find(part => part.type === type)?.value
+    return `${value('year')}/${value('month')}/${value('day')}`
   }
   
-  const [startDate, setStartDate] = useState(getToday())
-  const [endDate, setEndDate] = useState(getToday())
+  const [startDate, setStartDate] = useState(getToday)
+  const [endDate, setEndDate] = useState(getToday)
 
   const [targetStore, setTargetStore] = useState<{ name: string; id: string } | null>(null)
 
   const fetchHistory = async (refresh: boolean) => {
+    const sequence = ++requestSequence.current
     setIsLoading(true)
     setIsLiveRefresh(refresh)
     setError(null)
@@ -55,6 +60,8 @@ export function SalesHistoryModal() {
       })
 
       const json = await res.json().catch(() => null)
+      // 閉じる前や前回表示の遅延応答は、現在の表示・読込み状態へ反映しない。
+      if (sequence !== requestSequence.current) return
       if (!res.ok) {
         throw new Error(json?.message || `HTTP error! status: ${res.status}`)
       }
@@ -63,30 +70,54 @@ export function SalesHistoryModal() {
         setData(json.data)
         setHasCache(Boolean(json.hasCache))
         setFetchedAt(typeof json.fetchedAt === 'string' ? json.fetchedAt : null)
-        if (typeof json.startDate === 'string') setStartDate(json.startDate)
-        if (typeof json.endDate === 'string') setEndDate(json.endDate)
-        if (json.targetStore) {
-          setTargetStore(json.targetStore)
-        }
+        setSavedPeriod(typeof json.startDate === 'string' && typeof json.endDate === 'string' ? { start: json.startDate, end: json.endDate } : null)
+        setTargetStore(json.targetStore ?? null)
       } else {
         throw new Error(json.message || 'データ取得に失敗しました。')
       }
     } catch (err) {
+      if (sequence !== requestSequence.current) return
       console.error(err)
       setError(err instanceof Error ? err.message : '予期せぬエラーが発生しました。')
     } finally {
-      setIsLoading(false)
-      setIsLiveRefresh(false)
-      setHasLoadedCache(true)
+      if (sequence === requestSequence.current) {
+        setIsLoading(false)
+        setIsLiveRefresh(false)
+      }
     }
   }
 
   const openModal = () => {
+    manualPeriod.current = false
+    const today = getToday()
+    setStartDate(today)
+    setEndDate(today)
     setIsOpen(true)
-    if (!hasLoadedCache) {
-      void fetchHistory(false)
-    }
+    void fetchHistory(false)
   }
+
+  const closeModal = () => {
+    requestSequence.current++
+    setIsOpen(false)
+  }
+
+  useEffect(() => {
+    if (!isOpen) return
+    const updateDay = () => {
+      if (manualPeriod.current) return
+      const today = getToday()
+      setStartDate(today)
+      setEndDate(today)
+    }
+    const timer = setInterval(updateDay, 60_000)
+    window.addEventListener('focus', updateDay)
+    document.addEventListener('visibilitychange', updateDay)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', updateDay)
+      document.removeEventListener('visibilitychange', updateDay)
+    }
+  }, [isOpen])
 
   const formattedFetchedAt = fetchedAt
     ? new Intl.DateTimeFormat('ja-JP', {
@@ -118,7 +149,7 @@ export function SalesHistoryModal() {
                 入出庫履歴（リアルタイム）
               </h2>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={closeModal}
                 className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
               >
                 <X className="h-5 w-5" />
@@ -132,7 +163,7 @@ export function SalesHistoryModal() {
                   type="text"
                   placeholder="yyyy/MM/dd"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  onChange={(e) => { manualPeriod.current = true; setStartDate(e.target.value) }}
                   className="w-28 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                 />
                 <span>〜</span>
@@ -140,7 +171,7 @@ export function SalesHistoryModal() {
                   type="text"
                   placeholder="yyyy/MM/dd"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={(e) => { manualPeriod.current = true; setEndDate(e.target.value) }}
                   className="w-28 rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
                 />
               </div>
@@ -169,9 +200,9 @@ export function SalesHistoryModal() {
 
             <div className="border-b border-sky-100 bg-sky-50/70 px-6 py-2 text-xs text-sky-800">
               {formattedFetchedAt
-                ? `保存履歴: ${formattedFetchedAt}（${startDate} 〜 ${endDate}）`
+                ? `保存履歴: ${formattedFetchedAt}（${savedPeriod ? `${savedPeriod.start} 〜 ${savedPeriod.end}` : '期間不明'}）`
                 : '保存履歴はまだありません。'}
-              <span className="ml-3 text-sky-600">毎日17時・19時までに自動更新</span>
+              <span className="ml-3 text-sky-600">自動取得予定: 毎日17:00・18:50（日本時間／実行環境によって遅れる場合があります）</span>
             </div>
 
             <div className="flex-1 overflow-auto p-6">

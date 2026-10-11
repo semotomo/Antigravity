@@ -1,7 +1,7 @@
 import type { ActionResult, ProductEditExecutionData, ProductEditRecoveryData, ProductEditorData, ProductEditorReviewData } from '@/lib/pos-products/editor'
 import type { PosProductFields } from '@/lib/pos-products/types'
 
-export type PreviewScenario = 'normal' | 'network-error' | 'conflict' | 'save-normal' | 'prepare-response-lost' | 'prepare-before-ledger' | 'prepare-unregistered' | 'save-response-lost' | 'db-pending' | 'save-rejected' | 'save-not-sent' | 'prepared-expired' | 'cancel-response-lost'
+export type PreviewScenario = 'normal' | 'slow-inspection' | 'inspection-error' | 'network-error' | 'conflict' | 'save-normal' | 'prepare-response-lost' | 'prepare-before-ledger' | 'prepare-unregistered' | 'save-response-lost' | 'db-pending' | 'save-rejected' | 'save-not-sent' | 'prepared-expired' | 'cancel-response-lost'
 let scenario: PreviewScenario = 'normal'
 let loads = 0
 const operations = new Map<string, ProductEditExecutionData>()
@@ -39,8 +39,10 @@ function target(input: unknown): input is { storeId: 7; productId: number; opera
 }
 
 export async function loadPosProductEditorAction(input: unknown): Promise<ActionResult<ProductEditorData>> {
-  await pause()
+  if (scenario === 'slow-inspection') await new Promise(resolve => setTimeout(resolve, 15_000))
+  else await pause()
   if (!target(input)) return { success: false, error: '合成テストの対象が一致しません。' }
+  if (scenario === 'inspection-error') return { success: false, error: '合成POS照合失敗：入力は保持しています。 [FORM_CONTRACT/EDIT_PARSE]' }
   loads++
   return { success: true, data: fixture(scenario === 'conflict' && loads > 1) }
 }

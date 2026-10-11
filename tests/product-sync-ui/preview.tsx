@@ -16,5 +16,5 @@ const element = document.getElementById('root')
 if (!element) throw new Error('Missing preview root')
 createRoot(element).render(<main className="mx-auto max-w-3xl p-4 sm:p-8">
   <h1 className="mb-4 text-xl font-bold">同期通知の検証用・合成データ・本番非接続</h1>
-  <ProductSyncNotificationList notifications={notices} unresolvedCount={2}/>
+  <ProductSyncNotificationList notifications={notices} unresolvedCount={2} syncEnabled={false}/>
 </main>)

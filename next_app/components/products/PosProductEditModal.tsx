@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useReducer, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/components/ui/StatusBadge'
 import { loadPosProductEditorAction, reviewPosProductEditorAction } from '@/app/actions/posProducts'
@@ -24,6 +24,7 @@ type EditorState = {
   preparationOnly: boolean
   recoveryCheck: ProductEditRecoveryData | null
   storageIdentityAmbiguous: boolean
+  editedFields: Partial<Record<keyof PosProductFields, true>>
 }
 
 type ProductEditorRecovery = { storeId: 6 | 7; productId: number; operationId: string }
@@ -54,10 +55,13 @@ const FIELD_LABELS: Record<keyof PosProductFields, string> = {
 const INPUT_CLASS = 'w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-600/20 disabled:bg-gray-100'
 const BUTTON_CLASS = 'rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-50'
 
-export function initialProductEditorState(): EditorState {
-  return { baseline: null, draft: null, refreshed: null, review: null, error: null,
+export function initialProductEditorState(product?: ProductListRow): EditorState {
+  // DB値は即時入力用であり、POS照合の基準・分類IDとして信用しない。
+  const money = (value: number | null | undefined) => Number.isSafeInteger(value) && Number(value) >= 0 ? String(value) : ''
+  const draft = product ? { name: product.product_name ?? '', price: money(product.selling_price), cost: money(product.cost_price), groupId: '', supplierId: null } : null
+  return { baseline: null, draft, refreshed: null, review: null, error: null,
     recovery: null, execution: null, storageReady: false, storageBlocked: false, executionNeedsRecovery: false,
-    frozenCommand: null, preparationOnly: false, recoveryCheck: null, storageIdentityAmbiguous: false }
+    frozenCommand: null, preparationOnly: false, recoveryCheck: null, storageIdentityAmbiguous: false, editedFields: {} }
 }
 
 export function productEditorReducer(state: EditorState, event: EditorEvent): EditorState {
@@ -65,17 +69,25 @@ export function productEditorReducer(state: EditorState, event: EditorEvent): Ed
   if ((state.recovery || state.storageBlocked) && ['loaded', 'changed', 'keep-input', 'replace-input', 'reviewed', 'clear-message'].includes(event.type)) return state
   switch (event.type) {
     case 'loaded':
+      if (!state.baseline) {
+        const draft = { ...event.data.fields }
+        // 初回の非同期応答は利用者が触った項目を戻さず、未編集項目だけPOS値にする。
+        for (const field of Object.keys(state.editedFields) as (keyof PosProductFields)[]) {
+          if (state.draft) Object.assign(draft, { [field]: state.draft[field] })
+        }
+        return { ...state, baseline: event.data, draft, refreshed: null, review: null, error: null }
+      }
       // 再取得しても入力と元の基準は変更せず、採用方法を利用者が選ぶ。
       return state.draft
         ? { ...state, refreshed: event.data, review: null, error: null }
         : { ...state, baseline: event.data, draft: { ...event.data.fields }, review: null, error: null }
     case 'changed':
       if (!state.draft) return state
-      return { ...state, draft: { ...state.draft, [event.field]: event.field === 'supplierId' && event.value === '' ? null : event.value }, review: null, error: null }
+      return { ...state, draft: { ...state.draft, [event.field]: event.field === 'supplierId' && event.value === '' ? null : event.value }, editedFields: { ...state.editedFields, [event.field]: true }, review: null, error: null }
     case 'keep-input':
       return state.refreshed ? { ...state, baseline: state.refreshed, refreshed: null, review: null, error: null } : state
     case 'replace-input':
-      return state.refreshed ? { ...state, baseline: state.refreshed, draft: { ...state.refreshed.fields }, refreshed: null, review: null, error: null } : state
+      return state.refreshed ? { ...state, baseline: state.refreshed, draft: { ...state.refreshed.fields }, editedFields: {}, refreshed: null, review: null, error: null } : state
     case 'reviewed':
       return { ...state, review: event.data, error: null }
     case 'failed':
@@ -93,9 +105,9 @@ export function productEditorReducer(state: EditorState, event: EditorEvent): Ed
     case 'execution-started':
       return state.recovery ? state : { ...state, recovery: event.pointer, storageReady: true, executionNeedsRecovery: true,
         frozenCommand: event.command ?? null, preparationOnly: event.preparationOnly ?? false,
-        draft: state.draft ?? (event.command ? { ...event.command.fields } : null), error: null }
+        draft: event.command ? { ...event.command.fields } : state.draft, error: null }
     case 'execution-command':
-      return { ...state, frozenCommand: event.command, draft: state.draft ?? { ...event.command.fields } }
+      return { ...state, frozenCommand: event.command, draft: { ...event.command.fields } }
     case 'execution-dispatched':
       return { ...state, preparationOnly: false, recoveryCheck: null }
     case 'execution-preparing':
@@ -153,6 +165,7 @@ function intentKey(storeId: 6 | 7, productId: number) { return `kennel-pos-edit-
 function phaseKey(storeId: 6 | 7, productId: number) { return `kennel-pos-edit-phase:v1:${storeId}:${productId}` }
 
 export function hasProductEditorChanges(state: EditorState): boolean {
+  if (!state.baseline) return Object.keys(state.editedFields).length > 0
   return Boolean(state.baseline && state.draft &&
     (Object.keys(FIELD_LABELS) as (keyof PosProductFields)[]).some(field => state.draft?.[field] !== state.baseline?.fields[field]))
 }
@@ -173,7 +186,7 @@ type PosProductEditModalProps = {
 }
 
 export function PosProductEditModal({ product, storeId, onClose, savingEnabled = false, onSaved }: PosProductEditModalProps) {
-  const [state, dispatch] = useReducer(productEditorReducer, undefined, initialProductEditorState)
+  const [state, dispatch] = useReducer(productEditorReducer, product.store_id === storeId ? product : undefined, initialProductEditorState)
   const [pending, setPending] = useState<'load' | 'review' | 'prepare' | 'save' | 'recover' | 'inspect' | 'cancel' | null>(null)
   const [confirmation, setConfirmation] = useState<'close' | 'replace' | 'save' | 'continue' | 'cancel' | null>(null)
   const [rescueOperationId, setRescueOperationId] = useState('')
@@ -183,13 +196,15 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
   const executionLock = useRef<ProductEditorRecovery | null>(null)
   const notifiedOperation = useRef<string | null>(null)
   const latestExecution = useRef<ProductEditExecutionData | null>(null)
+  const automaticLoadStarted = useRef(false)
   const titleId = useId()
   const descriptionId = useId()
   const dirty = hasProductEditorChanges(state)
   const baseline = state.baseline
   const draft = state.draft
   const locked = state.recovery !== null || state.storageBlocked
-  const editDisabled = pending !== null || locked || !state.storageReady
+  const editDisabled = (pending !== null && pending !== 'load') || locked || !state.storageReady
+  const loadDisabled = pending !== null || locked || !state.storageReady
   const executionCompleted = !state.executionNeedsRecovery && state.execution?.stage === 'completed'
   const executionRejected = !state.executionNeedsRecovery && ['rejected', 'not_sent'].includes(state.execution?.stage ?? '')
   const recoveryRelease = !state.storageIdentityAmbiguous && state.recoveryCheck?.releaseAllowed === true
@@ -295,7 +310,7 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
     else close()
   }
 
-  async function load() {
+  const load = useCallback(async () => {
     if (inFlight.current || locked || executionLock.current || !state.storageReady) return
     inFlight.current = true
     setPending('load')
@@ -314,7 +329,19 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
       inFlight.current = false
       setPending(null)
     }
-  }
+  }, [locked, state.storageReady, storeId, product.id, product.jan_code])
+
+  useEffect(() => {
+    if (!state.storageReady || locked || automaticLoadStarted.current) return
+    let active = true
+    // 復旧情報の検査後にだけ、新しい編集の読取りを一度開始する。保存は自動実行しない。
+    queueMicrotask(() => {
+      if (!active || automaticLoadStarted.current) return
+      automaticLoadStarted.current = true
+      void load()
+    })
+    return () => { active = false }
+  }, [state.storageReady, locked, load])
 
   async function review() {
     if (inFlight.current || locked || executionLock.current || !state.storageReady || !baseline || !draft || state.refreshed || !operationId.current) return
@@ -564,8 +591,8 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
               : locked ? '新しいPOS保存は停止中です。既存操作は、認可済みの状態に応じてPOS照合・DB反映だけを続けられます。'
               : '準備用：変更内容の確認まで。POS保存はまだ有効になっていません。'}</p>
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={load} disabled={editDisabled} className={BUTTON_CLASS}>{pending === 'load' ? 'POSから読込中...' : baseline ? 'POS値を再取得' : 'POSから読み込む'}</button>
-              {baseline ? <p className="text-xs text-gray-500">取得日時: <span className="tabular-nums">{new Date(baseline.capturedAt).toLocaleString('ja-JP')}</span></p> : <p className="text-sm text-gray-500">POSの現在値を読み込んでから編集してください。</p>}
+              <button type="button" onClick={load} disabled={loadDisabled} className={BUTTON_CLASS}>{pending === 'load' ? 'POSを裏で照合中...' : baseline ? 'POS値を再取得' : 'POS照合を再試行'}</button>
+              {baseline ? <p className="text-xs text-gray-500">取得日時: <span className="tabular-nums">{new Date(baseline.capturedAt).toLocaleString('ja-JP')}</span></p> : <p role="status" className="text-sm text-gray-500">未照合：商品名・金額・原価は先に入力できます。入力は保持し、POS照合が完了するまで保存しません。</p>}
             </div>
             {state.error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-pretty text-sm text-red-700">{state.error}</p> : null}
             {state.storageBlocked && !state.recovery ? <section className="space-y-3 rounded-xl border border-amber-300 p-4" aria-label="操作IDの読取り救済"><p className="text-sm">元の操作IDを特定できないため、新しい編集は開始しません。操作IDを入力して状態だけを確認できますが、元IDとの一致を証明できない復旧情報は解除しません。</p><input aria-label="救済確認の操作ID" value={rescueOperationId} disabled={pending !== null} maxLength={36} onChange={event => setRescueOperationId(event.target.value)} className={INPUT_CLASS} placeholder="元の操作UUID" /><button type="button" disabled={pending !== null} onClick={() => void inspectRecovery()} className={BUTTON_CLASS}>操作IDで状態だけ確認</button></section> : null}
@@ -604,24 +631,24 @@ export function PosProductEditModal({ product, storeId, onClose, savingEnabled =
                 </div>
               </section>
             ) : null}
-            {baseline && draft ? (
+            {draft && (!locked || baseline) ? (
               <form onSubmit={event => { event.preventDefault(); void review() }} className="space-y-5">
                 <fieldset disabled={editDisabled || state.refreshed !== null} className="grid gap-4 sm:grid-cols-2">
                   <legend className="mb-3 font-semibold">編集内容</legend>
                   <label className="space-y-2 sm:col-span-2"><span className="text-sm font-medium">商品名</span><input required maxLength={200} value={draft.name} onChange={event => dispatch({ type: 'changed', field: 'name', value: event.target.value })} className={INPUT_CLASS} /></label>
-                  <label className="space-y-2"><span className="text-sm font-medium">商品グループ</span><select required value={draft.groupId} onChange={event => dispatch({ type: 'changed', field: 'groupId', value: event.target.value })} className={INPUT_CLASS}>
-                    {!baseline.groups.some(choice => choice.id === draft.groupId) ? <option value={draft.groupId}>現在の入力（最新候補から選び直してください）</option> : null}
-                    {baseline.groups.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
+                  <label className="space-y-2"><span className="text-sm font-medium">商品グループ</span><select required disabled={!baseline} value={draft.groupId} onChange={event => dispatch({ type: 'changed', field: 'groupId', value: event.target.value })} className={INPUT_CLASS}>
+                    {!baseline ? <option value="">POS照合後に選択できます</option> : !baseline.groups.some(choice => choice.id === draft.groupId) ? <option value={draft.groupId}>現在の入力（最新候補から選び直してください）</option> : null}
+                    {baseline?.groups.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
                   </select></label>
-                  <label className="space-y-2"><span className="text-sm font-medium">仕入先</span><select value={draft.supplierId ?? ''} onChange={event => dispatch({ type: 'changed', field: 'supplierId', value: event.target.value })} className={INPUT_CLASS}>
+                  <label className="space-y-2"><span className="text-sm font-medium">仕入先</span><select disabled={!baseline} value={draft.supplierId ?? ''} onChange={event => dispatch({ type: 'changed', field: 'supplierId', value: event.target.value })} className={INPUT_CLASS}>
                     <option value="">未設定</option>
-                    {draft.supplierId && !baseline.suppliers.some(choice => choice.id === draft.supplierId) ? <option value={draft.supplierId}>現在の入力（最新候補から選び直してください）</option> : null}
-                    {baseline.suppliers.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
+                    {draft.supplierId && baseline && !baseline.suppliers.some(choice => choice.id === draft.supplierId) ? <option value={draft.supplierId}>現在の入力（最新候補から選び直してください）</option> : null}
+                    {baseline?.suppliers.map(choice => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
                   </select></label>
                   <label className="space-y-2"><span className="text-sm font-medium">商品金額（円）</span><input required type="number" inputMode="numeric" min="0" max="999999999" step="1" value={draft.price} onChange={event => dispatch({ type: 'changed', field: 'price', value: event.target.value })} className={cn(INPUT_CLASS, 'tabular-nums')} /></label>
                   <label className="space-y-2"><span className="text-sm font-medium">商品原価（円）</span><input required type="number" inputMode="numeric" min="0" max="999999999" step="1" value={draft.cost} onChange={event => dispatch({ type: 'changed', field: 'cost', value: event.target.value })} className={cn(INPUT_CLASS, 'tabular-nums')} /></label>
                 </fieldset>
-                <div className="flex justify-end"><button type="submit" disabled={editDisabled || state.refreshed !== null || !dirty} className={BUTTON_CLASS}>{pending === 'review' ? '変更内容を確認中...' : '変更内容を確認'}</button></div>
+                <div className="flex justify-end"><button type="submit" disabled={pending !== null || editDisabled || !baseline || state.refreshed !== null || !dirty} className={BUTTON_CLASS}>{pending === 'review' ? '変更内容を確認中...' : !baseline ? 'POS照合待ち（入力は保持）' : '変更内容を確認'}</button></div>
               </form>
             ) : null}
             {!baseline && state.frozenCommand ? <section aria-label="固定した保存準備入力" className="space-y-3 rounded-2xl border border-gray-200 p-4"><h3 className="font-bold">固定した保存準備入力（変更不可）</h3><dl className="grid gap-3 sm:grid-cols-2">{(Object.keys(FIELD_LABELS) as (keyof PosProductFields)[]).map(field => <div key={field}><dt className="text-xs text-gray-500">{FIELD_LABELS[field]}</dt><dd className="mt-1 break-words text-sm tabular-nums">{state.frozenCommand!.fields[field] ?? '未設定'}</dd></div>)}</dl></section> : null}

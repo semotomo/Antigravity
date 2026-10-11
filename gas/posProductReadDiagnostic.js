@@ -214,9 +214,9 @@ function posReadDiagnostic_(config, storeId, jan, onStage, onEditForm) {
   return result;
 }
 
-/** 公開入口へ未接続。業務DTOだけ返し、フォーム/資格情報を返さない。 */
-function inspectPosProductEdit_(config, storeId, jan) {
-  var result = posReadDiagnostic_(config, storeId, jan, null, readPosProductEditForm_);
+/** 読取り専用の業務DTOだけ返し、フォーム/資格情報を返さない。 */
+function inspectPosProductEdit_(config, storeId, jan, onStage) {
+  var result = posReadDiagnostic_(config, storeId, jan, onStage || null, readPosProductEditForm_);
   return { storeId: result.storeId, janCode: result.janCode, capturedAt: Date.now(), searches: result.searches };
 }
 

@@ -160,18 +160,31 @@ test('不正JSON/非object/巨大UTF8本文や署名要求の非JSON MIMEを固�
   }
 })
 
-test('署名改ざん/不正payload/読取り例外はprivate固定エラーで止まり、本文や既存ログを返さない', () => {
+test('署名改ざん/不正payloadはprivate固定エラーで止まり、対象や本文や既存ログを返さない', () => {
   const envelope = JSON.parse(signed())
   for (const [body, options] of [[JSON.stringify({ ...envelope, signature: '0'.repeat(64) }), {}],
-    [signed('inspect', 7, { operationId, storeId: 7, janCode, password: 'synthetic-private' }), {}],
-    [signed(), { inspectThrows: true }]]) {
+    [signed('inspect', 7, { operationId, storeId: 7, janCode, password: 'synthetic-private' }), {}]]) {
     const f = fixture(options), result = f.post(body)
     assert.deepEqual(result, { version: 1, success: false, code: 'POS_PRODUCT_INSPECTION_UNAVAILABLE' })
+    assert.equal(f.configCalls, 0); assert.equal(f.calls.length, 0)
     noLegacy(f); assert.doesNotMatch(JSON.stringify(result), /synthetic-private|logs|payload|signature/)
   }
   const unavailable = fixture()
   unavailable.context.handlePosProductInspection_ = undefined
   assert.deepEqual(unavailable.post(signed()), failure); noLegacy(unavailable)
+  // 正規signerも対象不一致を署名前に拒否する。GAS側の検証と合わせて維持する。
+  assert.throws(() => signed('inspect', 7, { operationId, storeId: 6, janCode }))
+  assert.throws(() => signed('inspect', 7, { operationId: actorId, storeId: 7, janCode }))
+})
+
+test('署名と対象検証後の読取り例外は既知の工程とコードだけを返し、private本文やログを返さない', () => {
+  for (const storeId of [6, 7]) {
+    const f = fixture({ inspectThrows: true }), result = f.post(signed('inspect', storeId))
+    assert.deepEqual(result, { version: 1, success: false, operationId, actorId, storeId, janCode,
+      code: 'UNAVAILABLE', stage: 'POS_CONFIG', elapsedMs: 0 })
+    assert.equal(f.configCalls, 1); assert.equal(f.calls.length, 1)
+    noLegacy(f); assert.doesNotMatch(JSON.stringify(result), /synthetic-private|logs|payload|signature|password/)
+  }
 })
 
 test('従来POSTのmaster/sales/full/history/history_schemaと店舗/資格情報/期間/dryRunを保持する', () => {

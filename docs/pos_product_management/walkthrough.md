@@ -471,8 +471,27 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 事後32表snapshot SHA-256 `9408ab363f66b3d3c075eeeca00d769f7a0e476f7872c61a0ca35a2bbd774d8d` はcompleted/v4/send1、consume1/apply1・予約0、元旧操作/監査不変。型付き全行全列復元照合成功、対象外6702商品の全列と全棚卸し関連表は不変。対象商品変更列はproduct_name/selling_price/cost_price/派生markup_rate/updated_atだけ、別名/内部リンク各1は同店舗4779に束縛。DBと商品一覧で「ミツヤ もみじ焼き」/売価200/原価100/粗利率0.5・犬おやつ/モリミツ/有効を確認した。自動再送/手動商品SQL更新/棚卸し数量変更なし。
 - 画面証跡はGit対象外の `local_exports/real-save-production-ready-20261011.jpg`、`real-save-completed-20261011.jpg`、`real-save-product-result-20261011.jpg`。primary scratch SHAは既存99B91593…C65B0のまま。今回の実証は画像なしの指定1商品の3項目編集までであり、実画像あり商品・追加/JAN訂正/削除・新商品マスタ同期の有効化・本番スマホ再確認は残る。
 
+## 日付・自動取得予定・商品編集の先行入力（2026-10-11、ローカル実装）
+
+- 本人の実装開始承認後、既存隔離worktreeで実装。履歴のJST今日と保存キャッシュ期間を分離し、再表示・日跨ぎ・手動指定保持・閉じた画面の遅延応答無視を追加。モーダル再表示は保存履歴の読取りだけでPOS再取得は自動実行しない。
+- 既存4 cron routeの予定を両店舗17:00/18:50 JSTへ設定。route名の17/19・認証・店舗固定・60秒上限と他3cronは維持。Vercel画面で本番Hobbyを確認、公式仕様は分単位保証なし。両店舗同時POS読取りと60秒内の本番完了は未検証で、正確な時刻や取得成功を断定しない。
+- 編集フォームをDBの名前/金額/原価で先に表示し、復旧情報検査後に一度だけ自動読取り。DB値はPOS基準や候補IDとして使わず、初回応答は未編集項目だけに反映する。原価0・未入力・既存原価を区別し、入力済み項目・固定した復旧intentを保持。未照合保存、store/JAN不一致、結果不明時再送の拒否は維持。
+- GAS読取り2ファイルとNext transportに固定診断コード/工程/経過msを追加。署名未検証は旧固定応答、検証後の失敗は要求対象との相関と既知の9項目を検査し、HTML・例外原文・hidden・鍵を返さない。旧公開版の応答は工程不明と扱う。本店JAN4969735300013の実失敗原因の特定・修正確認は未完了。
+- 商品通知に現在の全体同期OFF/受付ON表示を追加し、過去拒否と結果不明の監査を保持。全体同期は有効化せず、個別編集・履歴取得と別設定であることを示す。
+- 本番非接続・CSP connect-src noneの合成previewで、PCの15秒照合待ちの名前/200円/原価0入力→照合完了→変更確認、390pxの破棄キャンセルと失敗再照合後の入力保持・未照合保存拒否を確認。商品dialog幅358/内容幅341/document幅390で横はみ出しなし。同期通知の現在停止/過去記録/結果不明はPC表示で確認。証跡はGit対象外の`local_exports/background-editor-desktop-20261011.png`、`background-editor-mobile-20261011.png`、`background-editor-error-mobile-20261011.png`。実POS保存の証明ではない。
+- 独立型検査・変更Next10ファイルLint・26ページ本番build・GAS13 JS構文・diff check成功。buildはprocess内の合成Supabase公開設定だけで実施し、envファイルや本番鍵を使わない。正式全回帰510件中507成功/既存3失敗/skip0（棚卸し関数抽出2件/CMS設定1件）。全体Lintも既存3 errors/5 warningsのみで、対象検査と区別する。
+- DB/GAS公開/Git push/Vercel反映・商品データ変更なし。primary scratch SHA-256は既存99B91593…C65B0と一致し、旧untracked helper2件は未変更。primaryのgit statusは旧別PCへのgitdir参照切れで確認不能だったため、修復・checkout等は行っていない。
+
+## 追加修正の公開反映（2026-10-11、承認範囲内で進行中）
+
+- 本人の続行により、対象26ファイルのGit/Vercel ProductionとGAS読取り2ファイルだけの公開反映を承認取得。DB/実商品/商品マスタ全体同期ON/資格情報の追加は対象外。独立差分レビューで公開ブロッカーなしを確認し、旧cutover helper2件は除外する。
+- GAS所有者kirikan22と既存公開v58/他3 deploymentを再確認。最新HEAD14ファイルを隔離退避し、前回公開後コピーと14/14一致。候補の差分はInspection/ReadDiagnosticだけで他12/manifest一致、13JS構文・共有129 bindings衝突なし、反映直前のfresh pullも14/14不変。
+- 17:21:24 HEAD反映後の再取得で14/14候補一致を確認し、既存公開IDだけv59へ更新。他3 deployment、公開権限/スコープ/設定/保存処理・同期停止は保持。退避先はGit対象外の`local_exports/gas-pre-read-diagnostics-20261011`、事後コピーは`gas-post-read-diagnostics-20261011`。
+- GitHub mainは030afadで、Vercel Current/Readyも同commitの46kdeWueyDF3DXXz7AM2E6qAdi8wと再確認。GitHub CLIのsemotomo認証が期限切れのため本人へ更新を依頼。GitHub connectorは別アカウントdoo-seであり反映には使用しない。Next.js公開と失敗JANの実読取り原因特定はまだ完了していない。
+
 ## 確認した一次資料
 
 - [Apps Script Utilities](https://developers.google.com/apps-script/reference/utilities/utilities): UTF-8を明示したHMAC-SHA256/ダイジェストAPI。
 - [Node.js Crypto](https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b): HMAC計算と固定長署名比較。
+- [Vercel Cron Usage & Pricing](https://vercel.com/docs/cron-jobs/usage-and-pricing): Hobbyの時刻精度はper-hour、Pro/Enterpriseはper-minute。
 - POS実画面のscript参照で確認した `hmma024.js?ver=2` / `hmma02401.js?ver=2`: 店販選択と店舗切替のAjax処理。取得・読取りだけで実行や改変はしていない。

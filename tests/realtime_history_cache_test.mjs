@@ -33,14 +33,14 @@ test('履歴画面は開いた時に保存履歴を復元し、手動操作だ�
   assert.match(historyModal, /保存履歴:/)
 })
 
-test('Hobbyプラン向けに店舗別Cronを17時・19時までに実行する', () => {
+test('店舗別Cronを承認済みの日本時間17:00・18:50へ設定する', () => {
   const vercelConfig = JSON.parse(source('next_app/vercel.json'))
   const schedules = new Map(vercelConfig.crons.map((cron) => [cron.path, cron.schedule]))
 
-  assert.equal(schedules.get('/api/cron/history-main-17'), '0 6 * * *')
-  assert.equal(schedules.get('/api/cron/history-wanwan-17'), '0 7 * * *')
-  assert.equal(schedules.get('/api/cron/history-main-19'), '0 8 * * *')
-  assert.equal(schedules.get('/api/cron/history-wanwan-19'), '0 9 * * *')
+  assert.equal(schedules.get('/api/cron/history-main-17'), '0 8 * * *')
+  assert.equal(schedules.get('/api/cron/history-wanwan-17'), '0 8 * * *')
+  assert.equal(schedules.get('/api/cron/history-main-19'), '50 9 * * *')
+  assert.equal(schedules.get('/api/cron/history-wanwan-19'), '50 9 * * *')
 
   for (const route of [
     'history-main-17',
