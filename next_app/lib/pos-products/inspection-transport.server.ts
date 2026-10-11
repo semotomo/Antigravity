@@ -9,31 +9,37 @@ const MAX_BYTES = 524_288
 const GAS_FAILURE_CODES = ['FORM_CONTRACT', 'IDENTITY', 'SEARCH', 'HTTP', 'REDIRECT', 'UNAVAILABLE'] as const
 const INSPECTION_STAGES = ['CONFIG', 'VERIFY', 'POS_CONFIG', 'LOGIN_GET', 'LOGIN_PAYLOAD', 'LOGIN_ACTION', 'LOGIN_POST', 'LIST_GET', 'SEARCH_PAYLOAD', 'SEARCH_POST', 'SEARCH_PARSE', 'DETAIL_POST', 'EDIT_POST', 'EDIT_PARSE']
 type InspectionFailureCode = typeof GAS_FAILURE_CODES[number] | 'CONFIGURATION' | 'TRANSPORT' | 'TIMEOUT' | 'RESPONSE_INVALID' | 'GATEWAY_UNAVAILABLE'
+type ResponseRejectionStage = 'DESTINATION' | 'REQUEST_TARGET' | 'REQUEST_SIZE' | 'REDIRECT_MISSING' | 'REDIRECT_TARGET' | 'REDIRECT_LENGTH' |
+  'RESPONSE_STATUS' | 'RESPONSE_TYPE' | 'RESPONSE_LENGTH' | 'RESPONSE_BODY' | 'RESPONSE_SIZE' | 'RESPONSE_SHAPE' |
+  'FAILURE_ENVELOPE' | 'RESPONSE_KEYS' | 'RESPONSE_IDENTITY' | 'RESPONSE_VALUE'
 
 export class PosProductInspectionError extends Error {
   constructor(readonly code: InspectionFailureCode, readonly stage: string = 'TRANSPORT', readonly elapsedMs: number | null = null) { super(FAILURE) }
 }
 
-function reject(): never { throw new PosProductInspectionError('RESPONSE_INVALID') }
+// 応答本文や転送URLを診断に含めず、拒否した検査の固定名だけを示す。
+function reject(stage: ResponseRejectionStage): never { throw new PosProductInspectionError('RESPONSE_INVALID', stage) }
 function destination(value: unknown): string {
-  if (typeof value !== 'string' || !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{20,256}\/exec$/.test(value)) reject()
+  if (typeof value !== 'string' || !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{20,256}\/exec$/.test(value)) reject('DESTINATION')
   return value
 }
 function responseTarget(location: string | null): string {
-  if (!location) reject()
+  if (!location) reject('REDIRECT_MISSING')
   const url = new URL(location)
   // GASの結果取得先だけ許可。署名本文や認証ヘッダーは転送しない。
   if (url.protocol !== 'https:' || url.hostname !== 'script.googleusercontent.com' || url.port || url.username || url.password ||
-      url.pathname !== '/macros/echo' || url.hash || url.search.length > 8192) reject()
+      url.pathname !== '/macros/echo' || url.hash) reject('REDIRECT_TARGET')
+  if (url.search.length > 8192) reject('REDIRECT_LENGTH')
   return url.href
 }
 async function readJson(response: Response): Promise<unknown> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   try {
-    if (response.status !== 200 || !/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) reject()
+    if (response.status !== 200) reject('RESPONSE_STATUS')
+    if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) reject('RESPONSE_TYPE')
     const declared = response.headers.get('content-length')
-    if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > MAX_BYTES)) reject()
-    if (!response.body) reject()
+    if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > MAX_BYTES)) reject('RESPONSE_LENGTH')
+    if (!response.body) reject('RESPONSE_BODY')
     reader = response.body.getReader()
     const chunks: Uint8Array[] = []
     let size = 0
@@ -41,7 +47,7 @@ async function readJson(response: Response): Promise<unknown> {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > MAX_BYTES) reject()
+      if (size > MAX_BYTES) reject('RESPONSE_SIZE')
       chunks.push(value)
     }
     const bytes = new Uint8Array(size)
@@ -57,7 +63,7 @@ async function readJson(response: Response): Promise<unknown> {
 /** 署名本文を一度だけ送信し、GASの既知結果URLへは本文なしGETだけを送る。 */
 export async function postPosProductEnvelope(destinationUrl: string, body: string, fetcher: typeof fetch = fetch): Promise<unknown> {
   const url = destination(destinationUrl)
-  if (typeof body !== 'string' || Buffer.byteLength(body, 'utf8') > 24576) reject()
+  if (typeof body !== 'string' || Buffer.byteLength(body, 'utf8') > 24576) reject('REQUEST_SIZE')
   const signal = AbortSignal.timeout(90_000)
   let response = await fetcher(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
     redirect: 'manual', cache: 'no-store', signal })
@@ -80,28 +86,31 @@ export function createSignedPosProductInspector(config: { enabled: boolean; url:
     async inspect(target) {
       try {
         if (!target || (target.storeId !== 6 && target.storeId !== 7) || !UUID.test(target.operationId) || !UUID.test(target.actorId) ||
-            typeof target.janCode !== 'string' || !/^(\d{8}|\d{12}|\d{13})$/.test(target.janCode)) reject()
+            typeof target.janCode !== 'string' || !/^(\d{8}|\d{12}|\d{13})$/.test(target.janCode)) reject('REQUEST_TARGET')
         const body = JSON.stringify(signPosProductRequest({ action: 'inspect', operationId: target.operationId,
           actorId: target.actorId, storeId: target.storeId,
           payload: { operationId: target.operationId, storeId: target.storeId, janCode: target.janCode } }, secret))
         // 再試行しない。一回の読取り失敗でDB受付・POS保存へ進まない。
         const value = await postPosProductEnvelope(url, body, fetcher)
-        if (!value || typeof value !== 'object' || Array.isArray(value)) reject()
+        if (!value || typeof value !== 'object' || Array.isArray(value)) reject('RESPONSE_SHAPE')
         const result = value as Record<string, unknown>
         if (result.version === 1 && result.success === false) {
           // 旧公開版は読取り工程の失敗も同じ固定応答になるため、署名失敗などと断定しない。
           if (Object.keys(result).length === 3 && result.code === 'POS_PRODUCT_INSPECTION_UNAVAILABLE') throw new PosProductInspectionError('GATEWAY_UNAVAILABLE', 'UNKNOWN')
+          // 公開入口の固定失敗は相関も署名済み証拠もない。工程だけ区別して失敗を維持する。
+          if (Object.keys(result).length === 3 && result.code === 'POS_PRODUCT_PUBLIC_GATEWAY_UNAVAILABLE') throw new PosProductInspectionError('GATEWAY_UNAVAILABLE', 'PUBLIC_GATEWAY')
           const failureKeys = ['version', 'success', 'operationId', 'actorId', 'storeId', 'janCode', 'code', 'stage', 'elapsedMs']
           if (Object.keys(result).length !== failureKeys.length || failureKeys.some(key => !Object.hasOwn(result, key)) ||
               result.operationId !== target.operationId || result.actorId !== target.actorId || result.storeId !== target.storeId || result.janCode !== target.janCode ||
               !GAS_FAILURE_CODES.includes(result.code as typeof GAS_FAILURE_CODES[number]) || typeof result.stage !== 'string' || !INSPECTION_STAGES.includes(result.stage) ||
-              !Number.isSafeInteger(result.elapsedMs) || Number(result.elapsedMs) < 0 || Number(result.elapsedMs) > 360_000) reject()
+              !Number.isSafeInteger(result.elapsedMs) || Number(result.elapsedMs) < 0 || Number(result.elapsedMs) > 360_000) reject('FAILURE_ENVELOPE')
           throw new PosProductInspectionError(result.code as typeof GAS_FAILURE_CODES[number], result.stage, result.elapsedMs as number)
         }
         const keys = ['version', 'success', 'operationId', 'actorId', 'storeId', 'janCode', 'data']
-        if (Object.keys(result).length !== keys.length || keys.some(key => !Object.hasOwn(result, key)) ||
-            result.version !== 1 || result.success !== true || result.operationId !== target.operationId || result.actorId !== target.actorId ||
-            result.storeId !== target.storeId || result.janCode !== target.janCode) reject()
+        if (Object.keys(result).length !== keys.length || keys.some(key => !Object.hasOwn(result, key))) reject('RESPONSE_KEYS')
+        if (result.version !== 1 || result.success !== true) reject('RESPONSE_VALUE')
+        if (result.operationId !== target.operationId || result.actorId !== target.actorId ||
+            result.storeId !== target.storeId || result.janCode !== target.janCode) reject('RESPONSE_IDENTITY')
         // 業務DTO自体の厳格検査は、DB対象と結び付けるdecodeProductEditInspectionが行う。
         return result.data
       } catch (error) {

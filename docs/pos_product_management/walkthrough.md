@@ -482,12 +482,20 @@ Cookie、hidden状態の値、資格情報はfixture/本書へ収録していな
 - 独立型検査・変更Next10ファイルLint・26ページ本番build・GAS13 JS構文・diff check成功。buildはprocess内の合成Supabase公開設定だけで実施し、envファイルや本番鍵を使わない。正式全回帰510件中507成功/既存3失敗/skip0（棚卸し関数抽出2件/CMS設定1件）。全体Lintも既存3 errors/5 warningsのみで、対象検査と区別する。
 - DB/GAS公開/Git push/Vercel反映・商品データ変更なし。primary scratch SHA-256は既存99B91593…C65B0と一致し、旧untracked helper2件は未変更。primaryのgit statusは旧別PCへのgitdir参照切れで確認不能だったため、修復・checkout等は行っていない。
 
-## 追加修正の公開反映（2026-10-11、承認範囲内で進行中）
+## 追加修正の公開反映（2026-10-11、承認済み26ファイル公開完了）
 
 - 本人の続行により、対象26ファイルのGit/Vercel ProductionとGAS読取り2ファイルだけの公開反映を承認取得。DB/実商品/商品マスタ全体同期ON/資格情報の追加は対象外。独立差分レビューで公開ブロッカーなしを確認し、旧cutover helper2件は除外する。
 - GAS所有者kirikan22と既存公開v58/他3 deploymentを再確認。最新HEAD14ファイルを隔離退避し、前回公開後コピーと14/14一致。候補の差分はInspection/ReadDiagnosticだけで他12/manifest一致、13JS構文・共有129 bindings衝突なし、反映直前のfresh pullも14/14不変。
 - 17:21:24 HEAD反映後の再取得で14/14候補一致を確認し、既存公開IDだけv59へ更新。他3 deployment、公開権限/スコープ/設定/保存処理・同期停止は保持。退避先はGit対象外の`local_exports/gas-pre-read-diagnostics-20261011`、事後コピーは`gas-post-read-diagnostics-20261011`。
-- GitHub mainは030afadで、Vercel Current/Readyも同commitの46kdeWueyDF3DXXz7AM2E6qAdi8wと再確認。GitHub CLIのsemotomo認証が期限切れのため本人へ更新を依頼。GitHub connectorは別アカウントdoo-seであり反映には使用しない。Next.js公開と失敗JANの実読取り原因特定はまだ完了していない。
+- 本人による認証更新後、GitHub CLIのsemotomoを再確認して対象26ファイルだけをcommit 76d4a5980125c7828bbc0ecb93ad5a61c7770c80で通常push。Vercel B9vgNjaGFK9QEftX2mjThqQcpnF9はReady/Current/Production、kennel-dashboardドメインと同commitを確認。実画面で新しい同期停止通知、商品入力の即時表示、一度の自動照合、履歴のJST今日開始・手動指定保持・再表示時の今日復帰を確認した。
+- 本番CronはEnabled、両店舗の17時は`0 8 * * *`、18:50は`50 9 * * *`で既存4経路を登録済み。Hobbyの柔軟な1時間枠のため厳密な分時刻は保証しない。両店舗の実取得成功・同時セッション・60秒以内完了は未検証で、Run操作はしていない。
+
+## 桁区切り修正と応答診断（2026-10-11、別承認済み）
+
+- 公開後の本店JAN4969735300013はFORM_CONTRACT/EDIT_PARSE。本人がログインしたPOSで本店/所属・両JANの一致と売価1,600/原価800を読取りだけで確認し、数字だけを許すparserが正しい桁区切りを拒否する再現テストを追加した。正しい3桁区切りだけを1〜9桁の数字へ正規化し、不正区切り/負値/全角/単位/小数等は拒否する。送信用の元値と非対象設定指紋の保持、他店舗/JAN拒否も検証した。
+- Form1ファイルの追加公開を本人が承認。最新v59を14ファイル退避し、候補はFormだけ差分、他13/manifest不変、13JS構文・129 bindings衝突なしを確認。17:32:33反映後の14/14一致を確認し、既存公開IDをv60へ更新。他3 deployment・権限・設定は変更なし。退避/候補/再取得はGit対象外の`local_exports/gas-pre-grouped-money-20261011`、`gas-grouped-money-candidate-20261011`、`gas-post-grouped-money-20261011`に保存。
+- v60後の本番UI読取りはRESPONSE_INVALID/TRANSPORTで停止、名前/1600/800の入力を保持して未照合保存を拒否。17:34:04のGAS doPostは22.799秒で完了したが業務読取り成功の証拠ではない。POSの分類候補9/仕入先候補26件を確認、応答上限超過等を推測で断定しない。
+- Next読取り通信1ファイルに固定の検査工程名だけを追加するGit/Vercel公開を本人が別承認。成功DTOへの検査は緩和せず、公開入口の固定失敗も失敗のまま工程だけ区別する。鍵・HTML・応答本文・Location実値は返さない。通信/dispatchの回帰とPOS関連371/371、独立型検査・対象Lint成功、全回帰515件中512成功/既存3失敗/skip0を確認した。公開後の実読取りは次の検証として残る。DB変更・商品保存・商品マスタ同期ONは行っていない。
 
 ## 確認した一次資料
 

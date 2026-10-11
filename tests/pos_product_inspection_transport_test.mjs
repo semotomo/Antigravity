@@ -127,3 +127,38 @@ test('旧公開版の固定エラーは工程不明として保持し、署名�
   await assert.rejects(()=>inspector.inspect(target),error=>error.code==='GATEWAY_UNAVAILABLE'&&error.stage==='UNKNOWN')
   assert.equal(calls,1)
 })
+
+test('応答の拒否工程だけを固定名で区別し、本文や転送先の実値を漏らさない',async()=>{
+  const cases=[
+    [()=>new Response('private-response',{status:503,headers:{'content-type':'application/json'}}),'RESPONSE_STATUS'],
+    [()=>new Response('private-html',{headers:{'content-type':'text/html'}}),'RESPONSE_TYPE'],
+    [()=>new Response('private-length',{headers:{'content-type':'application/json','content-length':'524289'}}),'RESPONSE_LENGTH'],
+    [()=>new Response('x'.repeat(524289),{headers:{'content-type':'application/json'}}),'RESPONSE_SIZE'],
+    [()=>new Response(null,{status:302}),'REDIRECT_MISSING'],
+    [()=>new Response(null,{status:302,headers:{location:'https://private.test/macros/echo?secret=private'}}),'REDIRECT_TARGET'],
+    [()=>new Response(null,{status:302,headers:{location:'https://script.googleusercontent.com/macros/echo?lib='+'x'.repeat(8192)}}),'REDIRECT_LENGTH'],
+    [()=>Response.json([]),'RESPONSE_SHAPE'],
+    [()=>Response.json(envelope({extra:'private'})),'RESPONSE_KEYS'],
+    [()=>Response.json(envelope({storeId:6})),'RESPONSE_IDENTITY'],
+    [()=>Response.json(envelope({version:2})),'RESPONSE_VALUE'],
+  ]
+  for(const [response,stage] of cases){
+    let calls=0
+    const inspector=api.createSignedPosProductInspector(config,async()=>{calls++;return response()})
+    await assert.rejects(()=>inspector.inspect(target),error=>error.code==='RESPONSE_INVALID'&&error.stage===stage&&
+      !JSON.stringify([error.message,error.code,error.stage]).includes('private'))
+    assert.equal(calls,1)
+  }
+})
+
+test('公開受付の固定3項目失敗は工程だけを示して拒否し、成功DTOにしない',async()=>{
+  const failed={version:1,success:false,code:'POS_PRODUCT_PUBLIC_GATEWAY_UNAVAILABLE'}
+  let calls=0
+  const inspector=api.createSignedPosProductInspector(config,async()=>{calls++;return Response.json(failed)})
+  await assert.rejects(()=>inspector.inspect(target),error=>error.code==='GATEWAY_UNAVAILABLE'&&error.stage==='PUBLIC_GATEWAY')
+  assert.equal(calls,1)
+  for(const change of [{extra:'private'},{storeId:7},{code:'private'},{version:2},{version:'1'},{success:true}]){
+    const reader=api.createSignedPosProductInspector(config,async()=>Response.json({...failed,...change}))
+    await assert.rejects(()=>reader.inspect(target),error=>error.code==='RESPONSE_INVALID'&&!error.message.includes('private'))
+  }
+})

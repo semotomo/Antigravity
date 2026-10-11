@@ -71,6 +71,28 @@ test('通信hiddenの更新は業務指紋を変えず、説明・フリガナ�
   for(const change of [{description:'変更後'},{kana:'変更後'},{short:'変更後'}]) assert.notEqual(parse(7,change).settings.otherSettingsFingerprint,f.settings.otherSettingsFingerprint)
   assert.equal(parse(7,{name:'次の商品名',cost:'65'}).settings.otherSettingsFingerprint,f.settings.otherSettingsFingerprint)
 })
+test('POSが表示する正しい3桁区切りの売価・原価を整数値で読む',()=>{
+  for(const store of [6,7]) for(const [price,cost] of [['1,600','800'],['1,234','56,789'],['999,999,999','0'],['0','999,999,999']]) {
+    const result=parse(store,{price,cost})
+    assert.equal(result.fields.price,price.replaceAll(',',''))
+    assert.equal(result.fields.cost,cost.replaceAll(',',''))
+  }
+  assert.equal(parse(7,{price:'000001600',cost:'000000000'}).fields.price,'1600')
+  assert.equal(parse(7,{price:'000001600',cost:'000000000'}).fields.cost,'0')
+})
+test('不正な桁区切り・単位・小数・上限超過は金額として解釈しない',()=>{
+  const invalid=['1,60','1,,600','1,6000','1600,000','0,160','01,600',',1600','1600,','1.600','1,600円',' 1,600','1,600 ','-1,600','１,６００','1,000,000,000','1000000000','']
+  for(const value of invalid) for(const key of ['price','cost']) assert.throws(()=>parse(7,{[key]:value}),value)
+})
+test('桁区切りの読取りは保存用の元値・非対象設定・店舗照合を変更しない',()=>{
+  const html=form(7,{price:'1,600',cost:'800'}).replace('</form>','<input type="hidden" name="te-conditions" value="synthetic-form-state"></form>')
+  const result=gas.parsePosProductEditForm_(html,7,jan,true)
+  assert.equal(result.inspection.fields.price,'1600')
+  assert.equal(result.submission.entries.find(entry=>entry.key==='gddGoodsPrice').value,'1,600')
+  assert.equal(result.inspection.settings.otherSettingsFingerprint,parse().settings.otherSettingsFingerprint)
+  assert.throws(()=>gas.parsePosProductEditForm_(html,6,jan,true))
+  assert.throws(()=>gas.parsePosProductEditForm_(html,7,'9999999999999',true))
+})
 test('店舗・区分・JAN二欄・内部ID・隠れた所属の不一致は停止する',()=>{
   for(const change of [{group:'11099'},{sales:'1'},{id:''},{id:'<bad>'},{productCode:'9999999999999'},{makerCode:'9999999999999'},{productCode:'',makerCode:''}]) assert.throws(()=>parse(7,change))
   assert.equal(parse(7,{productCode:''}).identity.productCode,'')

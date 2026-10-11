@@ -247,9 +247,10 @@ function parsePosProductEditForm_(html, storeId, jan, includeSubmission) {
       [productCode, manufacturerCode].some(function(code) { return code !== '' && code !== jan; })) reject();
   if (radio('gdsGoodsPriceFlg') !== '0' || radio('gddPriceInputFlg') !== 'false' || radio('gdsSupplierFlg') !== '0') reject();
   function money(key) {
-    var value = text(key, 9, false);
-    if (!/^\d{1,9}$/.test(value)) reject();
-    return String(Number(value));
+    var value = text(key, 11, false);
+    // 実POSの3桁区切り表示のみ解釈する。カンマを無条件に削除して不正値を受け入れない。
+    if (!/^(?:\d{1,9}|[1-9]\d{0,2}(?:,\d{3}){1,2})$/.test(value)) reject();
+    return String(Number(value.replace(/,/g, '')));
   }
   function choices(key) {
     phase = 'CATALOG_VALUES';
