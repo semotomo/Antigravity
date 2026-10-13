@@ -7,6 +7,10 @@ import vm from 'node:vm'
 const require = createRequire(import.meta.url)
 const ts = require('../next_app/node_modules/typescript')
 const source = readFileSync(new URL('../next_app/components/products/BackgroundProductEditModal.tsx', import.meta.url), 'utf8')
+const failures = {}
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../next_app/lib/pos-products/background-failure.ts', import.meta.url), 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText, { exports: failures })
 const exports = {}
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
   exports, URLSearchParams, require: name => {
@@ -14,6 +18,7 @@ vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.Mo
     if (name === 'react/jsx-runtime') return require('../next_app/node_modules/react/jsx-runtime')
     if (name === '@/lib/productStores') return { getProductStoreName: store => store === 7 ? '本店' : 'わんわん' }
     if (name === '@/components/ui/StatusBadge') return { cn: (...values) => values.join(' ') }
+    if (name === '@/lib/pos-products/background-failure') return failures
     throw Error(`Unexpected import ${name}`)
   },
 })
@@ -83,18 +88,85 @@ test('ACK消失後は保存した同一IDをGET照会し、新しいIDや再POST
   assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
 })
 
-test('同一ID照会で受付なしを確認した場合も元patchとIDで一度だけ再受付する', async () => {
+test('受付状態の確認はGETだけで保全し、受付なし確認後の明示操作だけ元patch/基準値/IDで再受付する', async () => {
   const f = fixture()
   await assert.rejects(exports.acceptBackgroundProductEdit({ ...f.options, fetcher: async () => { throw Error('offline') } }))
-  let lookups = 0
-  await exports.acceptBackgroundProductEdit({ ...f.options, patch: { price: '300' }, expectedValues: { price: '250' }, fetcher: async (url, options) => {
-    f.calls.push({ url, options }); if (options.method === 'GET') { lookups++; return { ok: true, json: async () => ({ success: true, data: null }) } }
+  const preserved = [...f.values.values()][0]
+  const options = { ...f.options, patch: { price: '300' }, expectedValues: { price: '250' }, createId: () => { throw Error('new id forbidden') }, fetcher: async (url, options) => {
+    f.calls.push({ url, options }); if (options.method === 'GET') return { ok: true, json: async () => ({ success: true, data: null }) }
     return { ok: true, json: async () => ({ success: true, data: intake }) }
-  } })
-  assert.equal(lookups, 1)
+  } }
+  await assert.rejects(exports.acceptBackgroundProductEdit(options), error => error.code === 'BG_EDIT_NO_INTAKE')
+  assert.deepEqual(f.calls.map(call => call.options.method), ['GET'])
+  assert.equal([...f.values.values()][0], preserved)
+  assert.equal(f.events.length, 0)
+  await exports.acceptBackgroundProductEdit({ ...options, retryUnaccepted: true })
+  assert.deepEqual(f.calls.map(call => call.options.method), ['GET', 'GET', 'POST'])
   assert.deepEqual(JSON.parse(f.calls.at(-1).options.body).patch, { name: '変更名' })
   assert.deepEqual(JSON.parse(f.calls.at(-1).options.body).expectedValues, { name: '旧名' })
   assert.equal(JSON.parse(f.calls.at(-1).options.body).operationId, operationId)
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+  assert.equal(f.values.size, 0)
+})
+
+test('明示再受付もGETで既存受付を確認した場合はPOSTを追加せず同じ操作を返す', async () => {
+  const f = fixture()
+  f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+  await exports.acceptBackgroundProductEdit({ ...f.options, retryUnaccepted: true, createId: () => { throw Error('new id forbidden') } })
+  assert.deepEqual(f.calls.map(call => call.options.method), ['GET'])
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+  assert.equal(f.values.size, 0)
+})
+
+test('工程別の固定診断コードで元例外/応答本文/未知コードを遮断し、受付確認失敗はPOSTしない', async () => {
+  const secret = 'private raw response or key'
+  for (const method of ['GET', 'POST']) {
+    const requestCode = method === 'GET' ? 'BG_EDIT_CHECK_REQUEST' : 'BG_EDIT_ACCEPT_REQUEST'
+    const responseCode = method === 'GET' ? 'BG_EDIT_CHECK_RESPONSE' : 'BG_EDIT_ACCEPT_RESPONSE'
+    const cases = [
+      { code: requestCode, fetcher: async () => { throw Error(secret) } },
+      { code: responseCode, response: { ok: true, json: async () => { throw Error(secret) } } },
+      { code: responseCode, response: { ok: true, json: async () => null } },
+      { code: responseCode, response: { ok: false, json: async () => ({ success: false, diagnosticCode: secret, error: secret }) } },
+      { code: 'BG_EDIT_DB_REJECTED', response: { ok: false, json: async () => ({ success: false, diagnosticCode: 'BG_EDIT_DB_REJECTED', error: secret }) } },
+      { code: responseCode, response: { ok: true, json: async () => ({ success: true, data: { ...intake, productId: 99 } }) } },
+    ]
+    for (const scenario of cases) {
+      const f = fixture()
+      if (method === 'GET') f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+      await assert.rejects(exports.acceptBackgroundProductEdit({ ...f.options, retryUnaccepted: method === 'GET', fetcher: async (url, options) => {
+        f.calls.push({ url, options }); return scenario.fetcher ? scenario.fetcher() : scenario.response
+      } }), error => {
+        assert.equal(error.code, scenario.code)
+        assert.ok(!error.message.includes(secret))
+        return true
+      })
+      assert.deepEqual(f.calls.map(call => call.options.method), [method])
+      assert.equal(f.values.size, 1)
+      assert.equal(f.events.length, 0)
+      assert.equal(f.lock.current, false)
+    }
+  }
+})
+
+test('入力/保全工程の失敗を固定コードにし、壊れたversion1情報を上書きせず通信しない', async () => {
+  const invalidInput = fixture({ expectedValues: undefined })
+  await assert.rejects(exports.acceptBackgroundProductEdit(invalidInput.options), error => error.code === 'BG_EDIT_INPUT')
+  assert.equal(invalidInput.calls.length, 0)
+  for (const kind of ['read', 'write', 'json']) {
+    const f = fixture()
+    if (kind === 'read') f.options.storage.getItem = () => { throw Error('private storage exception') }
+    if (kind === 'write') f.options.storage.setItem = () => { throw Error('private quota exception') }
+    if (kind === 'json') f.values.set(exports.backgroundEditStorageKey(target), '{private corrupt json')
+    await assert.rejects(exports.acceptBackgroundProductEdit(f.options), error => error.code === 'BG_EDIT_STORAGE' && !error.message.includes('private'))
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.events.length, 0)
+    if (kind === 'json') assert.equal([...f.values.values()][0], '{private corrupt json')
+  }
+  const f = fixture()
+  await assert.rejects(exports.acceptBackgroundProductEdit({ ...f.options, retryUnaccepted: true }), error => error.code === 'BG_EDIT_INPUT')
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.values.size, 0)
 })
 
 test('表示元の基準値が不正/編集キーと不一致ならPOSTせず、新しい基準を推測しない', async () => {
@@ -148,18 +220,98 @@ function elements(node) {
   return [node, ...(Array.isArray(children) ? children : [children]).flatMap(elements)]
 }
 
-function modalRenderer(fetcher = async () => { throw Error('Unexpected fetch') }) {
-  const states = []; let index = 0
+function modalRenderer(fetcher = async () => { throw Error('Unexpected fetch') }, { storage, runEffects = false } = {}) {
+  const states = [], effects = []; let index = 0
   const hooks = { useState(initial) { const slot = index++; if (!(slot in states)) states[slot] = typeof initial === 'function' ? initial() : initial
     return [states[slot], value => { states[slot] = typeof value === 'function' ? value(states[slot]) : value }] },
-    useEffect() {}, useRef: value => ({ current: value }), useId: () => 'id' }
+    useEffect(effect, deps) { const slot = index++; if (!runEffects) return
+      if (!states[slot] || deps.some((value, at) => value !== states[slot][at])) { states[slot] = deps; effects.push(effect) } },
+    useRef(value) { const slot = index++; if (!(slot in states)) states[slot] = { current: value }; return states[slot] }, useId: () => 'id' }
   const api = {}
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports: api, URLSearchParams, fetch: fetcher, require: name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? require('../next_app/node_modules/react/jsx-runtime') :
-      name === '@/lib/productStores' ? { getProductStoreName: () => '本店' } : name === '@/components/ui/StatusBadge' ? { cn: (...values) => values.join(' ') } : (() => { throw Error(name) })(),
+    exports: api, URLSearchParams, fetch: fetcher, window: { sessionStorage: storage, crypto: { randomUUID: () => operationId } },
+    require: name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? require('../next_app/node_modules/react/jsx-runtime') :
+      name === '@/lib/productStores' ? { getProductStoreName: () => '本店' } : name === '@/components/ui/StatusBadge' ? { cn: (...values) => values.join(' ') } :
+        name === '@/lib/pos-products/background-failure' ? failures : (() => { throw Error(name) })(),
   })
-  return props => { index = 0; return api.BackgroundProductEditModal(props) }
+  return props => { index = 0; const result = api.BackgroundProductEditModal(props); while (effects.length) effects.shift()(); return result }
 }
+
+test('通常保存の失敗を診断コードだけで示し、GETなし確認で希望値/同じIDを保持して明示再受付へ進む', async () => {
+  const f = fixture(), secret = 'private response body and key'
+  let mode = 'failed'
+  const render = modalRenderer(async (url, options) => {
+    f.calls.push({ url, options })
+    if (mode === 'failed') return { ok: false, json: async () => ({ success: false, diagnosticCode: 'BG_EDIT_DB_REJECTED', error: secret }) }
+    if (options.method === 'GET') return { ok: true, json: async () => ({ success: true, data: null }) }
+    return { ok: true, json: async () => ({ success: true, data: intake }) }
+  }, { storage: f.options.storage, runEffects: true })
+  const props = { product: { id: 42, jan_code: target.janCode, product_name: '旧名', selling_price: 100, cost_price: 50 }, storeId: 7,
+    onAccepted: f.options.onAccepted, onClose: f.options.onClose }
+  render(props)
+  let nodes = elements(render(props))
+  assert.ok(!nodes.some(node => node.props?.role === 'alert'))
+  assert.ok(!nodes.some(node => node.props?.children === operationId))
+  nodes.find(node => node.type === 'input').props.onChange({ target: { value: '変更名' } })
+  elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await new Promise(resolve => setImmediate(resolve))
+  nodes = elements(render(props))
+  assert.match(nodes.find(node => node.props?.role === 'alert').props.children, /BG_EDIT_DB_REJECTED/)
+  assert.ok(!JSON.stringify(nodes).includes(secret))
+  assert.ok(nodes.some(node => node.props?.children === operationId))
+  assert.ok(!nodes.some(node => node.type === 'button' && node.props.children === '同じ内容で再受付'))
+  const preserved = [...f.values.values()][0]
+  mode = 'missing'
+  nodes.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await new Promise(resolve => setImmediate(resolve))
+  nodes = elements(render(props))
+  assert.deepEqual(f.calls.map(call => call.options.method), ['POST', 'GET'])
+  assert.equal([...f.values.values()][0], preserved)
+  assert.equal(nodes.find(node => node.type === 'input').props.value, '変更名')
+  assert.ok(nodes.filter(node => node.type === 'input').every(node => node.props.disabled))
+  assert.match(nodes.find(node => node.props?.role === 'alert').props.children, /BG_EDIT_NO_INTAKE/)
+  assert.equal(f.events.length, 0)
+  nodes.find(node => node.type === 'button' && node.props.children === '同じ内容で再受付').props.onClick()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(f.calls.map(call => call.options.method), ['POST', 'GET', 'GET', 'POST'])
+  assert.equal(JSON.parse(f.calls.at(-1).options.body).operationId, operationId)
+  assert.deepEqual(JSON.parse(f.calls.at(-1).options.body).expectedValues, { name: '旧名' })
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+})
+
+test('受付なし確認後もGET失敗なら再受付ボタンを解除し、未知コード/JSON破損/通信例外を表示しない', async () => {
+  for (const kind of ['unknown', 'json', 'network', 'noIntakeCode']) {
+    const f = fixture(), secret = 'private response or exception'
+    f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+    let missing = true
+    const render = modalRenderer(async (url, options) => {
+      f.calls.push({ url, options })
+      if (missing) return { ok: true, json: async () => ({ success: true, data: null }) }
+      if (kind === 'network') throw Error(secret)
+      if (kind === 'json') return { ok: true, json: async () => { throw Error(secret) } }
+      if (kind === 'noIntakeCode') return { ok: false, json: async () => ({ success: false, diagnosticCode: 'BG_EDIT_NO_INTAKE', error: secret }) }
+      return { ok: false, json: async () => ({ success: false, diagnosticCode: secret, error: secret }) }
+    }, { storage: f.options.storage, runEffects: true })
+    const props = { product: { id: 42, jan_code: target.janCode, product_name: '旧名', selling_price: 100, cost_price: 50 }, storeId: 7,
+      onAccepted: f.options.onAccepted, onClose: f.options.onClose }
+    render(props)
+    elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.ok(elements(render(props)).some(node => node.type === 'button' && node.props.children === '同じ内容で再受付'))
+    missing = false
+    elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+    await new Promise(resolve => setImmediate(resolve))
+    const nodes = elements(render(props))
+    assert.ok(!nodes.some(node => node.type === 'button' && node.props.children === '同じ内容で再受付'))
+    assert.match(nodes.find(node => node.props?.role === 'alert').props.children,
+      kind === 'network' ? /BG_EDIT_CHECK_REQUEST/ : kind === 'noIntakeCode' ? /BG_EDIT_NO_INTAKE/ : /BG_EDIT_CHECK_RESPONSE/)
+    if (kind === 'noIntakeCode') assert.doesNotMatch(nodes.find(node => node.props?.role === 'alert').props.children, /まだ受付されていません/)
+    assert.ok(!JSON.stringify(nodes).includes(secret))
+    assert.deepEqual(f.calls.map(call => call.options.method), ['GET', 'GET'])
+    assert.equal(f.values.size, 1)
+    assert.equal(f.events.length, 0)
+  }
+})
 
 test('遅れて取得した希望値をreadonly表示し、要確認は同じIDの再確認/未送信取消へ案内する', () => {
   const render = modalRenderer()

@@ -5,6 +5,7 @@ import { requireInventoryManagerAccess } from '@/lib/inventory/auth'
 import { backgroundEditProduct, backgroundEditRecord, backgroundEditStore, backgroundEditUuid,
   decodeProductEditIntakeData, parseBackgroundEditRequest } from './background-edit'
 import type { ProductEditIntakeData } from './background-edit'
+import { BackgroundEditFailure } from './background-failure'
 
 const FAILURE = '商品変更の受付状態を確認できません。入力を保持し、同じ操作の受付状態を確認してください。'
 export function backgroundEditEnabled() {
@@ -14,33 +15,49 @@ export function backgroundEditEnabled() {
 /** service鍵とDB例外はサーバー内部だけで扱い、呼出元へ原文を渡さない。 */
 export async function backgroundEditRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) throw new Error(FAILURE)
+  if (!url || !key) throw new BackgroundEditFailure('BG_EDIT_DB_CONFIG')
+  let connected = false
   try {
     const client = createServiceClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } })
+    connected = true
     const { data, error } = await client.rpc(name, args)
-    if (error) throw new Error(FAILURE)
+    if (error) {
+      // DBの元例外・本文は記録せず、限定したSQLSTATE/RESTコードだけを残す。
+      const sqlstate = typeof error.code === 'string' && /^(?:[0-9A-Z]{5}|PGRST[0-9]{3})$/.test(error.code) ? error.code : 'UNKNOWN'
+      console.warn('POS_PRODUCT_BACKGROUND_DB_REJECTED', { sqlstate })
+      throw new BackgroundEditFailure('BG_EDIT_DB_REJECTED')
+    }
     return data
-  } catch { throw new Error(FAILURE) }
+  } catch (error) {
+    if (error instanceof BackgroundEditFailure) throw error
+    throw new BackgroundEditFailure(connected ? 'BG_EDIT_DB_TRANSPORT' : 'BG_EDIT_DB_CONFIG')
+  }
 }
 async function authorize(storeId: 6 | 7) {
-  const client = await createClient()
-  try { return (await requireInventoryManagerAccess(client, storeId)).id }
-  catch { throw new Error('対象店舗の管理者権限を確認できません。入力は保持されています。') }
+  try {
+    const client = await createClient()
+    return (await requireInventoryManagerAccess(client, storeId)).id
+  } catch { throw new BackgroundEditFailure('BG_EDIT_ACCESS') }
 }
 export async function enqueueBackgroundProductEdit(input: unknown): Promise<ProductEditIntakeData> {
-  const command = parseBackgroundEditRequest(input)
-  if (!backgroundEditEnabled()) throw new Error('裏側の商品保存受付はまだ有効になっていません。入力は保持されています。')
+  let command: ReturnType<typeof parseBackgroundEditRequest>
+  try { command = parseBackgroundEditRequest(input) }
+  catch { throw new BackgroundEditFailure('BG_EDIT_VALIDATION') }
+  if (!backgroundEditEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
   const actorId = await authorize(command.storeId)
-  if (!backgroundEditEnabled()) throw new Error(FAILURE)
-  const raw = backgroundEditRecord(await backgroundEditRpc('enqueue_pos_product_edit_intake', {
+  if (!backgroundEditEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
+  const result = await backgroundEditRpc('enqueue_pos_product_edit_intake', {
     p_actor_id: actorId, p_store_id: command.storeId, p_product_id: command.productId,
     p_operation_id: command.operationId, p_patch_text: JSON.stringify(command.patch), p_expected_values_text: JSON.stringify(command.expectedValues),
-  }))
-  if (raw.actor_id !== actorId) throw new Error(FAILURE)
-  const data = decodeProductEditIntakeData(raw)
-  if (data.operationId !== command.operationId || data.storeId !== command.storeId || data.productId !== command.productId ||
-      JSON.stringify(data.patch) !== JSON.stringify(command.patch)) throw new Error(FAILURE)
-  return data
+  })
+  try {
+    const raw = backgroundEditRecord(result)
+    if (raw.actor_id !== actorId) throw new BackgroundEditFailure('BG_EDIT_RECEIPT')
+    const data = decodeProductEditIntakeData(raw)
+    if (data.operationId !== command.operationId || data.storeId !== command.storeId || data.productId !== command.productId ||
+        JSON.stringify(data.patch) !== JSON.stringify(command.patch)) throw new BackgroundEditFailure('BG_EDIT_RECEIPT')
+    return data
+  } catch { throw new BackgroundEditFailure('BG_EDIT_RECEIPT') }
 }
 export async function controlBackgroundProductEdit(input: unknown): Promise<ProductEditIntakeData | { operationId: string; storeId: 6 | 7; productId: number; abandoned: true }> {
   const row = backgroundEditRecord(input)

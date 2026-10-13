@@ -5,6 +5,8 @@ import { cn } from '@/components/ui/StatusBadge'
 import { getProductStoreName } from '@/lib/productStores'
 import type { ProductListRow } from '@/lib/products'
 import type { BackgroundExpectedValues, ProductEditIntakeData } from '@/lib/pos-products/background-edit'
+import { BackgroundEditFailure, backgroundEditFailureCode, parseBackgroundEditFailureCode } from '@/lib/pos-products/background-failure'
+import type { BackgroundEditFailureCode } from '@/lib/pos-products/background-failure'
 
 type Draft = { name: string; price: string; cost: string }
 type Patch = Partial<Draft>
@@ -28,11 +30,11 @@ export function backgroundProductEditPatch(draft: Draft, edited: Partial<Record<
     if (!edited[field]) continue
     const value = draft[field].trim()
     if (field === 'name' ? !value || value.length > 200 || /[\x00-\x1f\x7f]/.test(value) : !/^\d{1,9}$/.test(value)) {
-      throw new Error(field === 'name' ? '商品名を200文字以内で入力してください。' : `${labels[field]}を0以上の整数で入力してください。`)
+      throw new BackgroundEditFailure('BG_EDIT_INPUT')
     }
     patch[field] = field === 'name' ? value : String(Number(value))
   }
-  if (!Object.keys(patch).length) throw new Error('変更する項目を入力してください。')
+  if (!Object.keys(patch).length) throw new BackgroundEditFailure('BG_EDIT_INPUT')
   return patch
 }
 
@@ -51,17 +53,20 @@ function validExpectedValues(value: unknown, patch: Patch): value is ExpectedVal
 }
 
 export function readBackgroundEditIntent(storage: StoragePort, target: Target): Intent | null {
-  const raw = storage.getItem(backgroundEditStorageKey(target))
-  if (raw === null) return null
-  if (raw.length > 4096) throw new Error('保存済みの受付情報を確認できません。')
-  const value = JSON.parse(raw) as Intent
-  if (!value || value.version !== 1 || value.storeId !== target.storeId || value.productId !== target.productId ||
-      value.janCode !== target.janCode || !UUID.test(value.operationId) || !value.patch || Array.isArray(value.patch) ||
-      Object.keys(value.patch).some(field => !fields.includes(field as keyof Draft)) ||
-      Object.values(value.patch).some(field => typeof field !== 'string') || !validExpectedValues(value.expectedValues, value.patch)) throw new Error('保存済みの受付情報を確認できません。')
-  backgroundProductEditPatch({ name: '', price: '', cost: '', ...value.patch },
-    Object.fromEntries(Object.keys(value.patch).map(field => [field, true])))
-  return value
+  try {
+    const raw = storage.getItem(backgroundEditStorageKey(target))
+    if (raw === null) return null
+    if (raw.length > 4096) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
+    const value = JSON.parse(raw) as Intent
+    if (!value || value.version !== 1 || value.storeId !== target.storeId || value.productId !== target.productId ||
+        value.janCode !== target.janCode || typeof value.operationId !== 'string' || !UUID.test(value.operationId) ||
+        !value.patch || typeof value.patch !== 'object' || Array.isArray(value.patch) ||
+        Object.keys(value.patch).some(field => !fields.includes(field as keyof Draft)) ||
+        Object.values(value.patch).some(field => typeof field !== 'string') || !validExpectedValues(value.expectedValues, value.patch)) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
+    backgroundProductEditPatch({ name: '', price: '', cost: '', ...value.patch },
+      Object.fromEntries(Object.keys(value.patch).map(field => [field, true])))
+    return value
+  } catch { throw new BackgroundEditFailure('BG_EDIT_STORAGE') }
 }
 
 export function isBackgroundEditIntake(value: unknown, target?: Target, operationId?: string): value is ProductEditIntakeData {
@@ -78,9 +83,29 @@ export function isBackgroundEditIntake(value: unknown, target?: Target, operatio
     (!operationId || data.operationId === operationId)
 }
 
+async function backgroundEditRequest(fetcher: typeof fetch, url: string, options: RequestInit,
+  requestCode: BackgroundEditFailureCode, responseCode: BackgroundEditFailureCode): Promise<{ data: unknown }> {
+  let response: Response
+  try { response = await fetcher(url, options) } catch { throw new BackgroundEditFailure(requestCode) }
+  let body: unknown
+  try { body = await response.json() } catch { throw new BackgroundEditFailure(responseCode) }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BackgroundEditFailure(responseCode)
+  const result = body as { success?: unknown; diagnosticCode?: unknown; data?: unknown }
+  if (!response.ok || result.success !== true) {
+    // サーバー本文や未知コードは表示せず、許可済みの固定コードだけを引き継ぐ。
+    throw new BackgroundEditFailure(parseBackgroundEditFailureCode(result.diagnosticCode) ?? responseCode)
+  }
+  return { data: result.data }
+}
+
+class UnacceptedBackgroundEditFailure extends BackgroundEditFailure {
+  constructor() { super('BG_EDIT_NO_INTAKE') }
+}
+
 export async function acceptBackgroundProductEdit(options: {
   target: Target; patch: Patch; expectedValues: ExpectedValues; storage: StoragePort; fetcher: typeof fetch; createId: () => string
   lock: { current: boolean }; onAccepted: (data: ProductEditIntakeData) => void; onClose: () => void
+  retryUnaccepted?: boolean
 }) {
   // Reactの再描画より前にロックし、同時クリックを一度の受付に限定する。
   if (options.lock.current) return
@@ -90,35 +115,42 @@ export async function acceptBackgroundProductEdit(options: {
     let data: ProductEditIntakeData | null = null
     if (intent) {
       const params = new URLSearchParams({ store: String(intent.storeId), operationId: intent.operationId })
-      const response = await options.fetcher(`/api/pos-products/background-edit?${params}`, { method: 'GET', cache: 'no-store' })
-      const body = await response.json()
-      if (!response.ok || body.success !== true || body.data !== null && (!isBackgroundEditIntake(body.data, options.target, intent.operationId) ||
-          fields.some(field => body.data.patch[field] !== intent!.patch[field]))) {
-        throw new Error('受付状態を確認できません。同じ入力のまま再確認してください。')
+      const body = await backgroundEditRequest(options.fetcher, `/api/pos-products/background-edit?${params}`, { method: 'GET', cache: 'no-store' },
+        'BG_EDIT_CHECK_REQUEST', 'BG_EDIT_CHECK_RESPONSE')
+      const received = body.data
+      if (received === null) {
+        // 読取りだけの確認からPOSTへ進めない。別の明示操作でも同一IDを再照会する。
+        if (!options.retryUnaccepted) throw new UnacceptedBackgroundEditFailure()
+      } else {
+        if (!isBackgroundEditIntake(received, options.target, intent.operationId) ||
+            fields.some(field => received.patch[field] !== intent!.patch[field])) throw new BackgroundEditFailure('BG_EDIT_CHECK_RESPONSE')
+        data = received
       }
-      data = body.data
     } else {
+      if (options.retryUnaccepted) throw new BackgroundEditFailure('BG_EDIT_INPUT')
       const patch = backgroundProductEditPatch({ name: '', price: '', cost: '', ...options.patch },
         Object.fromEntries(Object.keys(options.patch).map(field => [field, true])))
-      if (!validExpectedValues(options.expectedValues, patch)) throw new Error('表示元の商品値を確認できません。')
-      intent = { ...options.target, version: 1, operationId: options.createId(), patch, expectedValues: { ...options.expectedValues } }
-      if (!UUID.test(intent.operationId)) throw new Error('受付情報を作成できません。')
+      if (!validExpectedValues(options.expectedValues, patch)) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+      try {
+        intent = { ...options.target, version: 1, operationId: options.createId(), patch, expectedValues: { ...options.expectedValues } }
+        if (!UUID.test(intent.operationId)) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+      } catch { throw new BackgroundEditFailure('BG_EDIT_INPUT') }
       // 通信開始前に操作IDと入力を保全する。失敗時はPOS/受付POSTへ進まない。
-      options.storage.setItem(backgroundEditStorageKey(options.target), JSON.stringify(intent))
+      try { options.storage.setItem(backgroundEditStorageKey(options.target), JSON.stringify(intent)) } catch { throw new BackgroundEditFailure('BG_EDIT_STORAGE') }
     }
     if (!data) {
       const { operationId, storeId, productId, patch, expectedValues } = intent
-      const response = await options.fetcher('/api/pos-products/background-edit', {
+      const body = await backgroundEditRequest(options.fetcher, '/api/pos-products/background-edit', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId, storeId, productId, patch, expectedValues }),
-      })
-      const body = await response.json()
-      if (!response.ok || body.success !== true || !isBackgroundEditIntake(body.data, options.target, operationId) ||
-          fields.some(field => body.data.patch[field] !== patch[field])) {
-        throw new Error('変更を受け付けられませんでした。入力を保持しています。受付状態を再確認してください。')
+      }, 'BG_EDIT_ACCEPT_REQUEST', 'BG_EDIT_ACCEPT_RESPONSE')
+      const received = body.data
+      if (!isBackgroundEditIntake(received, options.target, operationId) ||
+          fields.some(field => received.patch[field] !== patch[field])) {
+        throw new BackgroundEditFailure('BG_EDIT_ACCEPT_RESPONSE')
       }
-      data = body.data
+      data = received
     }
-    if (!data) throw new Error('受付状態を確認できません。')
+    if (!data) throw new BackgroundEditFailure('BG_EDIT_ACCEPT_RESPONSE')
     options.onAccepted(data)
     // 受付確認後だけ保全情報を解除する。解除不能でもサーバーの同一ID確認を維持する。
     try { options.storage.removeItem(backgroundEditStorageKey(options.target)) } catch {}
@@ -178,12 +210,22 @@ type Props = {
   onAccepted: (data: ProductEditIntakeData) => void; onClose: () => void; onAdvanced?: () => void; onAbandoned?: () => void
 }
 
+function backgroundEditFailureMessage(code: BackgroundEditFailureCode, confirmedUnaccepted = false) {
+  const message = code === 'BG_EDIT_INPUT' ? '商品名は200文字以内、売価・原価は0以上の整数で入力してください。表示元の商品値も確認してください。'
+    : code === 'BG_EDIT_STORAGE' ? 'この端末の受付情報を保全・確認できません。入力を保持しています。'
+      : confirmedUnaccepted ? 'まだ受付されていません。希望値と同じ操作IDを保持しています。再受付する場合は「同じ内容で再受付」を押してください。'
+        : '保存受付を確認できません。入力と同じ操作IDを保持しています。「受付状態を確認」で再確認してください。'
+  return `${message}（診断コード: ${code}）`
+}
+
 export function BackgroundProductEditModal({ product, storeId, existingOperation, onAccepted, onClose, onAdvanced, onAbandoned }: Props) {
   const money = (value: number | null) => Number.isSafeInteger(value) && Number(value) >= 0 ? String(value) : ''
   const [draft, setDraft] = useState<Draft>(() => ({ name: product.product_name ?? '', price: money(product.selling_price), cost: money(product.cost_price), ...existingOperation?.patch }))
   const [edited, setEdited] = useState<Partial<Record<keyof Draft, boolean>>>({})
   const [ready, setReady] = useState(false)
   const [stored, setStored] = useState(false)
+  const [storedOperationId, setStoredOperationId] = useState<string | null>(null)
+  const [unaccepted, setUnaccepted] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
@@ -199,9 +241,9 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
     if (node && !node.open) node.showModal()
     try {
       const intent = readBackgroundEditIntent(window.sessionStorage, { productId: product.id, storeId, janCode: product.jan_code ?? '' })
-      if (intent) { setDraft(value => ({ ...value, ...intent.patch })); setStored(true) }
+      if (intent) { setDraft(value => ({ ...value, ...intent.patch })); setStored(true); setStoredOperationId(intent.operationId) }
       setReady(true)
-    } catch { setError('この端末の受付情報を確認できません。保存せず、既存の操作を確認してください。') }
+    } catch { setError(backgroundEditFailureMessage('BG_EDIT_STORAGE')) }
     return () => { if (node?.open) node.close() }
   }, [product.id, product.jan_code, storeId])
 
@@ -211,21 +253,28 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
     else onClose()
   }
 
-  async function save() {
+  async function save(retryUnaccepted = false) {
     if (!ready || active || lock.current) return
-    if (!product.jan_code) { setError('JANコードがないため、この商品を受付できません。'); return }
-    setError(null)
+    if (retryUnaccepted && (!stored || !unaccepted)) return
+    if (!product.jan_code) { setError(backgroundEditFailureMessage('BG_EDIT_INPUT')); return }
+    setError(null); setUnaccepted(false)
     try {
       const patch = stored ? {} : backgroundProductEditPatch(draft, edited)
       setPending(true)
       await acceptBackgroundProductEdit({ target: { productId: product.id, storeId, janCode: product.jan_code }, patch,
         expectedValues: backgroundProductEditExpectedValues(product, patch),
-        storage: window.sessionStorage, fetcher: fetch, createId: () => window.crypto.randomUUID(), lock, onAccepted, onClose })
-    } catch {
-      setStored(() => {
-        try { return readBackgroundEditIntent(window.sessionStorage, { productId: product.id, storeId, janCode: product.jan_code ?? '' }) !== null } catch { return true }
-      })
-      setError('変更を受け付けられませんでした。入力を保持しています。もう一度保存して受付状態を確認してください。')
+        storage: window.sessionStorage, fetcher: fetch, createId: () => window.crypto.randomUUID(), lock, onAccepted, onClose, retryUnaccepted })
+    } catch (failure) {
+      try {
+        const intent = readBackgroundEditIntent(window.sessionStorage, { productId: product.id, storeId, janCode: product.jan_code ?? '' })
+        setStored(intent !== null); setStoredOperationId(intent?.operationId ?? null)
+        if (intent) setDraft(value => ({ ...value, ...intent.patch }))
+      } catch { setStored(true) }
+      const code = backgroundEditFailureCode(failure, 'BG_EDIT_INPUT')
+      // 失敗応答のコードだけでは許可しない。成功したGETの不存在確認だけを根拠にする。
+      const confirmedUnaccepted = failure instanceof UnacceptedBackgroundEditFailure
+      setUnaccepted(confirmedUnaccepted)
+      setError(backgroundEditFailureMessage(code, confirmedUnaccepted))
     } finally { setPending(false) }
   }
 
@@ -271,7 +320,10 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
             onChange={event => { setDraft(value => ({ ...value, [field]: event.target.value })); setEdited(value => ({ ...value, [field]: true })); setError(null) }} />
         </label>)}
         {error ? <p role="alert" className="text-pretty text-sm text-red-700">{error}</p> : null}
+        {stored && !active && storedOperationId ? <p className="text-xs text-gray-600">操作ID: <span className="break-all font-mono">{storedOperationId}</span></p> : null}
         <div className="flex flex-wrap items-center justify-end gap-3">
+          {stored && !active && unaccepted ? <button type="button" className={buttonClass} disabled={!ready || pending}
+            onClick={() => void save(true)}>同じ内容で再受付</button> : null}
           {stored && !active ? <button type="button" className={buttonClass} disabled={pending} onClick={() => void abandon()}>未受付の入力を取り消す</button> : null}
           {active && existingOperation.status === 'needs_review' ? <button type="button" className={buttonClass} disabled={pending}
             onClick={() => void control('resume')}>再確認を依頼</button> : null}

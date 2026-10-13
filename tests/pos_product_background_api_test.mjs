@@ -13,30 +13,99 @@ const expectedValues = { price: '199', cost: '95' }
 const raw = { operation_id: id, actor_id: actor, store_id: 7, product_id: 42, jan_code: '4582107173062',
   patch: { price: '200', cost: '100' }, baseline: { product_name: '商品', selling_price: 199, cost_price: 95 },
   status: 'queued', created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), code: null }
-function load(path, imports = {}, env = {}) {
+function load(path, imports = {}, env = {}, warnings = []) {
   const exports = {}
   const source = readFileSync(new URL(`../next_app/${path}`, import.meta.url), 'utf8')
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
     { exports, process: { env }, Buffer, URL, Request, Response, TextDecoder,
-      require: name => name === 'server-only' ? {} : name.startsWith('node:') ? require(name) : imports[name] ?? (() => { throw Error(name) })() })
+      console: { warn: (...values) => warnings.push(values) },
+      require: name => name === 'server-only' ? {} : name.startsWith('node:') ? require(name)
+        : name === './background-failure' || name === '@/lib/pos-products/background-failure' ? failures
+          : imports[name] ?? (() => { throw Error(name) })() })
   return exports
 }
-function fixture({ enabled = true, denied = false, rpcFail = false, rpcData = null } = {}) {
-  const calls = []
+const failures = load('lib/pos-products/background-failure.ts')
+function fixture({ enabled = true, denied = false, rpcFail = false, rpcData = null, transportFail = false, missingConfig = false } = {}) {
+  const calls = [], warnings = []
   const env = { POS_PRODUCT_BACKGROUND_EDIT_ENABLED: enabled ? 'true' : 'false', POS_PRODUCT_WRITES_ENABLED: 'true',
     POS_PRODUCT_DISPATCH_ENABLED: 'true', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.invalid', SUPABASE_SERVICE_ROLE_KEY: 'synthetic' }
+  if (missingConfig) delete env.SUPABASE_SERVICE_ROLE_KEY
   const core = load('lib/pos-products/background-edit.ts')
   const dal = load('lib/pos-products/background-edit.server.ts', {
     './background-edit': core,
     '@/lib/supabase/server': { createClient: async () => ({}) },
     '@/lib/inventory/auth': { requireInventoryManagerAccess: async (_, store) => { calls.push(['auth', store]); if (denied) throw Error('private-token'); return { id: actor } } },
     '@supabase/supabase-js': { createClient: () => ({ rpc: async (name, args) => {
-      calls.push(['rpc', name, args]); if (rpcFail) return { error: { message: 'private-key' }, data: null }
+      calls.push(['rpc', name, args]); if (transportFail) throw Error('private-transport-token')
+      if (rpcFail) return { error: { message: 'private-key', code: '23502', details: 'private-input' }, data: null }
       return { error: null, data: rpcData ? rpcData(name, args) : name === 'get_pos_product_edit_intakes' ? [raw] : name === 'cancel_pos_product_edit_intake' ? { ...raw, status: 'cancelled' } : raw }
     } }) },
-  }, env)
-  return { core, dal, calls, env }
+  }, env, warnings)
+  return { core, dal, calls, env, warnings }
 }
+
+test('受付の入力/停止/認可/設定/通信/DB拒否/返値を固定codeで区別し元例外を出さない', async () => {
+  const command = { operationId: id, storeId: 7, productId: 42, patch: raw.patch, expectedValues }
+  for (const [options, code] of [
+    [{ enabled: false }, 'BG_EDIT_DISABLED'], [{ denied: true }, 'BG_EDIT_ACCESS'],
+    [{ missingConfig: true }, 'BG_EDIT_DB_CONFIG'], [{ transportFail: true }, 'BG_EDIT_DB_TRANSPORT'],
+    [{ rpcFail: true }, 'BG_EDIT_DB_REJECTED'], [{ rpcData: () => null }, 'BG_EDIT_RECEIPT'],
+  ]) {
+    const f = fixture(options)
+    await assert.rejects(() => f.dal.enqueueBackgroundProductEdit(command), error => {
+      assert.equal(error.code, code)
+      assert.ok(!error.message.includes('private'))
+      return true
+    })
+    assert.ok(!JSON.stringify(f.warnings).includes('private'))
+    assert.ok(!JSON.stringify(f.warnings).includes('synthetic'))
+    if (options.rpcFail) {
+      assert.deepEqual(structuredClone(f.warnings), [['POS_PRODUCT_BACKGROUND_DB_REJECTED', { sqlstate: '23502' }]])
+    }
+  }
+  const f = fixture()
+  await assert.rejects(() => f.dal.enqueueBackgroundProductEdit({ ...command, storeId: 8 }), error => error.code === 'BG_EDIT_VALIDATION')
+  assert.equal(f.calls.length, 0)
+})
+
+test('未知の例外やコード文字列を診断codeとして公開しない', () => {
+  assert.equal(failures.parseBackgroundEditFailureCode('private-key'), null)
+  assert.equal(failures.parseBackgroundEditFailureCode('BG_EDIT_DB_REJECTED'), 'BG_EDIT_DB_REJECTED')
+  assert.equal(failures.backgroundEditFailureCode({ code: 'BG_EDIT_DB_REJECTED', message: 'private-key' }, 'BG_EDIT_INPUT'), 'BG_EDIT_INPUT')
+  const changed = new failures.BackgroundEditFailure('BG_EDIT_DB_REJECTED')
+  Object.assign(changed, { code: 'private-key' })
+  assert.equal(failures.backgroundEditFailureCode(changed, 'BG_EDIT_INPUT'), 'BG_EDIT_INPUT')
+})
+
+test('APIの拒否は工程固定codeだけを返し、origin/body/DB応答を区別する', async () => {
+  const warnings = [], calls = []
+  const route = load('app/api/pos-products/background-edit/route.ts', {
+    '@/lib/pos-products/background-http.server': load('lib/pos-products/background-http.server.ts'),
+    '@/lib/inventory/validation': { isSameOriginInventoryRequest: request => request.headers.get('origin') === new URL(request.url).origin },
+    '@/lib/pos-products/background-edit.server': {
+      enqueueBackgroundProductEdit: async () => { calls.push('enqueue'); throw new failures.BackgroundEditFailure('BG_EDIT_DB_REJECTED') },
+      readBackgroundProductEdits: async () => { calls.push('read'); throw Error('private-key private-input') },
+    },
+  }, {}, warnings)
+  const url = 'https://fixture.invalid/api/pos-products/background-edit'
+  for (const [request, status, code] of [
+    [new Request(url, { method: 'POST', headers: { Origin: 'https://evil.invalid' }, body: '{}' }), 403, 'BG_EDIT_ORIGIN'],
+    [new Request(url, { method: 'POST', headers: { Origin: 'https://fixture.invalid', 'Content-Type': 'application/json' }, body: '{' }), 400, 'BG_EDIT_BODY'],
+    [new Request(url, { method: 'POST', headers: { Origin: 'https://fixture.invalid', 'Content-Type': 'application/json' }, body: '{}' }), 400, 'BG_EDIT_DB_REJECTED'],
+  ]) {
+    const response = await route.POST(request), body = await response.json()
+    assert.equal(response.status, status)
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+    assert.equal(body.diagnosticCode, code)
+    assert.ok(!JSON.stringify(body).includes('private'))
+    assert.deepEqual(Object.keys(body).sort(), ['diagnosticCode', 'error', 'success'])
+  }
+  const response = await route.GET(new Request(url + '?store=7&products=42'))
+  assert.equal((await response.json()).diagnosticCode, 'BG_EDIT_CHECK_RESPONSE')
+  assert.deepEqual(calls, ['enqueue', 'read'])
+  assert.ok(!JSON.stringify(warnings).includes('private'))
+  assert.ok(warnings.every(value => value[0] === 'POS_PRODUCT_BACKGROUND_EDIT_REJECTED'))
+})
 
 test('受付patchは明示3項目だけを許可し、整数円・対象を厳格に検証', () => {
   const { core } = fixture()
