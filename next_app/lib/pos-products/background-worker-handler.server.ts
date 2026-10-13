@@ -25,8 +25,60 @@ function readJob(raw: unknown, storeId: 6 | 7, operationId?: string, leaseToken?
   const row = backgroundEditRecord(raw), dto = decodeProductEditIntakeData(row)
   if (dto.storeId !== storeId || (operationId && dto.operationId !== operationId) ||
       (leaseToken && row.lease_token !== leaseToken)) reject()
+  const choiceBaseline = classificationEvidence(row, backgroundEditRecord(dto.patch))
   return { dto, row, actorId: backgroundEditUuid(row.actor_id), leaseToken: backgroundEditUuid(row.lease_token),
-    baseline: backgroundEditRecord(row.baseline), target: { storeId: dto.storeId, productId: dto.productId, janCode: dto.janCode } }
+    baseline: backgroundEditRecord(row.baseline), choiceBaseline, target: { storeId: dto.storeId, productId: dto.productId, janCode: dto.janCode } }
+}
+
+/** DBが固定した選択証拠だけを使用する。表示用DB仕入先名からPOS IDを補完しない。 */
+function classificationChoice(value: unknown) {
+  const choice = exact(value, ['id', 'name'])
+  if (typeof choice.id !== 'string' || !/^[A-Za-z0-9._:-]{1,100}$/.test(choice.id) ||
+      typeof choice.name !== 'string' || !choice.name || choice.name.length > 1000 || choice.name.trim() !== choice.name || /[\x00-\x1f\x7f]/.test(choice.name)) reject()
+  return { id: choice.id as string, name: choice.name as string }
+}
+function classificationEvidence(row: Record<string, unknown>, patch: Record<string, unknown>) {
+  const keys = ['groupId', 'supplierId'].filter(key => Object.hasOwn(patch, key))
+  if (!keys.length) {
+    if (row.catalog_snapshot_id != null || row.pos_choice_baseline != null) reject()
+    return null
+  }
+  backgroundEditUuid(row.catalog_snapshot_id)
+  const baseline = exact(row.pos_choice_baseline, ['groupId', 'groupName', 'supplierId', 'supplierName', 'requested'])
+  classificationChoice({ id: baseline.groupId, name: baseline.groupName })
+  if (baseline.supplierId === null) { if (baseline.supplierName !== null) reject() }
+  else classificationChoice({ id: baseline.supplierId, name: baseline.supplierName })
+  const requested = exact(baseline.requested, keys)
+  for (const key of keys) {
+    if (key === 'supplierId' && patch[key] === null) { if (requested[key] !== null) reject() }
+    else if (classificationChoice(requested[key]).id !== patch[key]) reject()
+  }
+  return baseline
+}
+function verifyClassification(job: Job, inspection: ReturnType<typeof decodeProductEditInspection>) {
+  const evidence = job.choiceBaseline
+  if (!evidence) return
+  const requested = backgroundEditRecord(evidence.requested)
+  const catalogs = { groupId: inspection.groups, supplierId: inspection.suppliers }
+  for (const catalog of Object.values(catalogs)) {
+    if (catalog.length > 5000) reject()
+    const ids = new Set<string>(), names = new Set<string>()
+    for (const raw of catalog) {
+      const choice = classificationChoice(raw)
+      if (ids.has(choice.id) || names.has(choice.name)) reject()
+      ids.add(choice.id); names.add(choice.name)
+    }
+  }
+  for (const key of ['groupId', 'supplierId'] as const) {
+    if (!Object.hasOwn(job.dto.patch, key)) continue
+    if (inspection.snapshot.fields[key] !== evidence[key]) reject()
+    const catalog = catalogs[key], nameKey = key === 'groupId' ? 'groupName' : 'supplierName'
+    if (evidence[key] !== null && catalog.find(choice => choice.id === evidence[key])?.name !== evidence[nameKey]) reject()
+    if (requested[key] !== null) {
+      const choice = classificationChoice(requested[key])
+      if (catalog.find(current => current.id === choice.id)?.name !== choice.name) reject()
+    }
+  }
 }
 function readOperation(raw: unknown, job: Job): ProductOperation {
   const row = backgroundEditRecord(raw)
@@ -83,7 +135,9 @@ async function applyResult(job: Job, operation: ProductOperation, assertCurrent:
 async function execute(request: BackgroundWorkerRequest, clock: () => number, assertCurrent: () => void): Promise<Record<string, unknown>> {
   assertCurrent()
   if (request.action === 'claim') {
-    const payload = exact(request.payload, ['workerId'])
+    const capable = Object.hasOwn(request.payload, 'classificationCapable')
+    const payload = exact(request.payload, capable ? ['workerId', 'classificationCapable'] : ['workerId'])
+    if (capable && payload.classificationCapable !== true) reject()
     const claimed = exact(await backgroundEditRpc('claim_pos_product_edit_intake', {
       p_store_id: request.storeId, p_worker_id: backgroundEditUuid(payload.workerId),
     }), ['claimed', 'intake', 'operation'])
@@ -92,8 +146,8 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
     if (!claimed.claimed) return { claimed: false, intake: null, operation: null }
     const job = readJob(claimed.intake, request.storeId)
     if (job.dto.status !== 'working') reject()
-    if (claimed.operation !== null) {
-      const operation = readOperation(claimed.operation, job)
+    const operation = claimed.operation === null ? null : readOperation(claimed.operation, job)
+    if (operation !== null) {
       // 確認済みPOS値のDB反映だけなら、lease復旧時もPOSを再保存しない。
       if (['pos_confirmed', 'db_pending', 'completed'].includes(operation.status)) {
         if (operation.status !== 'completed') await applyResult(job, operation, assertCurrent)
@@ -101,6 +155,12 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
         return { claimed: false, intake: null, operation: null }
       }
       // 送信済みの不明状態はGASへ読取り確認だけを依頼する。再保存はしない。
+    }
+    // 旧workerへ分類の証拠/dispatchを渡さない。送信済み状態は再保存可へ戻さない。
+    if (job.choiceBaseline && (!capable ||
+        (operation?.sendAttempts !== 1 && process.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED !== 'true'))) {
+      await finish(job, operation?.sendAttempts === 1 ? 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN' : 'POS_PRODUCT_EDIT_DISABLED', assertCurrent)
+      return { claimed: false, intake: null, operation: null }
     }
     return { claimed: true, intake: claimed.intake, operation: claimed.operation }
   }
@@ -117,7 +177,8 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
   }
   if (request.action === 'fail') {
     const codes: Record<string, string> = { POS_READ_FAILED: 'POS_PRODUCT_EDIT_INSPECTION_FAILED', POS_PREPARE_FAILED: 'POS_PRODUCT_EDIT_CONFLICT',
-      WORKER_RESPONSE_FAILED: 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN', POS_PRODUCT_EDIT_OUTCOME_UNKNOWN: 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN' }
+      WORKER_RESPONSE_FAILED: 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN', POS_PRODUCT_EDIT_OUTCOME_UNKNOWN: 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN',
+      POS_CLASSIFICATION_DISABLED: 'POS_PRODUCT_EDIT_DISABLED' }
     if (typeof request.payload.code !== 'string' || !Object.hasOwn(codes, request.payload.code)) reject()
     return finish(job, codes[request.payload.code], assertCurrent)
   }
@@ -127,9 +188,11 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
       return { operationId: job.dto.operationId, actorId: job.actorId, storeId: request.storeId, nextAction: 'review', dispatch: null }
     }
     if (saved.operation !== null && readOperation(saved.operation, job).sendAttempts === 1) return reviewRequired('POS_PRODUCT_EDIT_OUTCOME_UNKNOWN')
+    if (job.choiceBaseline && process.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED !== 'true') return reviewRequired('POS_PRODUCT_EDIT_DISABLED')
     const inspection = decodeProductEditInspection(job.target, request.payload.inspection, now)
+    try { verifyClassification(job, inspection) } catch { return reviewRequired('POS_PRODUCT_EDIT_CONFLICT') }
     const mapping = { name: 'product_name', price: 'selling_price', cost: 'cost_price' } as const
-    for (const field of Object.keys(job.dto.patch) as (keyof typeof mapping)[]) {
+    for (const field of Object.keys(job.dto.patch).filter(key => Object.hasOwn(mapping, key)) as (keyof typeof mapping)[]) {
       const baseline = job.baseline[mapping[field]]
       if (baseline === null || baseline === undefined || String(baseline) !== inspection.snapshot.fields[field]) return reviewRequired('POS_PRODUCT_EDIT_CONFLICT')
     }
@@ -147,7 +210,11 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
     const dispatch = buildProductEditDispatch(candidate, command, inspection, now)
     const group = inspection.groups.find(g => g.id === fields.groupId), supplier = inspection.suppliers.find(s => s.id === fields.supplierId)
     if (!group || (fields.supplierId !== null && !supplier)) reject()
-    assertCurrent()
+    const preparationCurrent = () => {
+      assertCurrent()
+      if (job.choiceBaseline && process.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED !== 'true') reject()
+    }
+    preparationCurrent()
     const prepared = exact(await backgroundEditRpc('prepare_pos_product_edit_intake', {
       p_operation_id: job.dto.operationId, p_lease_token: job.leaseToken, p_command_text: commandText,
       p_pos_product_id: review.posProductId, p_expected_result_fingerprint: review.expectedResultFingerprint,
@@ -156,7 +223,7 @@ async function execute(request: BackgroundWorkerRequest, clock: () => number, as
       p_dispatch_text: dispatch.dispatchText, p_before_fingerprint_text: dispatch.beforeFingerprintText,
       p_expected_fingerprint_text: dispatch.expectedFingerprintText, p_reviewed_at: dispatch.reviewedAt, p_dispatch_hash: dispatch.dispatchHash,
     }), ['operation', 'dispatch', 'claimed'])
-    assertCurrent()
+    preparationCurrent()
     const restored = restoreProductEditDispatch(prepared.operation, prepared.dispatch, null, clock())
     readOperation(prepared.operation, job)
     if (!restored.dispatch || restored.operation.payloadHash !== candidate.payloadHash ||

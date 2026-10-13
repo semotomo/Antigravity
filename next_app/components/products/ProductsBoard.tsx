@@ -25,6 +25,7 @@ type ProductsBoardProps = {
   posEditorEnabled?: boolean
   posSaveEnabled?: boolean
   backgroundEditEnabled?: boolean
+  backgroundClassificationEnabled?: boolean
   selectedStoreId?: 6 | 7 | null
 }
 
@@ -34,7 +35,7 @@ type DialogState = {
   legacy?: boolean
 } | null
 
-export function ProductsBoard({ products: _initialProducts, posEditorEnabled = false, posSaveEnabled = false, backgroundEditEnabled = false, selectedStoreId = null }: ProductsBoardProps) {
+export function ProductsBoard({ products: _initialProducts, posEditorEnabled = false, posSaveEnabled = false, backgroundEditEnabled = false, backgroundClassificationEnabled = false, selectedStoreId = null }: ProductsBoardProps) {
   const router = useRouter()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ProductListRow[]>([])
@@ -185,7 +186,9 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
             <p role="status" className="text-pretty text-gray-600">{backgroundStatus(product)?.status === 'needs_review'
               ? backgroundStatus(product)?.message : '変更を受け付けました。POSへ反映中です。'}</p>
             <p className="text-pretty text-gray-600">反映予定：{Object.entries(backgroundStatus(product)!.patch).map(([field, value]) =>
-              `${({ name: '商品名', price: '売価', cost: '原価' } as Record<string, string>)[field]} ${value}`).join(' / ')}</p>
+              field === 'groupId' ? `商品グループ ${backgroundStatus(product)!.posChoiceBaseline?.requested.groupId?.name ?? '変更予定'}`
+                : field === 'supplierId' ? `仕入先 ${value === null ? '未設定' : backgroundStatus(product)!.posChoiceBaseline?.requested.supplierId?.name ?? '変更予定'}`
+                  : `${({ name: '商品名', price: '売価', cost: '原価' } as Record<string, string>)[field]} ${value}`).join(' / ')}</p>
           </div> : null}
           <p className="mt-1 text-xs text-gray-500">
             {product.category || 'カテゴリ未設定'}
@@ -363,10 +366,11 @@ export function ProductsBoard({ products: _initialProducts, posEditorEnabled = f
               product={dialogState.product}
               storeId={selectedStoreId}
               existingOperation={backgroundStatus(dialogState.product)}
+              backgroundClassificationEnabled={backgroundClassificationEnabled}
               onAccepted={acceptEdit}
               onAbandoned={() => { router.refresh(); setSearchRevision(value => value + 1); setStatusRevision(value => value + 1) }}
               onClose={() => setDialogState(null)}
-              onAdvanced={() => setDialogState(value => value ? { ...value, legacy: true } : null)}
+              onAdvanced={backgroundClassificationEnabled ? undefined : () => setDialogState(value => value ? { ...value, legacy: true } : null)}
             />
             ) : (
             <PosProductEditModal

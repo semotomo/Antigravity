@@ -11,14 +11,29 @@ const failures = {}
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../next_app/lib/pos-products/background-failure.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, { exports: failures })
+const posModules = new Map([['background-failure', failures]])
+function posModule(name) {
+  if (posModules.has(name)) return posModules.get(name)
+  const api = {}
+  posModules.set(name, api)
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL(`../next_app/lib/pos-products/${name}.ts`, import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText, { exports: api, require: imported => {
+    if (imported.startsWith('./')) return posModule(imported.slice(2))
+    if (imported.startsWith('@/lib/pos-products/')) return posModule(imported.slice('@/lib/pos-products/'.length))
+    throw Error(`Unexpected shared import ${imported}`)
+  } })
+  return api
+}
 const exports = {}
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-  exports, URLSearchParams, require: name => {
+  exports, URLSearchParams, AbortController, setTimeout, clearTimeout, require: name => {
     if (name === 'react') return require('../next_app/node_modules/react')
     if (name === 'react/jsx-runtime') return require('../next_app/node_modules/react/jsx-runtime')
     if (name === '@/lib/productStores') return { getProductStoreName: store => store === 7 ? '本店' : 'わんわん' }
     if (name === '@/components/ui/StatusBadge') return { cn: (...values) => values.join(' ') }
     if (name === '@/lib/pos-products/background-failure') return failures
+    if (name.startsWith('@/lib/pos-products/')) return posModule(name.slice('@/lib/pos-products/'.length))
     throw Error(`Unexpected import ${name}`)
   },
 })
@@ -169,6 +184,46 @@ test('入力/保全工程の失敗を固定コードにし、壊れたversion1�
   assert.equal(f.values.size, 0)
 })
 
+test('receipt deadlineは終わらないfetch/JSONを工程codeで止めてlockを解除し、同一IDを保全する', { timeout: 500 }, async () => {
+  for (const method of ['GET', 'POST']) for (const stage of ['fetch', 'json']) {
+    const f = fixture()
+    if (method === 'GET') f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+    let signal
+    await assert.rejects(exports.acceptBackgroundProductEdit({ ...f.options, requestTimeoutMs: 5, fetcher: async (url, options) => {
+      f.calls.push({ url, options }); signal = options.signal
+      if (stage === 'fetch') return new Promise(() => {})
+      return { ok: true, json: () => new Promise(() => {}) }
+    } }), error => error.code === `BG_EDIT_${method === 'GET' ? 'CHECK' : 'ACCEPT'}_${stage === 'fetch' ? 'REQUEST' : 'RESPONSE'}`)
+    assert.equal(signal.aborted, true)
+    assert.equal(f.lock.current, false)
+    assert.equal(f.values.size, 1)
+    assert.equal(f.events.length, 0)
+    assert.deepEqual(f.calls.map(call => call.options.method), [method])
+  }
+})
+
+test('取消/再確認も終わらないfetch/JSONをdeadlineで止め、希望値/同じIDを保全しlockを解除する', { timeout: 500 }, async () => {
+  for (const action of ['cancel', 'resume', 'abandon']) for (const stage of ['fetch', 'json']) {
+    const f = fixture()
+    f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+    const preserved = [...f.values.values()][0]
+    let signal
+    const options = { target, storage: f.options.storage, operation: { ...intake, status: 'needs_review' }, action, requestTimeoutMs: 5, lock: f.lock,
+      onAccepted: f.options.onAccepted, onAbandoned: () => f.events.push(['abandoned']), onClose: f.options.onClose,
+      fetcher: async (url, request) => { f.calls.push({ url, options: request }); signal = request.signal
+        return stage === 'fetch' ? new Promise(() => {}) : { ok: true, json: () => new Promise(() => {}) }
+      } }
+    await assert.rejects(action === 'abandon' ? exports.abandonBackgroundEditIntent(options) : exports.controlBackgroundProductEdit(options),
+      error => error.code === `BG_EDIT_ACCEPT_${stage === 'fetch' ? 'REQUEST' : 'RESPONSE'}`)
+    assert.equal(signal.aborted, true)
+    assert.equal(f.lock.current, false)
+    assert.equal([...f.values.values()][0], preserved)
+    assert.equal(f.events.length, 0)
+    assert.equal(f.calls.length, 1)
+    assert.equal(JSON.parse(f.calls[0].options.body).operationId, operationId)
+  }
+})
+
 test('表示元の基準値が不正/編集キーと不一致ならPOSTせず、新しい基準を推測しない', async () => {
   for (const expectedValues of [undefined, { price: '100' }, { name: '旧名', price: '100' }, { name: 100 }]) {
     const f = fixture({ expectedValues })
@@ -220,7 +275,7 @@ function elements(node) {
   return [node, ...(Array.isArray(children) ? children : [children]).flatMap(elements)]
 }
 
-function modalRenderer(fetcher = async () => { throw Error('Unexpected fetch') }, { storage, runEffects = false } = {}) {
+function modalRenderer(fetcher = async () => { throw Error('Unexpected fetch') }, { storage, runEffects = false, receiptDeadlineMs = 20_000 } = {}) {
   const states = [], effects = []; let index = 0
   const hooks = { useState(initial) { const slot = index++; if (!(slot in states)) states[slot] = typeof initial === 'function' ? initial() : initial
     return [states[slot], value => { states[slot] = typeof value === 'function' ? value(states[slot]) : value }] },
@@ -229,13 +284,38 @@ function modalRenderer(fetcher = async () => { throw Error('Unexpected fetch') }
     useRef(value) { const slot = index++; if (!(slot in states)) states[slot] = { current: value }; return states[slot] }, useId: () => 'id' }
   const api = {}
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports: api, URLSearchParams, fetch: fetcher, window: { sessionStorage: storage, crypto: { randomUUID: () => operationId } },
+    exports: api, URLSearchParams, AbortController, clearTimeout,
+    setTimeout: (callback, delay) => setTimeout(callback, delay === 20_000 ? receiptDeadlineMs : delay),
+    fetch: fetcher, window: { sessionStorage: storage, crypto: { randomUUID: () => operationId } },
     require: name => name === 'react' ? hooks : name === 'react/jsx-runtime' ? require('../next_app/node_modules/react/jsx-runtime') :
       name === '@/lib/productStores' ? { getProductStoreName: () => '本店' } : name === '@/components/ui/StatusBadge' ? { cn: (...values) => values.join(' ') } :
-        name === '@/lib/pos-products/background-failure' ? failures : (() => { throw Error(name) })(),
+        name === '@/lib/pos-products/background-failure' ? failures : name.startsWith('@/lib/pos-products/') ? posModule(name.slice('@/lib/pos-products/'.length)) : (() => { throw Error(name) })(),
   })
   return props => { index = 0; const result = api.BackgroundProductEditModal(props); while (effects.length) effects.shift()(); return result }
 }
+
+test('受付状態を確認のpendingはdeadline後に解除され、保全情報復元不能は理由を表示して送信を止める', async () => {
+  const f = fixture()
+  f.values.set(exports.backgroundEditStorageKey(target), JSON.stringify({ version: 1, ...target, operationId, patch: { name: '変更名' }, expectedValues: { name: '旧名' } }))
+  const render = modalRenderer(async () => new Promise(() => {}), { storage: f.options.storage, runEffects: true, receiptDeadlineMs: 5 })
+  const props = { product: { id: 42, jan_code: target.janCode, product_name: '旧名', selling_price: 100, cost_price: 50 }, storeId: 7,
+    onAccepted: f.options.onAccepted, onClose: f.options.onClose }
+  render(props)
+  elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  let nodes = elements(render(props))
+  assert.equal(nodes.find(node => node.type === 'button' && node.props.children === '受付状態を確認').props.disabled, false)
+  assert.match(nodes.find(node => node.props?.role === 'alert').props.children, /BG_EDIT_CHECK_REQUEST/)
+  assert.equal(f.values.size, 1)
+  const g = fixture()
+  g.options.storage.getItem = () => { throw Error('private storage failure') }
+  const blocked = modalRenderer(g.options.fetcher, { storage: g.options.storage, runEffects: true })
+  blocked(props)
+  nodes = elements(blocked(props))
+  assert.match(nodes.find(node => node.props?.role === 'alert').props.children, /BG_EDIT_STORAGE.*操作を停止/)
+  assert.ok(nodes.filter(node => node.type === 'input').every(node => node.props.disabled))
+  assert.equal(g.calls.length, 0)
+})
 
 test('通常保存の失敗を診断コードだけで示し、GETなし確認で希望値/同じIDを保持して明示再受付へ進む', async () => {
   const f = fixture(), secret = 'private response body and key'
@@ -352,9 +432,12 @@ test('control失敗は固定エラーだけを表示し、readonly希望値と�
 test('両店舗を別対象にし、旧保全情報は旧モーダルへ導き、確定価格を予定値で置換しない', () => {
   const boardSource = readFileSync(new URL('../next_app/components/products/ProductsBoard.tsx', import.meta.url), 'utf8')
   const Background = () => null, Legacy = () => null, Table = () => null, blank = () => null
-  for (const storeId of [6, 7]) for (const oldPointer of [false, true]) {
+  for (const storeId of [6, 7]) for (const oldPointer of [false, true]) for (const classificationEnabled of [false, true]) {
     const product = { id: 42, store_id: storeId, jan_code: target.janCode, product_name: '現名称', selling_price: 200, cost_price: 100 }
-    const data = { ...intake, storeId, patch: { price: '400' } }
+    const selection = exports.backgroundProductClassificationPatch(classificationSnapshot({ storeId }), { groupId: 'g2', supplierId: null },
+      { groupId: true, supplierId: true }, { ...target, storeId })
+    const data = { ...intake, storeId, patch: { price: '400', ...(classificationEnabled ? selection.patch : {}) },
+      ...(classificationEnabled ? { catalogSnapshotId: selection.catalogSnapshotId, posChoiceBaseline: selection.posChoiceBaseline } : {}) }
     const values = ['商品', [product], false, { product, nonce: 1 }, false, 0, { [`${storeId}:42`]: data }, 0]
     const writes = []; let index = 0, refreshes = 0
     const mocks = {
@@ -378,7 +461,7 @@ test('両店舗を別対象にし、旧保全情報は旧モーダルへ導き�
       exports: api, window: { sessionStorage: { getItem: () => oldPointer ? 'preserved legacy pointer' : null } },
       require: name => { assert.ok(Object.hasOwn(mocks, name), name); return mocks[name] },
     })
-    const tree = api.ProductsBoard({ products: [], backgroundEditEnabled: true, selectedStoreId: storeId })
+    const tree = api.ProductsBoard({ products: [], backgroundEditEnabled: true, backgroundClassificationEnabled: classificationEnabled, selectedStoreId: storeId })
     const table = elements(tree).find(node => node.type === Table)
     const action = table.props.columns.find(column => column.key === 'actions').render(product)
     action.props.onClick()
@@ -386,6 +469,13 @@ test('両店舗を別対象にし、旧保全情報は旧モーダルへ導き�
     const modal = elements(tree).find(node => node.type === Background)
     assert.equal(modal.props.storeId, storeId)
     assert.equal(modal.props.existingOperation.operationId, operationId)
+    assert.equal(modal.props.backgroundClassificationEnabled, classificationEnabled)
+    assert.equal(typeof modal.props.onAdvanced, classificationEnabled ? 'undefined' : 'function')
+    if (classificationEnabled) {
+      const information = elements(table.props.columns.find(column => column.key === 'product_name').render(product))
+      assert.ok(information.some(node => node.props?.children?.some?.(child => typeof child === 'string' && child.includes('希望の分類'))))
+      assert.ok(!JSON.stringify(information).includes('商品グループ g2'))
+    }
     modal.props.onAccepted({ ...data, status: 'completed' })
     modal.props.onAccepted({ ...data, status: 'completed' })
     assert.equal(refreshes, 1)
@@ -419,5 +509,174 @@ test('server flag OFFは旧モーダルで、店舗別行の予定値と有界�
   assert.match(board, /AbortController/)
   assert.match(board, /slice\([^)]*100/)
   assert.match(board, /反映予定/)
-  assert.doesNotMatch(source, /loadPosProductEditor|reviewPosProductEditor|groupId|supplierId/)
+  assert.doesNotMatch(source, /loadPosProductEditor|reviewPosProductEditor/)
+})
+
+const snapshotId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+function classificationSnapshot(overrides = {}) {
+  return { snapshotId, ...target, capturedAt: Date.now() - 1_000, expiresAt: Date.now() + 300_000,
+    currentGroupId: 'g1', currentSupplierId: 's1', groups: [{ id: 'g1', name: '元の分類' }, { id: 'g2', name: '希望の分類' }, { id: 'g3', name: '新しい分類' }],
+    suppliers: [{ id: 's1', name: '元の仕入先' }, { id: 's2', name: '新しい仕入先' }], ...overrides }
+}
+function classificationProps(f) {
+  return { product: { id: target.productId, jan_code: target.janCode, product_name: '旧名', selling_price: 100, cost_price: 50 }, storeId: target.storeId,
+    backgroundClassificationEnabled: true, onAccepted: f.options.onAccepted, onClose: f.options.onClose }
+}
+function byLabel(nodes, text) { return nodes.find(node => node.type === 'label' && elements(node).some(child => child.props?.children === text)) }
+function choose(render, props, label, value) {
+  elements(byLabel(elements(render(props)), label)).find(node => node.type === 'select').props.onChange({ target: { value } })
+}
+async function settle() { await new Promise(resolve => setImmediate(resolve)) }
+
+test('分類patchは検証済みsnapshotの編集差分だけを含め、仮値/未編集の基準を送らない', () => {
+  const snapshot = classificationSnapshot()
+  assert.deepEqual(structuredClone(exports.backgroundProductClassificationPatch(snapshot, { groupId: 'g1', supplierId: 's1' }, {}, target)), { patch: {}, expectedValues: {} })
+  assert.deepEqual(structuredClone(exports.backgroundProductClassificationPatch(snapshot, { groupId: 'g1', supplierId: 's1' }, { groupId: true, supplierId: true }, target)), { patch: {}, expectedValues: {} })
+  const value = structuredClone(exports.backgroundProductClassificationPatch(snapshot, { groupId: 'g2', supplierId: null }, { groupId: true, supplierId: true }, target))
+  assert.deepEqual(value.patch, { groupId: 'g2', supplierId: null })
+  assert.deepEqual(value.expectedValues, { groupId: 'g1', supplierId: 's1' })
+  assert.equal(value.catalogSnapshotId, snapshotId)
+  assert.equal(value.posChoiceBaseline.requested.groupId.name, '希望の分類')
+  assert.equal(value.posChoiceBaseline.requested.supplierId, null)
+  assert.throws(() => exports.backgroundProductClassificationPatch(null, { groupId: 'g2', supplierId: null }, { groupId: true }, target))
+  assert.throws(() => exports.backgroundProductClassificationPatch({ ...snapshot, expiresAt: Date.now() - 1 }, { groupId: 'g2', supplierId: 's1' }, { groupId: true }, target))
+  assert.throws(() => exports.backgroundProductClassificationPatch(snapshot, { groupId: 'other-store', supplierId: 's1' }, { groupId: true }, target))
+})
+
+test('分類初回はcache GET→不存在のときだけ一度refreshし、通常3項目に分類の仮値を混ぜない', async () => {
+  const f = fixture()
+  const render = modalRenderer(async (url, options) => {
+    f.calls.push({ url, options })
+    if (url.startsWith('/api/pos-products/background-classification')) return { ok: true, json: async () => ({ success: true, data: options.method === 'GET' ? null : classificationSnapshot() }) }
+    return { ok: true, json: async () => ({ success: true, data: intake }) }
+  }, { storage: f.options.storage, runEffects: true })
+  const props = classificationProps(f)
+  props.onAdvanced = () => { throw Error('legacy transition forbidden') }
+  render(props)
+  elements(render(props)).find(node => node.type === 'button' && node.props.children === '分類・仕入先を編集').props.onClick()
+  await settle()
+  let nodes = elements(render(props))
+  assert.deepEqual(f.calls.map(call => call.options.method), ['GET', 'POST'])
+  assert.match(f.calls[0].url, /storeId=7&productId=42/)
+  assert.deepEqual(JSON.parse(f.calls[1].options.body), { storeId: 7, productId: 42 })
+  assert.deepEqual(nodes.filter(node => node.type === 'select').map(node => node.props.value), ['g1', 's1'])
+  assert.ok(nodes.filter(node => node.type === 'input').every(node => !node.props.disabled))
+  nodes.find(node => node.type === 'input').props.onChange({ target: { value: '変更名' } })
+  elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await settle()
+  assert.deepEqual(JSON.parse(f.calls.at(-1).options.body), { operationId, storeId: 7, productId: 42, patch: { name: '変更名' }, expectedValues: { name: '旧名' } })
+})
+
+test('分類取得を待つ間でも通常項目を編集/受付でき、分類通信で通常保存をロックしない', async () => {
+  const f = fixture(); let finish
+  const lookup = new Promise(resolve => { finish = resolve })
+  const render = modalRenderer(async (url, options) => {
+    f.calls.push({ url, options })
+    if (url.startsWith('/api/pos-products/background-classification')) return lookup
+    return { ok: true, json: async () => ({ success: true, data: intake }) }
+  }, { storage: f.options.storage, runEffects: true })
+  const props = classificationProps(f)
+  render(props)
+  elements(render(props)).find(node => node.type === 'button' && node.props.children === '分類・仕入先を編集').props.onClick()
+  const nodes = elements(render(props))
+  assert.ok(nodes.filter(node => node.type === 'input').every(node => !node.props.disabled))
+  nodes.find(node => node.type === 'input').props.onChange({ target: { value: '変更名' } })
+  elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await settle()
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+  assert.equal(f.calls[1].url, '/api/pos-products/background-edit')
+  finish({ ok: true, json: async () => ({ success: true, data: classificationSnapshot() }) })
+  await settle()
+})
+
+test('分類の不正/期限切れ/取得失敗は固定表示だけにして通常入力と保存を妨げず、欠落dataをnull扱いしない', async () => {
+  for (const kind of ['store', 'expired', 'missing', 'network']) {
+    const f = fixture(), secret = 'private classification failure'
+    const render = modalRenderer(async (url, options) => {
+      f.calls.push({ url, options })
+      if (!url.startsWith('/api/pos-products/background-classification')) return { ok: true, json: async () => ({ success: true, data: intake }) }
+      if (kind === 'network') throw Error(secret)
+      return { ok: true, json: async () => kind === 'missing' ? { success: true, private: secret }
+        : { success: true, data: classificationSnapshot(kind === 'store' ? { storeId: 6 } : { expiresAt: Date.now() - 1 }) } }
+    }, { storage: f.options.storage, runEffects: true })
+    const props = classificationProps(f)
+    render(props)
+    elements(render(props)).find(node => node.type === 'button' && node.props.children === '分類・仕入先を編集').props.onClick()
+    await settle()
+    const nodes = elements(render(props))
+    assert.ok(nodes.some(node => node.props?.role === 'alert'))
+    assert.ok(!JSON.stringify(nodes).includes(secret))
+    assert.equal(f.calls.length, 1)
+    assert.ok(nodes.filter(node => node.type === 'input').every(node => !node.props.disabled))
+    nodes.find(node => node.type === 'input').props.onChange({ target: { value: '変更名' } })
+    elements(render(props)).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+    await settle()
+    assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+  }
+})
+
+test('明示snapshot更新は編集中の分類/仕入先/通常入力を保持し、最新検証済み基準で変更項目だけ受付する', async () => {
+  const f = fixture(), nextSnapshotId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  let release
+  const refresh = new Promise(resolve => { release = resolve })
+  const refreshedSnapshot = classificationSnapshot({ snapshotId: nextSnapshotId, currentGroupId: 'g3', currentSupplierId: 's2' })
+  const baseline = exports.backgroundProductClassificationPatch(refreshedSnapshot, { groupId: 'g2', supplierId: null }, { groupId: true, supplierId: true }, target)
+  const receipt = { ...intake, catalogSnapshotId: nextSnapshotId, patch: { name: '変更名', groupId: 'g2', supplierId: null }, posChoiceBaseline: baseline.posChoiceBaseline }
+  const render = modalRenderer(async (url, options) => {
+    f.calls.push({ url, options })
+    if (url.startsWith('/api/pos-products/background-classification')) return options.method === 'GET'
+      ? { ok: true, json: async () => ({ success: true, data: classificationSnapshot() }) } : refresh
+    return { ok: true, json: async () => ({ success: true, data: receipt }) }
+  }, { storage: f.options.storage, runEffects: true })
+  const props = classificationProps(f)
+  render(props)
+  elements(render(props)).find(node => node.type === 'button' && node.props.children === '分類・仕入先を編集').props.onClick()
+  await settle()
+  choose(render, props, '商品グループ', 'g2'); choose(render, props, '仕入先', '')
+  elements(render(props)).find(node => node.type === 'input').props.onChange({ target: { value: '変更名' } })
+  elements(render(props)).find(node => node.type === 'button' && node.props.children === '候補を再取得').props.onClick()
+  release({ ok: true, json: async () => ({ success: true, data: refreshedSnapshot }) })
+  await settle()
+  const nodes = elements(render(props))
+  assert.equal(nodes.find(node => node.type === 'input').props.value, '変更名')
+  assert.deepEqual(nodes.filter(node => node.type === 'select').map(node => node.props.value), ['g2', ''])
+  nodes.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await settle()
+  assert.deepEqual(JSON.parse(f.calls.at(-1).options.body), { operationId, storeId: 7, productId: 42, patch: receipt.patch,
+    expectedValues: { name: '旧名', groupId: 'g3', supplierId: 's2' }, catalogSnapshotId: nextSnapshotId })
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+})
+
+test('分類v1保全はsnapshot ID/希望名称/元patch/基準を復元し、GET-only確認と明示再受付で変更しない', async () => {
+  const f = fixture()
+  const selection = exports.backgroundProductClassificationPatch(classificationSnapshot(), { groupId: 'g2', supplierId: null }, { groupId: true, supplierId: true }, target)
+  await assert.rejects(exports.acceptBackgroundProductEdit({ ...f.options, patch: { ...f.options.patch, ...selection.patch },
+    expectedValues: { ...f.options.expectedValues, ...selection.expectedValues }, catalogSnapshotId: selection.catalogSnapshotId,
+    posChoiceBaseline: selection.posChoiceBaseline, fetcher: async () => { throw Error('lost ack') } }))
+  const saved = structuredClone(exports.readBackgroundEditIntent(f.options.storage, target))
+  assert.equal(saved.version, 1); assert.equal(saved.catalogSnapshotId, snapshotId)
+  assert.equal(saved.posChoiceBaseline.requested.groupId.name, '希望の分類')
+  const options = { ...f.options, patch: { price: '300' }, expectedValues: { price: '250' }, catalogSnapshotId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    createId: () => { throw Error('new id forbidden') }, fetcher: async (url, options) => {
+      f.calls.push({ url, options })
+      return { ok: true, json: async () => ({ success: true, data: options.method === 'GET' ? null : { ...intake, patch: saved.patch, catalogSnapshotId: snapshotId, posChoiceBaseline: saved.posChoiceBaseline } }) }
+    } }
+  await assert.rejects(exports.acceptBackgroundProductEdit(options), error => error.code === 'BG_EDIT_NO_INTAKE')
+  assert.deepEqual(f.calls.map(call => call.options.method), ['GET'])
+  await exports.acceptBackgroundProductEdit({ ...options, retryUnaccepted: true })
+  assert.deepEqual(JSON.parse(f.calls.at(-1).options.body), { operationId, storeId: 7, productId: 42,
+    patch: { name: '変更名', groupId: 'g2', supplierId: null }, expectedValues: { name: '旧名', groupId: 'g1', supplierId: 's1' }, catalogSnapshotId: snapshotId })
+  assert.deepEqual(f.events, [['accepted', operationId], ['closed']])
+})
+
+test('classified受付の希望名称をreadonly表示し、未知候補や旧receiptは通常復旧を維持する', () => {
+  const f = fixture(), snapshot = classificationSnapshot()
+  const selection = exports.backgroundProductClassificationPatch(snapshot, { groupId: 'g2', supplierId: null }, { groupId: true, supplierId: true }, target)
+  const operation = { ...intake, patch: { ...intake.patch, ...selection.patch }, catalogSnapshotId: snapshotId, posChoiceBaseline: selection.posChoiceBaseline }
+  assert.equal(exports.isBackgroundEditIntake(operation, target, operationId), true)
+  assert.equal(exports.isBackgroundEditIntake(intake, target, operationId), true)
+  const nodes = elements(modalRenderer()( { ...classificationProps(f), existingOperation: operation } ))
+  assert.ok(nodes.some(node => node.props?.children === '希望の分類'))
+  assert.ok(nodes.filter(node => node.type === 'input' || node.type === 'select').every(node => node.props.disabled))
+  assert.ok(!nodes.some(node => node.type === 'button' && node.props.children === '分類・仕入先を編集'))
 })

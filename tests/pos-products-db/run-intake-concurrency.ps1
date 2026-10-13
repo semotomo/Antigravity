@@ -1,4 +1,4 @@
-param()
+param([switch]$Classification)
 $ErrorActionPreference = 'Stop'
 $testWorkspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $testBinaryRoot = Join-Path $testWorkspace 'local_exports\postgres-17.11-test-20261008-csvguard-a8e32157\pgsql\bin'
@@ -31,7 +31,8 @@ try {
     $env:POS_PRODUCT_INTAKE_TEST_USER = $testUser
     $env:POS_PRODUCT_INTAKE_TEST_DATABASE = $testDatabase
     $env:POS_PRODUCT_INTAKE_TEST_DATA_DIRECTORY = $testDataDirectory
-    & node '--test' (Join-Path $PSScriptRoot 'intake-concurrency.integration.mjs')
+    $testEntry = if ($Classification) { 'classification-concurrency.integration.mjs' } else { 'intake-concurrency.integration.mjs' }
+    & node '--test' (Join-Path $PSScriptRoot $testEntry)
     $testExitCode = $LASTEXITCODE
 } finally {
     if ($testStarted) {

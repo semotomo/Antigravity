@@ -12,6 +12,9 @@ export function backgroundEditEnabled() {
   return process.env.POS_PRODUCT_BACKGROUND_EDIT_ENABLED === 'true' && process.env.POS_PRODUCT_WRITES_ENABLED === 'true' &&
     process.env.POS_PRODUCT_DISPATCH_ENABLED === 'true'
 }
+export function backgroundClassificationEnabled() {
+  return backgroundEditEnabled() && process.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED === 'true'
+}
 /** service鍵とDB例外はサーバー内部だけで扱い、呼出元へ原文を渡さない。 */
 export async function backgroundEditRpc(name: string, args: Record<string, unknown>): Promise<unknown> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -44,18 +47,23 @@ export async function enqueueBackgroundProductEdit(input: unknown): Promise<Prod
   try { command = parseBackgroundEditRequest(input) }
   catch { throw new BackgroundEditFailure('BG_EDIT_VALIDATION') }
   if (!backgroundEditEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
+  if (command.catalogSnapshotId && !backgroundClassificationEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
   const actorId = await authorize(command.storeId)
   if (!backgroundEditEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
-  const result = await backgroundEditRpc('enqueue_pos_product_edit_intake', {
+  if (command.catalogSnapshotId && !backgroundClassificationEnabled()) throw new BackgroundEditFailure('BG_EDIT_DISABLED')
+  const result = await backgroundEditRpc(command.catalogSnapshotId ? 'enqueue_pos_product_edit_intake_v2' : 'enqueue_pos_product_edit_intake', {
     p_actor_id: actorId, p_store_id: command.storeId, p_product_id: command.productId,
     p_operation_id: command.operationId, p_patch_text: JSON.stringify(command.patch), p_expected_values_text: JSON.stringify(command.expectedValues),
+    ...(command.catalogSnapshotId ? { p_catalog_snapshot_id: command.catalogSnapshotId } : {}),
   })
   try {
     const raw = backgroundEditRecord(result)
     if (raw.actor_id !== actorId) throw new BackgroundEditFailure('BG_EDIT_RECEIPT')
     const data = decodeProductEditIntakeData(raw)
     if (data.operationId !== command.operationId || data.storeId !== command.storeId || data.productId !== command.productId ||
-        JSON.stringify(data.patch) !== JSON.stringify(command.patch)) throw new BackgroundEditFailure('BG_EDIT_RECEIPT')
+        JSON.stringify(data.patch) !== JSON.stringify(command.patch) || data.catalogSnapshotId !== command.catalogSnapshotId ||
+        (Object.hasOwn(command.patch, 'groupId') && data.posChoiceBaseline?.groupId !== command.expectedValues.groupId) ||
+        (Object.hasOwn(command.patch, 'supplierId') && data.posChoiceBaseline?.supplierId !== command.expectedValues.supplierId)) throw new BackgroundEditFailure('BG_EDIT_RECEIPT')
     return data
   } catch { throw new BackgroundEditFailure('BG_EDIT_RECEIPT') }
 }

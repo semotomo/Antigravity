@@ -21,6 +21,14 @@ const simple = (id, fields) => `<form id="${id}" action="/hm-hmma/view/hmma/hmma
 const list = n => `${n}件中` + simple('hmma02400Form', { schOfficeCd: '', schTenpoGroupNoSingle: '', schGoodsId: '', schMakerCd: '', schGoodsName: '', doSerchNormal: '', 'goodsItems:0:doHmma02402': '', doDelete: '' })
 const searchPages = (html, second = html) => [list(0), list(1), simple('hmma02402Form', { doHmma02403: '' }), html, list(0), list(1), simple('hmma02402Form', { doHmma02403: '' }), second]
 const opaque = { 'thumbnailImageUrl-30': '', 'imageFileCnt-30': 'synthetic-private-count+/=&', delImageFileUrl: '', goodsImageItemsSave: 'synthetic-private-items+/=&' }
+const classificationIntake = () => ({ patch: { groupId: 'next-6', supplierId: 'supplier-6' },
+  catalog_snapshot_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', pos_choice_baseline: {
+    groupId: 'group-6', groupName: '店舗の分類', supplierId: null, supplierName: null,
+    requested: { groupId: { id: 'next-6', name: '次の分類' }, supplierId: { id: 'supplier-6', name: '店舗の仕入先' } },
+  } })
+const classificationAfter = () => imageForm(6)
+  .replace(/(<option value="group-6") selected/, '$1').replace('<option value="next-6"', '<option value="next-6" selected')
+  .replace(/(<option value="") selected/, '$1').replace('<option value="supplier-6"', '<option value="supplier-6" selected')
 function imageForm(store, overrides = {}) {
   return form(store, overrides).replace(input('imageFileName', '既存画像.png', 'hidden'), Object.entries(opaque).map(([key, value]) => input(key, value, 'hidden')).join(''))
     .replace('method="post"', 'method="post" enctype="multipart/form-data"').replace('</form>', input('uploadThumbnailFile', '', 'file') + '</form>')
@@ -71,9 +79,9 @@ function setup(options = {}) {
         } else if (envelope.action === 'prepare') {
           options.afterPrepare?.(properties)
           const inspection = envelope.payload.inspection
-          const patch = {}, fieldMap = { name: 'goodsName', price: 'gddGoodsPrice', cost: 'gddGoodsCost' }
+          const patch = {}, fieldMap = { name: 'goodsName', price: 'gddGoodsPrice', cost: 'gddGoodsCost', groupId: 'goodsGroup', supplierId: 'gddSupplierCd' }
           for (const [key, value] of Object.entries(intake.patch)) {
-            if (value !== inspection.searches[1].formInspection.fields[key]) patch[fieldMap[key]] = value
+            if (value !== inspection.searches[1].formInspection.fields[key]) patch[fieldMap[key]] = value === null ? '' : value
           }
           const dispatch = { operationId, actorId, storeId: store, janCode: jan, before: inspection.searches[1].formInspection,
             patch, expiresAt: tick + 120000 }
@@ -117,6 +125,51 @@ test('worker OFF/読取りOFF/保存OFF/consume OFF/lockbusyは外部接続し�
   for (const options of [{ properties: { POS_PRODUCT_BACKGROUND_EDIT_ENABLED: null } }, { properties: { POS_PRODUCT_INSPECTION_ENABLED: null } },
     { properties: { POS_PRODUCT_EDIT_EXECUTION_ENABLED: null } }, { properties: { POS_PRODUCT_CONSUME_ENABLED: null } }, { busy: true }]) {
     const f = setup(options); assert.equal(f.run().processed, false); assert.equal(f.calls.length, 0)
+  }
+})
+
+test('分類job専用フラグOFFはPOS読取り前にreview、従来3項目受付は影響しない', () => {
+  const f = setup({ intake: classificationIntake() })
+  assert.equal(f.run().code, 'REVIEW_REQUIRED'); assert.equal(f.saveCount, 0)
+  assert.equal(f.calls.filter(call => call.url.startsWith('https://cg8.power-k.jp')).length, 0)
+  assert.equal(f.messages.at(-1).payload.code, 'POS_CLASSIFICATION_DISABLED')
+  assert.equal(f.messages[0].payload.classificationCapable, true)
+  assert.equal(setup({ intake: { catalog_snapshot_id: null, pos_choice_baseline: null } }).run().code, 'COMPLETED')
+})
+
+test('分類/仕入先の固定証拠を照合し、一回保存して画像opaqueと未変更価格/原価を保持する', async () => {
+  const f = setup({ properties: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classificationIntake(), after: classificationAfter() })
+  assert.equal(f.run().code, 'COMPLETED'); assert.equal(f.saveCount, 1); assert.equal(f.consumeCount, 1)
+  const saved = f.calls.find(call => call.url.startsWith('https://cg8.power-k.jp') && typeof call.request.payload === 'string')
+  const body = await new Response(saved.request.payload, { headers: { 'Content-Type': saved.request.contentType } }).formData()
+  assert.equal(body.get(prefix + 'goodsGroup'), 'next-6'); assert.equal(body.get(prefix + 'gddSupplierCd'), 'supplier-6')
+  assert.equal(body.get(prefix + 'gddGoodsPrice'), '126'); assert.equal(body.get(prefix + 'gddGoodsCost'), '75')
+  for (const [key, value] of Object.entries(opaque)) assert.equal(body.get(prefix + key), value)
+  const unset = classificationIntake(); unset.patch = { supplierId: null }
+  unset.pos_choice_baseline.supplierId = 'supplier-6'; unset.pos_choice_baseline.supplierName = '店舗の仕入先'; unset.pos_choice_baseline.requested = { supplierId: null }
+  const before = imageForm(6).replace(/(<option value="") selected/, '$1').replace('<option value="supplier-6"', '<option value="supplier-6" selected')
+  const g = setup({ properties: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: unset, before, after: imageForm(6) })
+  assert.equal(g.run().code, 'COMPLETED'); assert.equal(g.saveCount, 1)
+})
+
+test('分類証拠欠落・requested名変更・fresh同名候補を拒否し、停止後もsend1復旧だけは許可する', () => {
+  const bad = classificationIntake(); bad.pos_choice_baseline.requested.groupId.name = '異名'
+  for (const options of [{ intake: { ...classificationIntake(), catalog_snapshot_id: null } }, { intake: bad },
+    { before: imageForm(6).replace('次の分類', '店舗の分類') }]) {
+    const f = setup({ properties: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classificationIntake(), ...options })
+    assert.notEqual(f.run().code, 'COMPLETED'); assert.equal(f.saveCount, 0); assert.equal(f.consumeCount, 0)
+  }
+  const f = setup({ intake: classificationIntake(), existingOperation: { id: operationId, actor_id: actorId, store_id: 6,
+    jan_code: jan, product_id_snapshot: 123, send_attempts: 1, status: 'uncertain' } })
+  assert.equal(f.run().code, 'COMPLETED'); assert.equal(f.saveCount, 0); assert.equal(f.consumeCount, 0)
+  assert.deepEqual(f.messages.map(message => message.action), ['claim', 'recover'])
+})
+
+test('分類フラグがprepare/consume待機中にOFFなら保存開始しない', () => {
+  for (const stop of ['afterPrepare', 'onConsume']) {
+    const f = setup({ properties: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classificationIntake(), after: classificationAfter(),
+      [stop]: properties => properties.set('POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED', null) })
+    assert.notEqual(f.run().code, 'COMPLETED'); assert.equal(f.saveCount, 0)
   }
 })
 

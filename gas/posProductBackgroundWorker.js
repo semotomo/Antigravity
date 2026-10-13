@@ -43,11 +43,14 @@ function executePosProductBackgroundJob_(properties, startedAt) {
   function readAllowed() {
     current();
     if (properties.getProperty('POS_PRODUCT_INSPECTION_ENABLED') !== 'true') throw new Error('POS_PRODUCT_BACKGROUND_READ_DISABLED');
+    if (intake && !recoveryRequired && posProductBackgroundClassJob_(intake) &&
+        properties.getProperty('POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED') !== 'true') throw new Error('CLASSIFICATION_DISABLED');
   }
   function executionAllowed() {
     current();
     return properties.getProperty('POS_PRODUCT_INSPECTION_ENABLED') === 'true' &&
-      properties.getProperty('POS_PRODUCT_CONSUME_ENABLED') === 'true';
+      properties.getProperty('POS_PRODUCT_CONSUME_ENABLED') === 'true' &&
+      (!posProductBackgroundClassJob_(intake) || properties.getProperty('POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED') === 'true');
   }
   function fail(code) {
     if (!intake || !call) return;
@@ -66,7 +69,8 @@ function executePosProductBackgroundJob_(properties, startedAt) {
     var stores = [firstStore, firstStore === 6 ? 7 : 6];
     for (var index = 0; index < stores.length; index++) {
       storeId = stores[index];
-      var claimed = call('claim', storeId, { workerId: workerId });
+      // 停止中もsend1の読取り復旧に対応できる能力を、署名payloadへ固定する。
+      var claimed = call('claim', storeId, { workerId: workerId, classificationCapable: true });
       posProductBackgroundRecord_(claimed, ['intake', 'operation', 'claimed']);
       if (typeof claimed.claimed !== 'boolean' || (claimed.operation !== null && !posProductBackgroundObject_(claimed.operation))) throw new Error('INVALID_CLAIM');
       if (!claimed.claimed) {
@@ -97,6 +101,11 @@ function executePosProductBackgroundJob_(properties, startedAt) {
       break;
     }
     if (!intake) return { processed: false, code: 'EMPTY' };
+    if (!recoveryRequired && posProductBackgroundClassJob_(intake) &&
+        properties.getProperty('POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED') !== 'true') {
+      fail('POS_CLASSIFICATION_DISABLED');
+      return { processed: true, code: 'REVIEW_REQUIRED' };
+    }
     var session;
     try {
       readAllowed();
@@ -120,6 +129,7 @@ function executePosProductBackgroundJob_(properties, startedAt) {
     }
     var prepared;
     try {
+      validatePosProductBackgroundClassification_(intake, session.before.data.searches[1].formInspection);
       // フォーム・Cookie・画像opaqueは渡さず、照合用業務DTOのコピーだけを署名する。
       prepared = call('prepare', storeId, { operationId: intake.operation_id, leaseToken: intake.lease_token,
         inspection: JSON.parse(posProductBackgroundCanonical_(session.before.data)) });
@@ -132,10 +142,10 @@ function executePosProductBackgroundJob_(properties, startedAt) {
       }
       var command = prepared.dispatch;
       posProductBackgroundRecord_(command, ['operationId', 'actorId', 'storeId', 'janCode', 'before', 'patch', 'expiresAt']);
-      var fieldMap = { name: 'goodsName', price: 'gddGoodsPrice', cost: 'gddGoodsCost' }, expectedPatch = {};
+      var fieldMap = { name: 'goodsName', price: 'gddGoodsPrice', cost: 'gddGoodsCost', groupId: 'goodsGroup', supplierId: 'gddSupplierCd' }, expectedPatch = {};
       Object.keys(intake.patch).forEach(function(key) {
         // 受付基準との競合はNextが検査する。現在値と同じ入力は保存patchに追加しない。
-        if (intake.patch[key] !== session.before.data.searches[1].formInspection.fields[key]) expectedPatch[fieldMap[key]] = intake.patch[key];
+        if (intake.patch[key] !== session.before.data.searches[1].formInspection.fields[key]) expectedPatch[fieldMap[key]] = intake.patch[key] === null ? '' : intake.patch[key];
       });
       if (command.operationId !== intake.operation_id || command.actorId !== intake.actor_id || command.storeId !== storeId ||
           command.janCode !== intake.jan_code || posProductBackgroundCanonical_(command.patch) !== posProductBackgroundCanonical_(expectedPatch) ||
@@ -282,9 +292,58 @@ function validatePosProductBackgroundIntake_(intake, storeId) {
       typeof intake.jan_code !== 'string' || !/^(\d{8}|\d{12}|\d{13})$/.test(intake.jan_code) ||
       !posProductBackgroundObject_(intake.patch) || !posProductBackgroundObject_(intake.baseline)) throw new Error('INVALID_INTAKE');
   var keys = Object.keys(intake.patch);
-  if (!keys.length || keys.length > 3 || keys.some(function(key) {
-    return ['name', 'price', 'cost'].indexOf(key) < 0 || typeof intake.patch[key] !== 'string' || intake.patch[key].length > 1000;
+  if (!keys.length || keys.length > 5 || keys.some(function(key) {
+    return ['name', 'price', 'cost', 'groupId', 'supplierId'].indexOf(key) < 0 ||
+      (key === 'supplierId' && intake.patch[key] === null ? false : typeof intake.patch[key] !== 'string' || intake.patch[key].length > 1000);
   })) throw new Error('INVALID_INTAKE');
+  validatePosProductBackgroundClassification_(intake, null);
+}
+
+function posProductBackgroundClassJob_(intake) {
+  return intake && (Object.prototype.hasOwnProperty.call(intake.patch, 'groupId') || Object.prototype.hasOwnProperty.call(intake.patch, 'supplierId'));
+}
+
+/** 受付のID/表示名とfresh候補を照合し、同名候補や欠落を先頭候補で補わない。 */
+function validatePosProductBackgroundClassification_(intake, inspection) {
+  function reject() { throw new Error('INVALID_CLASSIFICATION'); }
+  function choice(value) {
+    posProductBackgroundRecord_(value, ['id', 'name']);
+    if (typeof value.id !== 'string' || !/^[A-Za-z0-9._:-]{1,100}$/.test(value.id) || typeof value.name !== 'string' ||
+        !value.name || value.name.length > 1000 || value.name.trim() !== value.name || /[\x00-\x1f\x7f]/.test(value.name)) reject();
+    return value;
+  }
+  if (!posProductBackgroundClassJob_(intake)) {
+    if (intake.catalog_snapshot_id != null || intake.pos_choice_baseline != null) reject();
+    return;
+  }
+  if (!posProductBackgroundUuid_(intake.catalog_snapshot_id)) reject();
+  var baseline = intake.pos_choice_baseline;
+  posProductBackgroundRecord_(baseline, ['groupId', 'groupName', 'supplierId', 'supplierName', 'requested']);
+  choice({ id: baseline.groupId, name: baseline.groupName });
+  if (baseline.supplierId === null) { if (baseline.supplierName !== null) reject(); }
+  else choice({ id: baseline.supplierId, name: baseline.supplierName });
+  var keys = ['groupId', 'supplierId'].filter(function(key) { return Object.prototype.hasOwnProperty.call(intake.patch, key); });
+  posProductBackgroundRecord_(baseline.requested, keys);
+  keys.forEach(function(key) {
+    if (key === 'supplierId' && intake.patch[key] === null) { if (baseline.requested[key] !== null) reject(); }
+    else if (choice(baseline.requested[key]).id !== intake.patch[key]) reject();
+  });
+  if (!inspection) return;
+  [inspection.groups, inspection.suppliers].forEach(function(catalog) {
+    if (!Array.isArray(catalog) || catalog.length > 5000) reject();
+    var ids = {}, names = {};
+    catalog.forEach(function(raw) {
+      var item = choice(raw);
+      if (Object.prototype.hasOwnProperty.call(ids, item.id) || Object.prototype.hasOwnProperty.call(names, item.name)) reject();
+      Object.defineProperty(ids, item.id, { value: true }); Object.defineProperty(names, item.name, { value: true });
+    });
+  });
+  keys.forEach(function(key) {
+    if (inspection.fields[key] !== baseline[key]) reject();
+    var catalog = key === 'groupId' ? inspection.groups : inspection.suppliers;
+    if (baseline[key] !== null && (!catalog.some(function(item) { return item.id === baseline[key] && item.name === baseline[key === 'groupId' ? 'groupName' : 'supplierName']; }))) reject();
+    if (baseline.requested[key] !== null && !catalog.some(function(item) { return item.id === baseline.requested[key].id && item.name === baseline.requested[key].name; })) reject();
+  });
 }
 
 function validatePosProductBackgroundReceipt_(value, operationId, storeId) {

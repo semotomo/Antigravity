@@ -4,18 +4,24 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { cn } from '@/components/ui/StatusBadge'
 import { getProductStoreName } from '@/lib/productStores'
 import type { ProductListRow } from '@/lib/products'
-import type { BackgroundExpectedValues, ProductEditIntakeData } from '@/lib/pos-products/background-edit'
+import { parseBackgroundEditRequest, parseBackgroundProductPatch, parseBackgroundPosChoiceBaseline } from '@/lib/pos-products/background-edit'
+import type { BackgroundExpectedValues, BackgroundProductPatch, BackgroundPosChoiceBaseline, ProductEditIntakeData } from '@/lib/pos-products/background-edit'
+import { decodeBackgroundClassificationSnapshot } from '@/lib/pos-products/classification'
+import type { BackgroundClassificationSnapshot } from '@/lib/pos-products/classification'
 import { BackgroundEditFailure, backgroundEditFailureCode, parseBackgroundEditFailureCode } from '@/lib/pos-products/background-failure'
 import type { BackgroundEditFailureCode } from '@/lib/pos-products/background-failure'
 
 type Draft = { name: string; price: string; cost: string }
-type Patch = Partial<Draft>
+type Patch = BackgroundProductPatch
 type ExpectedValues = BackgroundExpectedValues
 type Target = { storeId: 6 | 7; productId: number; janCode: string }
-type Intent = Target & { version: 1; operationId: string; patch: Patch; expectedValues: ExpectedValues }
+type Intent = Target & { version: 1; operationId: string; patch: Patch; expectedValues: ExpectedValues; catalogSnapshotId?: string; posChoiceBaseline?: BackgroundPosChoiceBaseline }
+type ClassificationDraft = { groupId: string; supplierId: string | null }
+type ClassificationEdited = Partial<Record<keyof ClassificationDraft, boolean>>
 type StoragePort = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const fields = ['name', 'price', 'cost'] as const
+const patchFields = [...fields, 'groupId', 'supplierId'] as const
 const labels = { name: '商品名', price: '売価', cost: '原価' }
 const inputClass = 'w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-600/20 disabled:bg-gray-100'
 const buttonClass = 'rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-not-allowed disabled:opacity-50'
@@ -41,61 +47,123 @@ export function backgroundProductEditPatch(draft: Draft, edited: Partial<Record<
 export function backgroundProductEditExpectedValues(product: Pick<ProductListRow, 'product_name' | 'selling_price' | 'cost_price'>, patch: Patch): ExpectedValues {
   const money = (value: number | null) => Number.isSafeInteger(value) && Number(value) >= 0 ? String(value) : null
   const original = { name: product.product_name ?? null, price: money(product.selling_price), cost: money(product.cost_price) }
-  return Object.fromEntries(Object.keys(patch).map(field => [field, original[field as keyof Draft]]))
+  return Object.fromEntries(fields.filter(field => Object.hasOwn(patch, field)).map(field => [field, original[field]]))
 }
 
-function validExpectedValues(value: unknown, patch: Patch): value is ExpectedValues {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const expected = value as ExpectedValues
-  return Object.keys(expected).length === Object.keys(patch).length &&
-    Object.keys(patch).every(field => Object.hasOwn(expected, field) &&
-      (expected[field as keyof Draft] === null || typeof expected[field as keyof Draft] === 'string'))
+function intentPayload(intent: Pick<Intent, 'operationId' | 'storeId' | 'productId' | 'patch' | 'expectedValues' | 'catalogSnapshotId'>) {
+  const { operationId, storeId, productId, patch, expectedValues, catalogSnapshotId } = intent
+  return { operationId, storeId, productId, patch, expectedValues, ...(catalogSnapshotId !== undefined ? { catalogSnapshotId } : {}) }
+}
+
+export function backgroundProductClassificationPatch(snapshot: BackgroundClassificationSnapshot | null, draft: ClassificationDraft | null,
+  edited: ClassificationEdited, target: Target): { patch: Patch; expectedValues: ExpectedValues; catalogSnapshotId?: string; posChoiceBaseline?: BackgroundPosChoiceBaseline } {
+  const patch: Patch = {}, expectedValues: ExpectedValues = {}
+  if (!edited.groupId && !edited.supplierId) return { patch, expectedValues }
+  if (!snapshot || !draft) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+  if (edited.groupId && draft.groupId !== snapshot.currentGroupId) { patch.groupId = draft.groupId; expectedValues.groupId = snapshot.currentGroupId }
+  if (edited.supplierId && draft.supplierId !== snapshot.currentSupplierId) { patch.supplierId = draft.supplierId; expectedValues.supplierId = snapshot.currentSupplierId }
+  if (!Object.keys(patch).length) return { patch, expectedValues }
+  try {
+    const verified = decodeBackgroundClassificationSnapshot(snapshot, target)
+    const group = verified.groups.find(group => group.id === draft.groupId)
+    const supplier = draft.supplierId === null ? null : verified.suppliers.find(supplier => supplier.id === draft.supplierId)
+    if (!group || supplier === undefined) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+    const baseline = { groupId: verified.currentGroupId, groupName: verified.groups.find(group => group.id === verified.currentGroupId)!.name,
+      supplierId: verified.currentSupplierId, supplierName: verified.suppliers.find(supplier => supplier.id === verified.currentSupplierId)?.name ?? null,
+      requested: { ...(Object.hasOwn(patch, 'groupId') ? { groupId: { ...group } } : {}),
+        ...(Object.hasOwn(patch, 'supplierId') ? { supplierId: supplier === null ? null : { ...supplier } } : {}) } }
+    return { patch, expectedValues, catalogSnapshotId: verified.snapshotId, posChoiceBaseline: parseBackgroundPosChoiceBaseline(baseline, patch) }
+  } catch { throw new BackgroundEditFailure('BG_EDIT_INPUT') }
 }
 
 export function readBackgroundEditIntent(storage: StoragePort, target: Target): Intent | null {
   try {
     const raw = storage.getItem(backgroundEditStorageKey(target))
     if (raw === null) return null
-    if (raw.length > 4096) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
+    if (raw.length > 16384) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
     const value = JSON.parse(raw) as Intent
     if (!value || value.version !== 1 || value.storeId !== target.storeId || value.productId !== target.productId ||
         value.janCode !== target.janCode || typeof value.operationId !== 'string' || !UUID.test(value.operationId) ||
-        !value.patch || typeof value.patch !== 'object' || Array.isArray(value.patch) ||
-        Object.keys(value.patch).some(field => !fields.includes(field as keyof Draft)) ||
-        Object.values(value.patch).some(field => typeof field !== 'string') || !validExpectedValues(value.expectedValues, value.patch)) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
-    backgroundProductEditPatch({ name: '', price: '', cost: '', ...value.patch },
-      Object.fromEntries(Object.keys(value.patch).map(field => [field, true])))
-    return value
+        !value.patch || typeof value.patch !== 'object' || Array.isArray(value.patch)) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
+    const request = parseBackgroundEditRequest(intentPayload(value))
+    const baseline = value.posChoiceBaseline === undefined ? undefined : parseBackgroundPosChoiceBaseline(value.posChoiceBaseline, request.patch)
+    if (baseline && !request.catalogSnapshotId) throw new BackgroundEditFailure('BG_EDIT_STORAGE')
+    return { ...request, version: 1, janCode: value.janCode, ...(baseline ? { posChoiceBaseline: baseline } : {}) }
   } catch { throw new BackgroundEditFailure('BG_EDIT_STORAGE') }
 }
 
 export function isBackgroundEditIntake(value: unknown, target?: Target, operationId?: string): value is ProductEditIntakeData {
   if (!value || typeof value !== 'object') return false
   const data = value as ProductEditIntakeData
+  try {
+    parseBackgroundProductPatch(data.patch)
+    if (Object.hasOwn(data.patch, 'groupId') || Object.hasOwn(data.patch, 'supplierId')) {
+      if (typeof data.catalogSnapshotId !== 'string' || !UUID.test(data.catalogSnapshotId)) return false
+      parseBackgroundPosChoiceBaseline(data.posChoiceBaseline, data.patch)
+    } else if (data.catalogSnapshotId !== undefined || data.posChoiceBaseline !== undefined) return false
+  } catch { return false }
   return typeof data.operationId === 'string' && UUID.test(data.operationId) && [6, 7].includes(data.storeId) &&
     Number.isSafeInteger(data.productId) && data.productId > 0 && typeof data.janCode === 'string' &&
     ['queued', 'working', 'needs_review', 'completed', 'cancelled'].includes(data.status) &&
     typeof data.message === 'string' && typeof data.createdAt === 'string' && typeof data.updatedAt === 'string' &&
     !!data.patch && typeof data.patch === 'object' && !Array.isArray(data.patch) &&
-    Object.keys(data.patch).every(key => fields.includes(key as keyof Draft)) &&
-    Object.values(data.patch).every(value => typeof value === 'string') &&
     (!target || data.storeId === target.storeId && data.productId === target.productId && data.janCode === target.janCode) &&
     (!operationId || data.operationId === operationId)
 }
 
+function matchesBackgroundIntent(data: ProductEditIntakeData, intent: Pick<Intent, 'patch' | 'expectedValues' | 'catalogSnapshotId' | 'posChoiceBaseline'>) {
+  return patchFields.every(field => data.patch[field] === intent.patch[field]) &&
+    (intent.catalogSnapshotId === undefined || data.catalogSnapshotId === intent.catalogSnapshotId) &&
+    (!Object.hasOwn(intent.patch, 'groupId') || data.posChoiceBaseline?.groupId === intent.expectedValues.groupId) &&
+    (!Object.hasOwn(intent.patch, 'supplierId') || data.posChoiceBaseline?.supplierId === intent.expectedValues.supplierId) &&
+    (!intent.posChoiceBaseline || JSON.stringify(parseBackgroundPosChoiceBaseline(data.posChoiceBaseline, data.patch)) === JSON.stringify(intent.posChoiceBaseline))
+}
+
 async function backgroundEditRequest(fetcher: typeof fetch, url: string, options: RequestInit,
-  requestCode: BackgroundEditFailureCode, responseCode: BackgroundEditFailureCode): Promise<{ data: unknown }> {
-  let response: Response
-  try { response = await fetcher(url, options) } catch { throw new BackgroundEditFailure(requestCode) }
-  let body: unknown
-  try { body = await response.json() } catch { throw new BackgroundEditFailure(responseCode) }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BackgroundEditFailure(responseCode)
-  const result = body as { success?: unknown; diagnosticCode?: unknown; data?: unknown }
-  if (!response.ok || result.success !== true) {
-    // サーバー本文や未知コードは表示せず、許可済みの固定コードだけを引き継ぐ。
-    throw new BackgroundEditFailure(parseBackgroundEditFailureCode(result.diagnosticCode) ?? responseCode)
-  }
-  return { data: result.data }
+  requestCode: BackgroundEditFailureCode, responseCode: BackgroundEditFailureCode, timeoutMs = 20_000): Promise<{ data: unknown }> {
+  const controller = new AbortController()
+  let stageCode = requestCode
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let rejectDeadline: (reason: BackgroundEditFailure) => void = () => {}
+  const abort = () => { rejectDeadline(new BackgroundEditFailure(stageCode)); controller.abort() }
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject
+    timer = setTimeout(abort, timeoutMs)
+  })
+  if (options.signal?.aborted) abort()
+  else options.signal?.addEventListener('abort', abort, { once: true })
+  try {
+    return await Promise.race([deadline, (async () => {
+      let response: Response
+      try { response = await fetcher(url, { ...options, signal: controller.signal }) } catch { throw new BackgroundEditFailure(requestCode) }
+      stageCode = responseCode
+      let body: unknown
+      try { body = await response.json() } catch { throw new BackgroundEditFailure(responseCode) }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BackgroundEditFailure(responseCode)
+      const result = body as { success?: unknown; diagnosticCode?: unknown; data?: unknown }
+      if (!response.ok || result.success !== true) {
+        // サーバー本文や未知コードは表示せず、許可済みの固定コードだけを引き継ぐ。
+        throw new BackgroundEditFailure(parseBackgroundEditFailureCode(result.diagnosticCode) ?? responseCode)
+      }
+      return { data: result.data }
+    })()])
+  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort) }
+}
+
+export async function loadBackgroundProductClassification(options: {
+  target: Target; refresh?: boolean; fetcher: typeof fetch; signal?: AbortSignal
+}): Promise<BackgroundClassificationSnapshot | null> {
+  const { target, refresh } = options
+  const params = new URLSearchParams({ storeId: String(target.storeId), productId: String(target.productId) })
+  const body = await backgroundEditRequest(options.fetcher,
+    `/api/pos-products/background-classification${refresh ? '' : `?${params}`}`,
+    refresh ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: options.signal,
+      body: JSON.stringify({ storeId: target.storeId, productId: target.productId }) }
+      : { method: 'GET', cache: 'no-store', signal: options.signal },
+    'BG_EDIT_CHECK_REQUEST', 'BG_EDIT_CHECK_RESPONSE', refresh ? 90_000 : 20_000)
+  if (body.data === null) return null
+  try { return decodeBackgroundClassificationSnapshot(body.data, target) }
+  catch { throw new BackgroundEditFailure('BG_EDIT_CHECK_RESPONSE') }
 }
 
 class UnacceptedBackgroundEditFailure extends BackgroundEditFailure {
@@ -106,6 +174,8 @@ export async function acceptBackgroundProductEdit(options: {
   target: Target; patch: Patch; expectedValues: ExpectedValues; storage: StoragePort; fetcher: typeof fetch; createId: () => string
   lock: { current: boolean }; onAccepted: (data: ProductEditIntakeData) => void; onClose: () => void
   retryUnaccepted?: boolean
+  requestTimeoutMs?: number
+  catalogSnapshotId?: string; posChoiceBaseline?: BackgroundPosChoiceBaseline
 }) {
   // Reactの再描画より前にロックし、同時クリックを一度の受付に限定する。
   if (options.lock.current) return
@@ -116,36 +186,40 @@ export async function acceptBackgroundProductEdit(options: {
     if (intent) {
       const params = new URLSearchParams({ store: String(intent.storeId), operationId: intent.operationId })
       const body = await backgroundEditRequest(options.fetcher, `/api/pos-products/background-edit?${params}`, { method: 'GET', cache: 'no-store' },
-        'BG_EDIT_CHECK_REQUEST', 'BG_EDIT_CHECK_RESPONSE')
+        'BG_EDIT_CHECK_REQUEST', 'BG_EDIT_CHECK_RESPONSE', options.requestTimeoutMs)
       const received = body.data
       if (received === null) {
         // 読取りだけの確認からPOSTへ進めない。別の明示操作でも同一IDを再照会する。
         if (!options.retryUnaccepted) throw new UnacceptedBackgroundEditFailure()
       } else {
         if (!isBackgroundEditIntake(received, options.target, intent.operationId) ||
-            fields.some(field => received.patch[field] !== intent!.patch[field])) throw new BackgroundEditFailure('BG_EDIT_CHECK_RESPONSE')
+            !matchesBackgroundIntent(received, intent)) throw new BackgroundEditFailure('BG_EDIT_CHECK_RESPONSE')
         data = received
       }
     } else {
       if (options.retryUnaccepted) throw new BackgroundEditFailure('BG_EDIT_INPUT')
-      const patch = backgroundProductEditPatch({ name: '', price: '', cost: '', ...options.patch },
-        Object.fromEntries(Object.keys(options.patch).map(field => [field, true])))
-      if (!validExpectedValues(options.expectedValues, patch)) throw new BackgroundEditFailure('BG_EDIT_INPUT')
       try {
-        intent = { ...options.target, version: 1, operationId: options.createId(), patch, expectedValues: { ...options.expectedValues } }
-        if (!UUID.test(intent.operationId)) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+        const patch = { ...options.patch }
+        if (fields.some(field => Object.hasOwn(patch, field))) Object.assign(patch,
+          backgroundProductEditPatch({ name: '', price: '', cost: '', ...patch }, Object.fromEntries(fields.filter(field => Object.hasOwn(patch, field)).map(field => [field, true]))))
+        const request = parseBackgroundEditRequest(intentPayload({ ...options.target, operationId: options.createId(), patch,
+          expectedValues: options.expectedValues, catalogSnapshotId: options.catalogSnapshotId }))
+        const baseline = options.posChoiceBaseline === undefined ? undefined : parseBackgroundPosChoiceBaseline(options.posChoiceBaseline, request.patch)
+        if (baseline && (!request.catalogSnapshotId || Object.hasOwn(patch, 'groupId') && baseline.groupId !== request.expectedValues.groupId ||
+            Object.hasOwn(patch, 'supplierId') && baseline.supplierId !== request.expectedValues.supplierId)) throw new BackgroundEditFailure('BG_EDIT_INPUT')
+        intent = { ...request, janCode: options.target.janCode, version: 1, ...(baseline ? { posChoiceBaseline: baseline } : {}) }
       } catch { throw new BackgroundEditFailure('BG_EDIT_INPUT') }
       // 通信開始前に操作IDと入力を保全する。失敗時はPOS/受付POSTへ進まない。
       try { options.storage.setItem(backgroundEditStorageKey(options.target), JSON.stringify(intent)) } catch { throw new BackgroundEditFailure('BG_EDIT_STORAGE') }
     }
     if (!data) {
-      const { operationId, storeId, productId, patch, expectedValues } = intent
+      const { operationId } = intent
       const body = await backgroundEditRequest(options.fetcher, '/api/pos-products/background-edit', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId, storeId, productId, patch, expectedValues }),
-      }, 'BG_EDIT_ACCEPT_REQUEST', 'BG_EDIT_ACCEPT_RESPONSE')
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(intentPayload(intent)),
+      }, 'BG_EDIT_ACCEPT_REQUEST', 'BG_EDIT_ACCEPT_RESPONSE', options.requestTimeoutMs)
       const received = body.data
       if (!isBackgroundEditIntake(received, options.target, operationId) ||
-          fields.some(field => received.patch[field] !== patch[field])) {
+          !matchesBackgroundIntent(received, intent)) {
         throw new BackgroundEditFailure('BG_EDIT_ACCEPT_RESPONSE')
       }
       data = received
@@ -161,6 +235,7 @@ export async function acceptBackgroundProductEdit(options: {
 export async function controlBackgroundProductEdit(options: {
   target: Target; operation: ProductEditIntakeData; action: 'cancel' | 'resume'; fetcher: typeof fetch
   lock: { current: boolean }; onAccepted: (data: ProductEditIntakeData) => void; onClose: () => void
+  requestTimeoutMs?: number
 }) {
   if (options.lock.current) return
   options.lock.current = true
@@ -170,20 +245,21 @@ export async function controlBackgroundProductEdit(options: {
         (action === 'resume' ? operation.status !== 'needs_review' : !['queued', 'needs_review'].includes(operation.status))) {
       throw new Error('この操作の状態を確認できません。')
     }
-    const response = await options.fetcher('/api/pos-products/background-edit/control', {
+    const body = await backgroundEditRequest(options.fetcher, '/api/pos-products/background-edit/control', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storeId: operation.storeId, operationId: operation.operationId, action }),
-    })
-    const body = await response.json()
-    if (!response.ok || body.success !== true || !isBackgroundEditIntake(body.data, options.target, operation.operationId) ||
-        fields.some(field => body.data.patch[field] !== operation.patch[field])) throw new Error('操作の受付状態を確認できません。')
-    options.onAccepted(body.data)
+    }, 'BG_EDIT_ACCEPT_REQUEST', 'BG_EDIT_ACCEPT_RESPONSE', options.requestTimeoutMs)
+    const received = body.data
+    if (!isBackgroundEditIntake(received, options.target, operation.operationId) ||
+        patchFields.some(field => received.patch[field] !== operation.patch[field]) || received.catalogSnapshotId !== operation.catalogSnapshotId) throw new BackgroundEditFailure('BG_EDIT_ACCEPT_RESPONSE')
+    options.onAccepted(received)
     options.onClose()
   } finally { options.lock.current = false }
 }
 
 export async function abandonBackgroundEditIntent(options: {
   target: Target; storage: StoragePort; fetcher: typeof fetch; lock: { current: boolean }; onAbandoned: () => void; onClose: () => void
+  requestTimeoutMs?: number
 }) {
   if (options.lock.current) return
   options.lock.current = true
@@ -191,10 +267,10 @@ export async function abandonBackgroundEditIntent(options: {
     const intent = readBackgroundEditIntent(options.storage, options.target)
     if (!intent) throw new Error('受付情報を確認できません。')
     const { operationId, storeId, productId } = intent
-    const response = await options.fetcher('/api/pos-products/background-edit/control', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ operationId, storeId, productId, action: 'abandon' }) })
-    const body = await response.json(), receipt = body.data
-    if (!response.ok || body.success !== true || !receipt || Object.keys(receipt).length !== 4 ||
+    const body = await backgroundEditRequest(options.fetcher, '/api/pos-products/background-edit/control', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operationId, storeId, productId, action: 'abandon' }) }, 'BG_EDIT_ACCEPT_REQUEST', 'BG_EDIT_ACCEPT_RESPONSE', options.requestTimeoutMs)
+    const receipt = body.data as { operationId?: unknown; storeId?: unknown; productId?: unknown; abandoned?: unknown } | null
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || Object.keys(receipt).length !== 4 ||
         receipt.operationId !== operationId || receipt.storeId !== storeId || receipt.productId !== productId || receipt.abandoned !== true) {
       throw new Error('未受付の取消を確認できません。入力は保持しています。')
     }
@@ -207,18 +283,19 @@ export async function abandonBackgroundEditIntent(options: {
 
 type Props = {
   product: ProductListRow; storeId: 6 | 7; existingOperation?: ProductEditIntakeData | null
+  backgroundClassificationEnabled?: boolean
   onAccepted: (data: ProductEditIntakeData) => void; onClose: () => void; onAdvanced?: () => void; onAbandoned?: () => void
 }
 
 function backgroundEditFailureMessage(code: BackgroundEditFailureCode, confirmedUnaccepted = false) {
-  const message = code === 'BG_EDIT_INPUT' ? '商品名は200文字以内、売価・原価は0以上の整数で入力してください。表示元の商品値も確認してください。'
+  const message = code === 'BG_EDIT_INPUT' ? '商品名は200文字以内、売価・原価は0以上の整数で入力してください。分類・仕入先は取得した有効な候補から選択してください。'
     : code === 'BG_EDIT_STORAGE' ? 'この端末の受付情報を保全・確認できません。入力を保持しています。'
       : confirmedUnaccepted ? 'まだ受付されていません。希望値と同じ操作IDを保持しています。再受付する場合は「同じ内容で再受付」を押してください。'
         : '保存受付を確認できません。入力と同じ操作IDを保持しています。「受付状態を確認」で再確認してください。'
   return `${message}（診断コード: ${code}）`
 }
 
-export function BackgroundProductEditModal({ product, storeId, existingOperation, onAccepted, onClose, onAdvanced, onAbandoned }: Props) {
+export function BackgroundProductEditModal({ product, storeId, existingOperation, backgroundClassificationEnabled = false, onAccepted, onClose, onAdvanced, onAbandoned }: Props) {
   const money = (value: number | null) => Number.isSafeInteger(value) && Number(value) >= 0 ? String(value) : ''
   const [draft, setDraft] = useState<Draft>(() => ({ name: product.product_name ?? '', price: money(product.selling_price), cost: money(product.cost_price), ...existingOperation?.patch }))
   const [edited, setEdited] = useState<Partial<Record<keyof Draft, boolean>>>({})
@@ -229,27 +306,42 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
+  const [classificationOpen, setClassificationOpen] = useState(false)
+  const [classificationSnapshot, setClassificationSnapshot] = useState<BackgroundClassificationSnapshot | null>(null)
+  const [classificationDraft, setClassificationDraft] = useState<ClassificationDraft | null>(null)
+  const [classificationEdited, setClassificationEdited] = useState<ClassificationEdited>({})
+  const [classificationPending, setClassificationPending] = useState(false)
+  const [classificationError, setClassificationError] = useState<string | null>(null)
+  const [storedBaseline, setStoredBaseline] = useState<BackgroundPosChoiceBaseline | null>(null)
   const dialog = useRef<HTMLDialogElement>(null)
   const lock = useRef(false)
+  const classificationLock = useRef(false)
+  const classificationEdits = useRef<ClassificationEdited>({})
+  const classificationController = useRef<AbortController | null>(null)
   const titleId = useId(), descriptionId = useId()
   const active = existingOperation && ['queued', 'working', 'needs_review'].includes(existingOperation.status)
   // 状況取得がモーダル表示より遅れても、サーバーに保持した希望値を表示する。
   const displayed = active ? { ...draft, ...existingOperation.patch } : draft
+  const heldBaseline = active ? existingOperation.posChoiceBaseline : stored ? storedBaseline : null
+  const classificationChanged = !!classificationSnapshot && !!classificationDraft &&
+    (classificationEdited.groupId && classificationDraft.groupId !== classificationSnapshot.currentGroupId ||
+      classificationEdited.supplierId && classificationDraft.supplierId !== classificationSnapshot.currentSupplierId)
+  const choicesFresh = !!classificationSnapshot && classificationSnapshot.expiresAt > Date.now()
 
   useEffect(() => {
     const node = dialog.current
     if (node && !node.open) node.showModal()
     try {
       const intent = readBackgroundEditIntent(window.sessionStorage, { productId: product.id, storeId, janCode: product.jan_code ?? '' })
-      if (intent) { setDraft(value => ({ ...value, ...intent.patch })); setStored(true); setStoredOperationId(intent.operationId) }
+      if (intent) { setDraft(value => ({ ...value, ...intent.patch })); setStored(true); setStoredOperationId(intent.operationId); setStoredBaseline(intent.posChoiceBaseline ?? null) }
       setReady(true)
-    } catch { setError(backgroundEditFailureMessage('BG_EDIT_STORAGE')) }
-    return () => { if (node?.open) node.close() }
+    } catch { setError(`${backgroundEditFailureMessage('BG_EDIT_STORAGE')}受付状態の確認を開始できないため、操作を停止しています。`) }
+    return () => { classificationController.current?.abort(); if (node?.open) node.close() }
   }, [product.id, product.jan_code, storeId])
 
   function requestClose() {
     if (lock.current) return
-    if (!active && !stored && Object.keys(edited).length) setConfirmClose(true)
+    if (!active && !stored && (Object.keys(edited).length || classificationChanged)) setConfirmClose(true)
     else onClose()
   }
 
@@ -259,16 +351,20 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
     if (!product.jan_code) { setError(backgroundEditFailureMessage('BG_EDIT_INPUT')); return }
     setError(null); setUnaccepted(false)
     try {
-      const patch = stored ? {} : backgroundProductEditPatch(draft, edited)
+      const target = { productId: product.id, storeId, janCode: product.jan_code }
+      const normalPatch = stored || !Object.keys(edited).length ? {} : backgroundProductEditPatch(draft, edited)
+      const classification = stored || !backgroundClassificationEnabled ? { patch: {}, expectedValues: {} }
+        : backgroundProductClassificationPatch(classificationSnapshot, classificationDraft, classificationEdited, target)
+      const patch = { ...normalPatch, ...classification.patch }
       setPending(true)
-      await acceptBackgroundProductEdit({ target: { productId: product.id, storeId, janCode: product.jan_code }, patch,
-        expectedValues: backgroundProductEditExpectedValues(product, patch),
+      await acceptBackgroundProductEdit({ ...classification, target, patch,
+        expectedValues: { ...backgroundProductEditExpectedValues(product, normalPatch), ...classification.expectedValues },
         storage: window.sessionStorage, fetcher: fetch, createId: () => window.crypto.randomUUID(), lock, onAccepted, onClose, retryUnaccepted })
     } catch (failure) {
       try {
         const intent = readBackgroundEditIntent(window.sessionStorage, { productId: product.id, storeId, janCode: product.jan_code ?? '' })
         setStored(intent !== null); setStoredOperationId(intent?.operationId ?? null)
-        if (intent) setDraft(value => ({ ...value, ...intent.patch }))
+        if (intent) { setDraft(value => ({ ...value, ...intent.patch })); setStoredBaseline(intent.posChoiceBaseline ?? null) }
       } catch { setStored(true) }
       const code = backgroundEditFailureCode(failure, 'BG_EDIT_INPUT')
       // 失敗応答のコードだけでは許可しない。成功したGETの不存在確認だけを根拠にする。
@@ -276,6 +372,41 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
       setUnaccepted(confirmedUnaccepted)
       setError(backgroundEditFailureMessage(code, confirmedUnaccepted))
     } finally { setPending(false) }
+  }
+
+  async function loadClassification(refresh = false) {
+    if (!backgroundClassificationEnabled || !ready || active || stored || classificationLock.current || !product.jan_code) return
+    classificationLock.current = true
+    const controller = new AbortController()
+    classificationController.current = controller
+    setClassificationOpen(true); setClassificationPending(true); setClassificationError(null)
+    try {
+      const options = { target: { storeId, productId: product.id, janCode: product.jan_code }, fetcher: fetch, signal: controller.signal }
+      let snapshot = await loadBackgroundProductClassification({ ...options, refresh })
+      // 初回のcache不存在だけを一度取得する。失敗・不正応答は自動再試行しない。
+      if (!snapshot && !refresh) snapshot = await loadBackgroundProductClassification({ ...options, refresh: true })
+      if (!snapshot) throw new BackgroundEditFailure('BG_EDIT_CHECK_RESPONSE')
+      if (controller.signal.aborted) return
+      const verified = snapshot
+      setClassificationSnapshot(verified)
+      // 通常入力と、編集中の選択は非同期の取得結果で上書きしない。
+      setClassificationDraft(previous => ({
+        groupId: previous && classificationEdits.current.groupId ? previous.groupId : verified.currentGroupId,
+        supplierId: previous && classificationEdits.current.supplierId ? previous.supplierId : verified.currentSupplierId,
+      }))
+    } catch (failure) {
+      if (!controller.signal.aborted) setClassificationError(`分類・仕入先の候補を取得できません。入力は保持しています。商品名・売価・原価は編集・保存できます。（診断コード: ${backgroundEditFailureCode(failure, 'BG_EDIT_CHECK_RESPONSE')}）`)
+    } finally {
+      classificationLock.current = false
+      if (!controller.signal.aborted) setClassificationPending(false)
+    }
+  }
+
+  function changeClassification(field: keyof ClassificationDraft, value: string) {
+    classificationEdits.current = { ...classificationEdits.current, [field]: true }
+    setClassificationEdited(classificationEdits.current)
+    setClassificationDraft(previous => previous ? { ...previous, [field]: field === 'supplierId' && value === '' ? null : value } : previous)
+    setError(null)
   }
 
   async function control(action: 'cancel' | 'resume') {
@@ -319,6 +450,37 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
             maxLength={field === 'name' ? 200 : 9} className={cn(inputClass, field !== 'name' && 'tabular-nums')}
             onChange={event => { setDraft(value => ({ ...value, [field]: event.target.value })); setEdited(value => ({ ...value, [field]: true })); setError(null) }} />
         </label>)}
+        {heldBaseline ? <div className="space-y-2 rounded-xl bg-gray-50 p-3 text-sm">
+          {heldBaseline.requested.groupId ? <p>商品グループ：<span>{heldBaseline.requested.groupId.name}</span></p> : null}
+          {Object.hasOwn(heldBaseline.requested, 'supplierId') ? <p>仕入先：<span>{heldBaseline.requested.supplierId?.name ?? '未設定'}</span></p> : null}
+        </div> : classificationOpen && !active && !stored ? <section aria-label="分類・仕入先" className="space-y-4 rounded-xl border border-gray-200 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">分類・仕入先</h3>
+            <button type="button" className={buttonClass} disabled={!ready || pending || classificationPending}
+              onClick={() => void loadClassification(true)}>候補を再取得</button>
+          </div>
+          {classificationPending ? <p role="status" className="text-sm text-gray-600">候補を取得しています。商品名・売価・原価は編集・保存できます。</p> : null}
+          {classificationError ? <p role="alert" className="text-pretty text-sm text-red-700">{classificationError}</p> : null}
+          {classificationSnapshot && !choicesFresh ? <p role="status" className="text-sm text-gray-600">候補の有効期限が切れています。入力は保持しています。候補を再取得してください。</p> : null}
+          <label className="block space-y-2"><span className="text-sm font-medium">商品グループ</span>
+            <select value={classificationDraft?.groupId ?? ''} disabled={!choicesFresh || pending} className={inputClass}
+              onChange={event => changeClassification('groupId', event.target.value)}>
+              {!classificationSnapshot ? <option value="">候補を取得すると選択できます</option>
+                : classificationDraft && !classificationSnapshot.groups.some(group => group.id === classificationDraft.groupId)
+                  ? <option value={classificationDraft.groupId}>保持した希望値（候補から選び直してください）</option> : null}
+              {classificationSnapshot?.groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+          </label>
+          <label className="block space-y-2"><span className="text-sm font-medium">仕入先</span>
+            <select value={classificationDraft?.supplierId ?? ''} disabled={!choicesFresh || pending} className={inputClass}
+              onChange={event => changeClassification('supplierId', event.target.value)}>
+              <option value="">{classificationSnapshot ? '未設定' : '候補を取得すると選択できます'}</option>
+              {classificationDraft?.supplierId && classificationSnapshot && !classificationSnapshot.suppliers.some(supplier => supplier.id === classificationDraft.supplierId)
+                ? <option value={classificationDraft.supplierId}>保持した希望値（候補から選び直してください）</option> : null}
+              {classificationSnapshot?.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+            </select>
+          </label>
+        </section> : null}
         {error ? <p role="alert" className="text-pretty text-sm text-red-700">{error}</p> : null}
         {stored && !active && storedOperationId ? <p className="text-xs text-gray-600">操作ID: <span className="break-all font-mono">{storedOperationId}</span></p> : null}
         <div className="flex flex-wrap items-center justify-end gap-3">
@@ -329,10 +491,12 @@ export function BackgroundProductEditModal({ product, storeId, existingOperation
             onClick={() => void control('resume')}>再確認を依頼</button> : null}
           {active && ['queued', 'needs_review'].includes(existingOperation.status) ? <button type="button" className={buttonClass} disabled={pending}
             onClick={() => void control('cancel')}>未送信の変更を取り消す</button> : null}
-          {onAdvanced && !active && !stored ? <button type="button" className={buttonClass} disabled={!ready || pending || Object.keys(edited).length > 0}
-            title={Object.keys(edited).length ? '入力を保存してから開いてください。' : undefined} onClick={onAdvanced}>分類・仕入先を編集</button> : null}
+          {(backgroundClassificationEnabled || onAdvanced) && !active && !stored && !classificationOpen ? <button type="button" className={buttonClass}
+            disabled={!ready || pending || !backgroundClassificationEnabled && Object.keys(edited).length > 0}
+            title={!backgroundClassificationEnabled && Object.keys(edited).length ? '入力を保存してから開いてください。' : undefined}
+            onClick={backgroundClassificationEnabled ? () => void loadClassification() : onAdvanced}>分類・仕入先を編集</button> : null}
           <button type="button" className={buttonClass} disabled={pending} onClick={requestClose}>閉じる</button>
-          {!active ? <button type="submit" disabled={!ready || pending || !stored && !Object.keys(edited).length}
+          {!active ? <button type="submit" disabled={!ready || pending || !stored && !Object.keys(edited).length && !classificationChanged}
             className={cn(buttonClass, 'border-sky-700 bg-sky-700 text-white hover:bg-sky-800')}>
             {pending ? '受付中…' : stored ? '受付状態を確認' : '保存'}
           </button> : null}

@@ -10,19 +10,24 @@ const require = createRequire(new URL('../next_app/package.json', import.meta.ur
 const opId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const leaseToken = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', workerId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 const now = 1800000000000, secret = '1'.repeat(64), clone = value => JSON.parse(JSON.stringify(value))
+const classIntake = () => ({ patch: { groupId: 'next6', supplierId: 's6' }, catalog_snapshot_id: workerId,
+  pos_choice_baseline: { groupId: 'g6', groupName: '分類', supplierId: null, supplierName: null,
+    requested: { groupId: { id: 'next6', name: '次分類' }, supplierId: { id: 's6', name: '仕入先' } } } })
+const classGroups = [{ id: 'g6', name: '分類' }, { id: 'next6', name: '次分類' }]
 function fixture(options = {}) {
   const env = { POS_PRODUCT_BACKGROUND_EDIT_ENABLED: 'true', POS_PRODUCT_WRITES_ENABLED: 'true', POS_PRODUCT_DISPATCH_ENABLED: 'true',
     POS_PRODUCT_CONSUME_ENABLED: 'true', POS_PRODUCT_CONSUME_SECRET: secret, ...options.env }, calls = [], cache = new Map()
   let clock = now, operation = null, dispatch = null, receipt = null
   const intake = { operation_id: opId, actor_id: actorId, store_id: 6, product_id: 42, jan_code: '0490123456789',
     patch: { price: '200' }, baseline: { product_name: '旧名', category: '分類', product_group: '分類', selling_price: 126, cost_price: 75, supplier_name: '' },
-    status: 'working', lease_token: leaseToken, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString() }
+    status: 'working', lease_token: leaseToken, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(), ...options.intake }
   const identity = { posProductId: 'fixture-pos-6', officeId: '11054', groupId: '11099', salesKind: 'retail',
     productCode: '', manufacturerCode: intake.jan_code, exclusiveStore: true }
   function inspection(price = '126', capturedAt = now) {
     const formInspection = { identity, fields: { name: '旧名', groupId: 'g6', price, cost: '75', supplierId: null },
       settings: { nameKana: 'キュウメイ', abbreviation: '既存略称', taxId: '0', priceScope: 'all', priceMode: 'fixed', supplierScope: 'all', otherSettingsFingerprint: 'c'.repeat(64) },
-      groups: [{ id: 'g6', name: '分類' }], suppliers: [{ id: 's6', name: '仕入先' }] }
+      groups: options.groups ?? [{ id: 'g6', name: '分類' }], suppliers: options.suppliers ?? [{ id: 's6', name: '仕入先' }] }
+    Object.assign(formInspection.fields, options.currentFields)
     return { storeId: 6, janCode: intake.jan_code, capturedAt, searches: ['schGoodsId', 'schMakerCd'].map(field => ({ field, count: 1, inspected: true,
       internalId: identity.posProductId, internalIdPresent: true, salesKind: '2', storeGroupId: identity.groupId,
       productCodeMatches: false, manufacturerCodeMatches: true, formInspection })) }
@@ -44,7 +49,9 @@ function fixture(options = {}) {
         payload_hash: require('node:crypto').createHash('sha256').update(args.p_command_text).digest('hex'),
         command_text: args.p_command_text, product_id_snapshot: 42, jan_code: intake.jan_code, pos_product_id: args.p_pos_product_id,
         expected_result_fingerprint: args.p_expected_result_fingerprint, verified_fingerprint: null }
-      assert.equal(cmd.fields.cost, '75'); assert.equal(cmd.fields.supplierId, null); assert.equal(cmd.fields.groupId, 'g6')
+      assert.equal(cmd.fields.cost, intake.patch.cost ?? '75')
+      assert.equal(cmd.fields.supplierId, Object.hasOwn(intake.patch, 'supplierId') ? intake.patch.supplierId : options.currentFields?.supplierId ?? null)
+      assert.equal(cmd.fields.groupId, intake.patch.groupId ?? options.currentFields?.groupId ?? 'g6')
       dispatch = { operation_id: opId, store_id: 6, dispatch_text: args.p_dispatch_text, dispatch_hash: args.p_dispatch_hash,
         before_fingerprint_text: args.p_before_fingerprint_text, expected_fingerprint_text: args.p_expected_fingerprint_text, reviewed_at: args.p_reviewed_at }
       if (options.mutatePrepared) options.mutatePrepared(operation)
@@ -92,6 +99,7 @@ function fixture(options = {}) {
     result: { outcome, code: outcome === 'values_verified' ? 'POS_PRODUCT_EDIT_VALUES_VERIFIED' : 'POS_PRODUCT_EDIT_VERIFY_REQUIRED',
       saveRequestStarted: true, responseReceived: true, ...(outcome === 'values_verified' ? { inspection: inspection('200', now + 2000) } : {}), ...overrides } })
   return { env, calls, intake, send, inspection, prepare, result, setTime: value => { clock = value },
+    setOperationStatus: status => { operation.status = status; operation.row_version++; operation.verified_fingerprint = operation.expected_result_fingerprint },
     consume: () => { receipt = { operation_id: opId, store_id: 6, dispatch_hash: dispatch.dispatch_hash, consumed_at: new Date(now + 1000).toISOString() } } }
 }
 
@@ -102,10 +110,107 @@ test('worker OFF・改変署名・未知payloadは特権DB処理を呼ばない'
   assert.equal((await g.send('claim', { workerId }, r => { r.storeId = 7 })).response.status, 403)
   assert.equal((await g.send('claim', { workerId, actorId })).response.status, 403); assert.equal(g.calls.length, 0)
 })
+
+test('分類受付は固定したPOS選択証拠とfresh候補でdispatchを作りDB仕入先nullを基準にしない', async () => {
+  const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classIntake(), groups: classGroups })
+  const { response, data } = await f.prepare()
+  assert.equal(response.status, 200); assert.equal(data.data.nextAction, 'save')
+  assert.deepEqual(data.data.dispatch.patch, { goodsGroup: 'next6', gddSupplierCd: 's6' })
+  assert.equal(data.data.dispatch.before.fields.cost, '75'); assert.equal(data.data.dispatch.before.settings.abbreviation, '既存略称')
+  const unset = classIntake(); unset.patch = { supplierId: null }; unset.pos_choice_baseline.supplierId = 's6'; unset.pos_choice_baseline.supplierName = '仕入先'; unset.pos_choice_baseline.requested = { supplierId: null }
+  const g = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: unset, currentFields: { supplierId: 's6' } })
+  assert.deepEqual((await g.prepare()).data.data.dispatch.patch, { gddSupplierCd: '' })
+})
+
+test('分類OFF/証拠欠落/現在ID変化/候補名変更/重複候補では保存準備せず希望入力を保全する', async () => {
+  const missing = classIntake(); missing.pos_choice_baseline = null
+  for (const options of [{ env: {} }, { intake: missing }, { currentFields: { groupId: 'next6' } },
+    { groups: [{ id: 'g6', name: '分類' }, { id: 'next6', name: '改名' }] },
+    { groups: [...classGroups, { id: 'duplicate6', name: '次分類' }] },
+    { groups: [...classGroups, { id: 'next6', name: '異名' }] }]) {
+    const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classIntake(), groups: classGroups, ...options })
+    const { data } = await f.prepare()
+    assert.notEqual(data.data?.nextAction, 'save'); assert.equal(f.calls.filter(call => call.name === 'prepare_pos_product_edit_intake').length, 0)
+    assert.deepEqual(f.intake.patch, (options.intake ?? classIntake()).patch)
+  }
+})
+
+test('分類だけの編集はfresh非対象仕入先を保持し、送信済みの復旧は分類OFFでもDBだけ反映する', async () => {
+  const intake = classIntake(); delete intake.patch.supplierId; delete intake.pos_choice_baseline.requested.supplierId
+  const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake, groups: classGroups, currentFields: { supplierId: 's6' } })
+  const prepared = await f.prepare()
+  assert.equal(prepared.response.status, 200); assert.deepEqual(prepared.data.data.dispatch.patch, { goodsGroup: 'next6' })
+  assert.equal(prepared.data.data.dispatch.before.fields.supplierId, 's6')
+  f.consume(); f.setTime(now + 3000); f.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED = 'false'
+  const after = f.inspection('126', now + 2000)
+  for (const search of after.searches) search.formInspection.fields.groupId = 'next6'
+  const recovered = await f.send('recover', { operationId: opId, leaseToken, inspection: after })
+  assert.equal(recovered.response.status, 200); assert.equal(recovered.data.data.status, 'completed')
+  assert.equal(f.calls.filter(call => call.name === 'prepare_pos_product_edit_intake').length, 1)
+  assert.equal(f.calls.filter(call => call.name === 'apply_pos_product_edit').length, 1)
+})
+
+test('分類フラグがDB保存準備の待機中にOFFならdispatchを返さず、元の選択証拠を維持する', async () => {
+  const intake = classIntake(), original = clone(intake.pos_choice_baseline)
+  const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake, groups: classGroups,
+    onRpc: (name, env) => { if (name === 'prepare_pos_product_edit_intake') env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED = 'false' } })
+  const result = await f.prepare()
+  assert.equal(result.response.status, 403); assert.equal(result.data.success, false)
+  assert.deepEqual(f.intake.pos_choice_baseline, original)
+  assert.equal(f.calls.filter(call => call.name === 'prepare_pos_product_edit_intake').length, 1)
+  assert.equal(f.calls.filter(call => call.name === 'apply_pos_product_edit').length, 0)
+})
 test('claimは対象店舗だけを返し、DB由来actor・leaseを保つ', async () => {
   const f = fixture(), { data } = await f.send('claim', { workerId })
   assert.equal(data.success, true); assert.equal(data.data.intake.actor_id, actorId); assert.equal(data.data.intake.lease_token, leaseToken)
   assert.deepEqual(f.calls[0].args, { p_store_id: 6, p_worker_id: workerId })
+})
+
+test('claim能力は署名されたtrueだけ受理し、false/型違い/余分なkeyはRPC前に拒否する', async () => {
+  for (const payload of [{ workerId, classificationCapable: false }, { workerId, classificationCapable: 'true' },
+    { workerId, classificationCapable: 1 }, { workerId, classificationCapable: null }, { workerId, classificationCapable: true, extra: true }]) {
+    const f = fixture()
+    assert.equal((await f.send('claim', payload)).response.status, 403); assert.equal(f.calls.length, 0)
+  }
+  const tampered = fixture()
+  assert.equal((await tampered.send('claim', { workerId }, request => { request.payload.classificationCapable = true })).response.status, 403)
+  assert.equal(tampered.calls.length, 0)
+  const capable = fixture()
+  assert.equal((await capable.send('claim', { workerId, classificationCapable: true })).data.data.claimed, true)
+})
+
+test('旧callerには分類send0/send1を渡さず、固定理由だけで希望値を要確認に保全する', async () => {
+  for (const sent of [false, true]) {
+    const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classIntake(), groups: classGroups })
+    if (sent) assert.equal((await f.prepare()).response.status, 200)
+    const before = f.calls.length, { response, data } = await f.send('claim', { workerId })
+    assert.equal(response.status, 200); assert.deepEqual(data.data, { claimed: false, intake: null, operation: null })
+    assert.deepEqual(f.calls.slice(before).map(call => call.name), ['claim_pos_product_edit_intake', 'finish_pos_product_edit_intake'])
+    assert.equal(f.calls.at(-1).args.p_code, sent ? 'POS_PRODUCT_EDIT_OUTCOME_UNKNOWN' : 'POS_PRODUCT_EDIT_DISABLED')
+    assert.equal(f.intake.status, 'needs_review'); assert.deepEqual(f.intake.patch, classIntake().patch)
+  }
+})
+
+test('DB確認済み分類操作の反映をcaller能力より先に完了し、POSjobを返さない', async () => {
+  for (const status of ['pos_confirmed', 'db_pending', 'completed']) {
+    const f = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classIntake(), groups: classGroups })
+    await f.prepare(); f.consume(); f.setOperationStatus(status); f.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED = 'false'
+    const { data } = await f.send('claim', { workerId })
+    assert.deepEqual(data.data, { claimed: false, intake: null, operation: null }); assert.equal(f.intake.status, 'completed')
+    assert.equal(f.calls.filter(call => call.name === 'apply_pos_product_edit').length, status === 'completed' ? 0 : 1)
+    assert.equal(f.calls.at(-1).args.p_code, null)
+  }
+})
+
+test('新callerは分類OFFのsend0をPOS前に停止し、send1だけは読取り復旧へ渡す', async () => {
+  const unsent = fixture({ intake: classIntake(), groups: classGroups })
+  assert.deepEqual((await unsent.send('claim', { workerId, classificationCapable: true })).data.data, { claimed: false, intake: null, operation: null })
+  assert.equal(unsent.calls.at(-1).args.p_code, 'POS_PRODUCT_EDIT_DISABLED')
+  const sent = fixture({ env: { POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED: 'true' }, intake: classIntake(), groups: classGroups })
+  await sent.prepare(); sent.env.POS_PRODUCT_BACKGROUND_CLASSIFICATION_ENABLED = 'false'
+  const { data } = await sent.send('claim', { workerId, classificationCapable: true })
+  assert.equal(data.data.claimed, true); assert.equal(data.data.operation.send_attempts, 1)
+  assert.equal(data.data.intake.pos_choice_baseline.requested.groupId.id, 'next6')
 })
 test('prepareはfresh照合の後で短命dispatchを固定し、未変更分類/仕入先/原価/画像設定を保持する', async () => {
   const f = fixture(), { response, data } = await f.prepare()
